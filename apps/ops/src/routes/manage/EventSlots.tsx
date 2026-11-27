@@ -71,7 +71,6 @@ export function EventSlotsView({ eventId, status, data, writeActions, onChanged,
         onAction={writes?.onAction} onChanged={onChanged} onClearFailure={onClearFailure}
         writeBlocked={writeBlocked} canStartWrite={canStartWrite}
         canManageSubmittedSlots={Boolean(writes?.canManageSubmittedSlots)} />
-      {data.atLimit && <p role="status">最大500件まで表示しています。条件を絞り込んでください。</p>}
       {data.total === 0 && !writes && <p>枠の追加機能は移行中です。</p>}
     </section>
   </div>;

@@ -97,14 +97,14 @@ test("MIG-0722 U02a: safe read-only slot table renders CURRENT holder fields, st
   }
 });
 
-test("MIG-0722 U02a: filter nav, counts, encoded URLs, 500 cap and XSS-safe title", () => {
-  const current = data({ atLimit: true });
+test("MIG-0722 U02a: filter nav, counts, encoded URLs, CURRENT cap description and XSS-safe title", () => {
+  const current = data();
   const html = render(React.createElement(EventSlotsView, {
     eventId: "ev id", status: "reserved", data: current,
   }));
   assert.match(html, /Example &lt;Event&gt;/);
   assert.match(html, /全3件中、最大500件/);
-  assert.match(html, /最大500件まで表示/);
+  assert.doesNotMatch(html, /最大500件まで表示しています|条件を絞り込んでください/);
   assert.match(html, /\/manage\/events\/ev%20id\/slots\?status=reserved/);
   assert.match(html, /aria-current="page"/);
   assert.match(html, /空き/);
@@ -1204,4 +1204,31 @@ test("MIG-0722 U02b: shared slot confirmation uses CURRENT danger dialog and can
     assert.deepEqual(calls, [{ kind: "delete", slotId: "a" }]);
     assert.equal(modal(), null);
   });
+});
+
+
+test("MIG-0722 U02a D-17-7: 500-row cap retains CURRENT description without a new truncation notice", () => {
+  for (const { total, shown, filter, counts } of [
+    { total: 499, shown: 499, filter: "all", counts: { available: 499, reserved: 0, submitted: 0 } },
+    { total: 500, shown: 500, filter: "all", counts: { available: 500, reserved: 0, submitted: 0 } },
+    { total: 501, shown: 500, filter: "all", counts: { available: 501, reserved: 0, submitted: 0 } },
+    { total: 700, shown: 500, filter: "reserved", counts: { available: 200, reserved: 500, submitted: 0 } },
+  ]) {
+    const slots = Array.from({ length: shown }, (_, i) => slot("cap-" + i, {
+      status: filter === "reserved" ? "reserved" : "available",
+      start_time: 1700000000 + i, sort_order: i,
+    }));
+    const html = render(React.createElement(EventSlotsView, {
+      eventId: "ev id", status: filter, data: data({
+        total, counts, slots, statusFilter: filter, atLimit: shown === 500,
+      }),
+    }));
+    assert.ok(html.includes(`枠管理 — 全${total}件中、最大500件を表示`));
+    assert.ok(html.includes(`枠一覧 (${shown})`));
+    const tbody = html.match(/<tbody>[\s\S]*?<\/tbody>/)?.[0];
+    assert.ok(tbody, "slot table must render");
+    assert.equal((tbody.match(/<tr(?:\s|>)/g) ?? []).length, shown);
+    assert.equal((html.match(/manage-slot-stat-value/g) ?? []).length, 4);
+    assert.doesNotMatch(html, /最大500件まで表示しています|条件を絞り込んでください/);
+  }
 });
