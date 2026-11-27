@@ -53,17 +53,19 @@ test("運営表示ロールはActive Xを最優先し権限unionは維持する"
   assert.match(source, /for \(const key of permissionKeys\) eventPermissions\.add\(key\)/);
 });
 
-test("枠表示名はX ID単位で分離しlegacy値はX未設定時だけ読む", () => {
+test("SEC-899: 枠表示名はX ID v2キーへ分離し未連携やlegacy値を継承しない", () => {
   const source = read("../components/event/SlotGrid.tsx");
-  const scopedIndex = source.indexOf("if (scoped) return scoped;");
-  const xGuardIndex = source.indexOf('if (normalizedViewerXId) return "";');
-  const legacyIndex = source.indexOf(
-    "const legacy = window.localStorage.getItem(LEGACY_SLOT_DISPLAY_NAME_KEY);",
-  );
+  const storage = read("./slots/slotDisplayNameStorage.ts");
 
-  assert.ok(scopedIndex >= 0);
-  assert.ok(xGuardIndex > scopedIndex);
-  assert.ok(legacyIndex > xGuardIndex);
+  assert.match(storage, /fn:lastSlotDisplayName:v2:x:/);
+  assert.match(storage, /return normalizedXId \? X_NAME_KEY_PREFIX/);
+  assert.match(storage, /if \(!key\) return "";/);
+  assert.match(storage, /if \(!key \|\| !trimmed\) return;/);
+  assert.match(source, /readPersistedSlotDisplayName\(/);
+  assert.match(source, /persistSlotDisplayName\(/);
+  assert.match(source, /reusableSlotDisplayName\(/);
+  assert.doesNotMatch(source, /LEGACY_SLOT_DISPLAY_NAME_KEY/);
+  assert.doesNotMatch(storage, /localStorage\.getItem\("fn:lastSlotDisplayName"/);
 });
 
 test("監査ログのactor X検証結果は入力単位で保持する", () => {
