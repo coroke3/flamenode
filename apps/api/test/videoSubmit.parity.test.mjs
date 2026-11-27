@@ -1019,7 +1019,7 @@ if (runUnderRootTsx(import.meta.url)) {
   });
 
   test("U03a SA-088: same-statement anchor and group receipt is complete or explicit overflow", async () => {
-    const { readSlotSubmissionReceipt } = await import("../src/routes/videos/submit.ts");
+    const { readSlotSubmissionReceipt } = await import("@flamenode/server-core/video/requiredVideoFields");
     const cases = [
       { name: "missing anchor", count: 0, group: "g", missing: true },
       { name: "null group", count: 1, group: null },
@@ -1067,7 +1067,7 @@ if (runUnderRootTsx(import.meta.url)) {
             .all(before.reservation_group_id, before.event_id)
           : before ? [before] : [];
         const snapshot = snapshotDb(w.sqlite);
-        const actual = await readSlotSubmissionReceipt(w.d1, slotId);
+        const actual = await readSlotSubmissionReceipt(drizzle(w.d1), slotId);
         assert.equal(w.d1.stats.reads, 1, scenario.name);
         assert.equal(w.d1.stats.maxBinds, 2, scenario.name);
         assert.equal(w.d1.stats.batches, 0, scenario.name);
@@ -1100,7 +1100,7 @@ if (runUnderRootTsx(import.meta.url)) {
   });
 
   test("U03a SA-088: reservation receipt CAS precedes audited mutation in one batch", async () => {
-    const { readSlotSubmissionReceipt, buildSlotSubmissionReceiptAssertions } = await import("../src/routes/videos/submit.ts");
+    const { readSlotSubmissionReceipt, buildSlotSubmissionReceiptAssertions } = await import("@flamenode/server-core/video/requiredVideoFields");
     const { mutateWithAudit, assertCondition } = await import("@flamenode/server-core/audit/mutate");
     const { sql } = await import("drizzle-orm");
     const cases = [
@@ -1139,7 +1139,7 @@ if (runUnderRootTsx(import.meta.url)) {
           updated_at: 100, version: 1, ...extra,
         });
         for (let i = 0; i < (scenario.count ?? 2); i++) add("cas_" + i, i);
-        const receipt = await readSlotSubmissionReceipt(w.d1, "cas_0");
+        const receipt = await readSlotSubmissionReceipt(drizzle(w.d1), "cas_0");
         assert.equal(receipt.group.kind, "ready", scenario.name);
         assert.equal(w.d1.stats.reads, 1, scenario.name);
         const conditions = buildSlotSubmissionReceiptAssertions(receipt);
@@ -1185,7 +1185,7 @@ if (runUnderRootTsx(import.meta.url)) {
   });
 
   test("U03a SA-088: incomplete or ambiguous receipt cannot build batch assertions", async () => {
-    const { readSlotSubmissionReceipt, buildSlotSubmissionReceiptAssertions } = await import("../src/routes/videos/submit.ts");
+    const { readSlotSubmissionReceipt, buildSlotSubmissionReceiptAssertions } = await import("@flamenode/server-core/video/requiredVideoFields");
     const w = seedWorld();
     try {
       for (let i = 0; i < 2; i++) insert(w.sqlite, "slots", {
@@ -1193,7 +1193,7 @@ if (runUnderRootTsx(import.meta.url)) {
         reserved_by_user_id: "u_owner", x_user_id: "x_owner", reserved_x_id_snapshot: "x_owner",
         display_name: "Owner", status: "reserved", updated_at: 100, version: 1,
       });
-      const receipt = await readSlotSubmissionReceipt(w.d1, "invalid_cas_0");
+      const receipt = await readSlotSubmissionReceipt(drizzle(w.d1), "invalid_cas_0");
       const sibling = receipt.group.rows.find((row) => row.id !== receipt.anchor.id);
       const bad = [
         { ...receipt, group: { kind: "overflow" } },

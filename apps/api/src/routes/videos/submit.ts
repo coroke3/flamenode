@@ -17,7 +17,6 @@
  * Queue wake = 0 (NOOP_WAKE_HOST; DOCUMENTED DIFFERENCE D-0603-1).
  */
 import type { VideoSubmitResult } from "@flamenode/contracts";
-import type { slots } from "@flamenode/db/schema";
 import { MAX_SLOTS_PER_VIDEO } from "@flamenode/domain/slots/limits";
 import { canActAsSlotSubmitter, resolveSlotGroupIdentity, resolveSlotSubmissionRelation } from "@flamenode/domain/slots/slotIdentity";
 import { resolveSlotReservationSubject } from "@flamenode/domain/slots/reservationGroups";
@@ -38,9 +37,7 @@ import {
   type VideoFormData,
 } from "@flamenode/domain/video";
 import { validateActiveXSnapshot } from "@flamenode/domain/xid";
-import { assertCondition, mutateWithAudit } from "@flamenode/server-core/audit/mutate";
-import { expectedRowCondition } from "@flamenode/server-core/audit/expectedRowCondition";
-import { sql, type SQL } from "drizzle-orm";
+import { mutateWithAudit } from "@flamenode/server-core/audit/mutate";
 import type { ServerCoreDb } from "@flamenode/server-core/db";
 import { generateId } from "@flamenode/server-core/id";
 import {
@@ -56,6 +53,8 @@ import {
   decodeGeneralCustomQuestionPolicyProjection,
   loadEligibleUnslottedVideoRequiredFields,
   type LoadedGeneralCustomQuestion,
+  type SlotSubmissionReceipt,
+  type SlotSubmissionReceiptRow,
 } from "@flamenode/server-core/video/requiredVideoFields";
 import { buildFreeVideoSubmissionWithRebuildPlan } from "@flamenode/server-core/video/unslottedEventPlans";
 import {
@@ -155,90 +154,6 @@ export async function readFreeVideoMultipartPreflight(
     ok: true,
     value: { ...preflight.value, videoForm: parsed.data, formData },
   };
-}
-
-type SlotSubmissionReceiptRow = typeof slots.$inferSelect;
-type SlotSubmissionReceipt = {
-  anchor: SlotSubmissionReceiptRow;
-  group: { kind: "ready"; rows: SlotSubmissionReceiptRow[] } | { kind: "overflow" };
-};
-
-const SLOT_RECEIPT_COLUMNS = `id, event_id, reserved_by_user_id, x_user_id, reserved_x_id_snapshot,
-  display_name, slot_label, start_time, sort_order, reservation_group_id, video_id, status, updated_at, version`;
-
-/** SA-088 U03a candidate: one statement provides the initial anchor and the
- * reservation group from the same database snapshot (#896 A). Do not mount
- * until the remaining preflight and same-batch CAS are integrated. No policy
- * decision is made here: the caller must check the anchor's authorization
- * before form errors and report overflow at CURRENT's group-validation stage.
- * The group is unordered; apply CURRENT's chronological comparator there.
- * A row-count limit does not bound the bytes of legacy text columns.
- */
-export async function readSlotSubmissionReceipt(
-  db: Pick<D1Database, "prepare">,
-  slotId: string,
-): Promise<SlotSubmissionReceipt | null> {
-  const { results } = await db.prepare(`WITH anchor AS (
-    SELECT ${SLOT_RECEIPT_COLUMNS} FROM slots WHERE id = ? LIMIT 1
-  ), group_rows AS (
-    SELECT ${SLOT_RECEIPT_COLUMNS} FROM slots
-    WHERE reservation_group_id = (SELECT NULLIF(reservation_group_id, '') FROM anchor)
-      AND event_id = (SELECT event_id FROM anchor)
-    LIMIT ?
-  )
-  SELECT 0 AS receipt_kind, anchor.* FROM anchor
-  UNION ALL
-  SELECT 1 AS receipt_kind, group_rows.* FROM group_rows`)
-    .bind(slotId, MAX_SLOTS_PER_VIDEO + 1).all<SlotSubmissionReceiptRow & { receipt_kind: number }>();
-  const anchors = results.filter((row) => row.receipt_kind === 0);
-  if (anchors.length === 0) return null;
-  const { receipt_kind: _kind, ...anchor } = anchors[0];
-  if (!anchor.reservation_group_id) return { anchor, group: { kind: "ready", rows: [anchor] } };
-  const groupRows = results.filter((row) => row.receipt_kind === 1);
-  if (groupRows.length > MAX_SLOTS_PER_VIDEO) return { anchor, group: { kind: "overflow" } };
-  return { anchor, group: { kind: "ready", rows: groupRows.map(({ receipt_kind: _kind, ...row }) => row) } };
-}
-
-/**
- * SA-088 U03a: recheck the complete reservation receipt inside the SAME D1
- * batch, before any resource/slot/audit DML. Use the existing scalar CAS and
- * assertion helpers; no JSON encoding of arbitrary legacy column values.
- * Six rows x 14 columns + count + four membership binds <= 89 binds/statement.
- * At most four statements. The caller must account for all of them in the
- * real S3 budget and preserve authorization/group validation before this step.
- * This is not a new route or a complete mutation plan.
- */
-export function buildSlotSubmissionReceiptAssertions(receipt: SlotSubmissionReceipt): SQL[] {
-  if (receipt.group.kind !== "ready") throw new Error("slot_submission_receipt_invalid");
-  const { anchor } = receipt;
-  const { rows } = receipt.group;
-  const columns = SLOT_RECEIPT_COLUMNS.split(",").map((column) => column.trim()) as (keyof SlotSubmissionReceiptRow)[];
-  const isScalarRow = (row: SlotSubmissionReceiptRow) => Object.keys(row).length === columns.length && columns.every((column) => {
-    const value = row[column];
-    return value === null || typeof value === "string" || (typeof value === "number" && Number.isFinite(value));
-  });
-  if (!isScalarRow(anchor) || rows.length < 1 || rows.length > MAX_SLOTS_PER_VIDEO ||
-      new Set(rows.map((row) => row.id)).size !== rows.length ||
-      rows.some((row) => !isScalarRow(row) || row.event_id !== anchor.event_id || row.reservation_group_id !== anchor.reservation_group_id) ||
-      (!anchor.reservation_group_id && rows.length !== 1) ||
-      !rows.some((row) => row.id === anchor.id && columns.every((column) => row[column] === anchor[column]))) {
-    throw new Error("slot_submission_receipt_invalid");
-  }
-  const membership = anchor.reservation_group_id ? sql`
-    (SELECT COUNT(*) FROM (SELECT id FROM slots
-      WHERE event_id = ${anchor.event_id} AND reservation_group_id = ${anchor.reservation_group_id}
-      LIMIT ${MAX_SLOTS_PER_VIDEO + 1})) = ${rows.length}
-  ` : sql`1 = 1`;
-  const assertions: SQL[] = [];
-  for (let i = 0; i < rows.length; i += 6) {
-    const chunk = rows.slice(i, i + 6);
-    const matches = sql.join(chunk.map((row) => sql`(${expectedRowCondition({ expectedCurrent: row })})`), sql` OR `);
-    assertions.push(assertCondition(sql`
-      (SELECT COUNT(*) FROM slots WHERE ${matches}) = ${chunk.length}
-      AND (${i === 0 ? membership : sql`1 = 1`})
-    `));
-  }
-  return assertions;
 }
 
 const SLOT_SUBMIT_REJECT_MESSAGE = "枠が見つかりません。";
