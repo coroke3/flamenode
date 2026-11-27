@@ -2371,10 +2371,14 @@ if (runUnderRootTsx(import.meta.url)) {
         result(expectedIssues.length, sortIssues(expectedIssues)));
       assert.doesNotMatch(corpus.text, /bogus\.key|not json/);
       const owner = await measure("staff_owner_missing_permissions");
-      readOnly(owner);
+      // The canonical owner preset resolves all its own keys. The selected
+      // check must not touch event_staff when there are no missing keys.
+      readOnly(owner, 200, 1);
+      assert.deepEqual(owner.projections, []);
       assert.deepEqual(owner.body, { ran: true, results: [] });
       const manager = await measure("staff_manager_has_dangerous_permissions");
       readOnly(manager);
+      assert.deepEqual(manager.projections.map((p) => p.rows), [1]);
       assert.equal(manager.body.results[0].count, 1);
       assert.deepEqual(manager.body.results[0].issues, [{
         ...issue("manager"), description: "危険権限: video.permissions",
