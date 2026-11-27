@@ -140,6 +140,7 @@ function snapshotSpreadsheetWriteCatalog(rows: unknown): {
   if (!Array.isArray(rows)) throw new Error("invalid_snapshot");
   const columns: WriteColumnRow[] = [];
   const names = new Set<string>();
+  const pkOrdinals = new Set<number>();
   let fkJson: string | undefined;
   const count = rows.length;
   for (let i = 0; i < count; i++) {
@@ -153,7 +154,7 @@ function snapshotSpreadsheetWriteCatalog(rows: unknown): {
     if (typeof name !== "string" || !isValidSqliteTableName(name) || names.has(name) ||
         (type !== null && typeof type !== "string") ||
         (not_null !== 0 && not_null !== 1) ||
-        (pk !== null && (!Number.isSafeInteger(pk) || pk < 0)) ||
+        (!Number.isSafeInteger(pk) || pk < 0 || (pk > 0 && pkOrdinals.has(pk))) ||
         (dflt_value !== null && typeof dflt_value !== "string") ||
         (hidden !== null && (!Number.isSafeInteger(hidden) || hidden < 0 || hidden > 3)) ||
         typeof foreign_keys_json !== "string" ||
@@ -161,8 +162,15 @@ function snapshotSpreadsheetWriteCatalog(rows: unknown): {
       throw new Error("invalid_snapshot");
     }
     names.add(name);
+    if (pk > 0) pkOrdinals.add(pk);
     fkJson = foreign_keys_json;
     columns.push({ name, type, not_null, pk, dflt_value, hidden, foreign_keys_json });
+  }
+  // The SELECT excludes tables without a primary key. Nonempty catalog
+  // results must therefore contain each ordinal 1..N exactly once.
+  if (columns.length > 0 && pkOrdinals.size === 0) throw new Error("invalid_snapshot");
+  for (let ordinal = 1; ordinal <= pkOrdinals.size; ordinal++) {
+    if (!pkOrdinals.has(ordinal)) throw new Error("invalid_snapshot");
   }
   const foreignKeys: SpreadsheetForeignKey[] = [];
   if (fkJson !== undefined) {

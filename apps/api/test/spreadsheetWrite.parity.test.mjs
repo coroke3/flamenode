@@ -1144,6 +1144,11 @@ if (runUnderRootTsx(import.meta.url)) {
       rows => rows.map((row, i) => i === 0 ? Object.create(row) : row),
       rows => [rows[0], rows[0], ...rows.slice(1)],
       rows => rows.map((row, i) => i === 0 ? { ...row, not_null: "1" } : row),
+      rows => rows.map(row => ({ ...row, pk: 0 })),
+      rows => rows.map(row => ({ ...row, pk: 1 })),
+      rows => rows.map(row => row.pk > 0 ? { ...row, pk: row.pk + 1 } : row),
+      rows => rows.map(row => row.pk > 0 ? { ...row, pk: null } : row),
+      rows => rows.map(row => row.pk > 0 ? { ...row, pk: Number.MAX_SAFE_INTEGER } : row),
     ];
     const logs = [];
     let injected = 0;
