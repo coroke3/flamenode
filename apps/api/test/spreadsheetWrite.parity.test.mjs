@@ -1415,6 +1415,26 @@ if (runUnderRootTsx(import.meta.url)) {
     const tableRows = table => honoSqlite.prepare('SELECT * FROM "' + table + '" ORDER BY id').all();
     const nonces = () => honoSqlite.prepare("SELECT * FROM spreadsheet_import_runs ORDER BY rowid").all();
     const queueKeys = () => allQueueRows(honoSqlite).map(row => row.target_type + ":" + row.target_id);
+    const activeQueue = () => new Map(honoSqlite.prepare(
+      "SELECT target_type, target_id, updated_at FROM static_rebuild_queue WHERE status IN ('pending', 'processing')"
+    ).all().map(row => [row.target_type + ":" + row.target_id, row.updated_at]));
+    function assertQueueAdvanced(before, keys) {
+      const after = activeQueue();
+      for (const key of keys) {
+        assert.ok(after.has(key), key);
+        if (before.has(key)) assert.ok(after.get(key) > before.get(key), key + " generation must advance");
+      }
+      return after;
+    }
+    function assertMemberQueue(before, video, linked) {
+      const expected = ["video:" + video, "users_index:global", ...(linked ? ["event_release:a-open"] : [])];
+      const after = assertQueueAdvanced(before, expected);
+      // Existing coalesced release rows must remain untouched for an unlinked video.
+      if (!linked) {
+        const releases = map => [...map].filter(([key]) => key.startsWith("event_release:")).sort();
+        assert.deepEqual(releases(after), releases(before));
+      }
+    }
     async function measure(label, method, path, payload, { cold, reads, writes = 0, batches = 1 }) {
       if (cold) resetAllCaches();
       const before = { ...honoD1.stats };
@@ -1428,7 +1448,9 @@ if (runUnderRootTsx(import.meta.url)) {
         statements: honoD1.stats.statements - before.statements,
         maxBinds: honoD1.stats.maxBinds,
       };
-      reports.push({ label, cold, ...actual, overS3: actual.reads > 3 });
+      const report = { label, cold, ...actual, overS3: actual.reads > 3 };
+      reports.push(report);
+      t.diagnostic("S3 characterization " + JSON.stringify(report));
       assert.equal(response.status, 200, label + " " + response.text);
       assert.match(response.headers.get("cache-control"), /private.*no-store/, label);
       assert.equal(actual.reads, reads + Number(cold), label + " pre-reads");
@@ -1442,6 +1464,7 @@ if (runUnderRootTsx(import.meta.url)) {
       const beforeAudit = allAudits(honoSqlite).length;
       const beforeNonces = nonces();
       const beforeQueue = queueKeys();
+      const beforeActive = activeQueue();
       const body = await measure(label, method, "/data", payload, { cold, reads });
       contracts.AdminSpreadsheetMutationResponseSchema.parse(body);
       const added = allAudits(honoSqlite).slice(beforeAudit);
@@ -1450,7 +1473,7 @@ if (runUnderRootTsx(import.meta.url)) {
       assert.equal(added[0].operation, { POST: "CREATE", PATCH: "UPDATE", DELETE: "DELETE" }[method], label);
       assert.equal(added[0].actor_user_id, "u_root", label);
       assert.deepEqual(nonces(), beforeNonces, label);
-      check(body, beforeQueue);
+      check(body, beforeQueue, beforeActive);
     }
     try {
       const catalogRow = id => ({ id, name: id, normalized_name: id, created_at: "1", updated_at: "1" });
@@ -1491,21 +1514,45 @@ if (runUnderRootTsx(import.meta.url)) {
           });
       }
 
+      for (const cold of [true, false]) {
+        const id = cold ? "s3-slot-cold" : "s3-slot-warm";
+        await crud("slots FK POST " + id, "POST", {
+          table: "slots", row: { id, event_id: "a-open", slot_label: id, status: "available" },
+        }, cold, 4, () => {
+          assert.equal(tableRows("slots").find(row => row.id === id).event_id, "a-open");
+        });
+      }
+
       // Both linked and unlinked video rows require the release lookup; the
       // genuine no-link receipt must not add an event target.
       for (const [id, video, linked] of [["vm-ov-0", "av-overflow", false], ["vm-1", "av-pending-1", true]]) {
         for (const cold of [true, false]) {
           const name = id + (cold ? "-cold" : "-warm");
           await crud("member PATCH " + name, "PATCH", { table: "video_members", primaryKey: { id }, column: "name", value: name }, cold, 5,
-            (body, beforeQueue) => {
+            (body, _queue, beforeActive) => {
               assert.equal(body.pendingPublicReflection, true);
               assert.equal(tableRows("video_members").find(row => row.id === id).name, name);
-              assert.ok(queueKeys().includes("video:" + video));
-              assert.ok(queueKeys().includes("users_index:global"));
-              if (linked) assert.ok(queueKeys().includes("event_release:a-open"));
-              else assert.deepEqual(queueKeys().filter(key => key.startsWith("event_release:")),
-                beforeQueue.filter(key => key.startsWith("event_release:")));
+              assertMemberQueue(beforeActive, video, linked);
             });
+        }
+      }
+
+      // New members exercise a default-completed INSERT (one video FK read)
+      // and exact-PK DELETE (one before-image), each with one release lookup.
+      for (const [video, linked] of [["av-overflow", false], ["av-pending-1", true]]) {
+        for (const method of ["POST", "DELETE"]) {
+          for (const cold of [true, false]) {
+            const id = "s3-member-" + video + (cold ? "-cold" : "-warm");
+            const payload = method === "POST"
+              ? { table: "video_members", row: { id, video_id: video, name: id } }
+              : { table: "video_members", primaryKey: { id } };
+            await crud("member " + method + " " + id, method, payload, cold, 5,
+              (body, _queue, beforeActive) => {
+                assert.equal(body.pendingPublicReflection, true);
+                assert.equal(tableRows("video_members").some(row => row.id === id), method === "POST");
+                assertMemberQueue(beforeActive, video, linked);
+              });
+          }
         }
       }
 
@@ -1513,6 +1560,7 @@ if (runUnderRootTsx(import.meta.url)) {
         const beforeRows = tableRows(input.table);
         const beforeAudit = allAudits(honoSqlite).length;
         const beforeQueue = queueKeys();
+        const beforeActive = activeQueue();
         const beforeNonces = nonces();
         const preview = await measure(label + " preview", "POST", "/import", { ...input, dryRun: true },
           { cold, reads: 3, writes: 1, batches: 0 });
@@ -1537,7 +1585,7 @@ if (runUnderRootTsx(import.meta.url)) {
         assert.equal(audits.filter(row => row.table_name === "spreadsheet_import_runs").length, 1);
         assert.equal(nonces().length, issued.length);
         assert.notEqual(nonces().find(row => row.nonce === nonce).consumed_at, null);
-        check(applied, beforeQueue);
+        check(applied, beforeQueue, beforeActive);
       }
       for (const cold of [true, false]) {
         const id = cold ? "s3-imp-cold" : "s3-imp-warm";
@@ -1568,17 +1616,15 @@ if (runUnderRootTsx(import.meta.url)) {
         ];
         // one shared PK read + one deduplicated FK read + one release read
         await importPair("member FK upsert " + suffix, { table: "video_members", mode: "upsert", rows }, cold, 6, [0, 2, 0],
-          body => {
+          (body, _queue, beforeActive) => {
             assert.equal(body.pendingPublicReflection, true);
             for (const row of rows) assert.equal(tableRows("video_members").find(saved => saved.id === row.id).name, row.name);
-            for (const key of ["video:av-pending-1", "video:av-overflow", "users_index:global", "event_release:a-open"]) {
-              assert.ok(queueKeys().includes(key), key);
-            }
+            assertQueueAdvanced(beforeActive, ["video:av-pending-1", "video:av-overflow", "users_index:global", "event_release:a-open"]);
           });
       }
-      assert.equal(reports.length, 24);
+      assert.equal(reports.length, 34);
+      assert.equal(reports.filter(row => row.cold).length, 17);
       assert.ok(reports.some(row => row.overS3), "#893 remains over budget");
-      for (const report of reports) t.diagnostic("S3 characterization " + JSON.stringify(report));
     } finally {
       resetAllCaches();
       curSqlite.close();
