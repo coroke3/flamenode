@@ -2,22 +2,23 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { canRestoreDraftField, isSectionDisabled, isFieldDisabled, restoreVideoDraftControls, buildVideoDraftControlledState } from "../.test-dist/apps/app/src/components/forms/videoFormDraftFields.js";
-import {
-  mapVideoSubmitMode,
-  submitVideoForm,
-  videoMemberAdapterProps,
-} from "../.test-dist/apps/app/src/components/forms/videoSubmitAdapter.js";
+import { isSectionDisabled, isFieldDisabled, restoreVideoDraftControls, buildVideoDraftControlledState } from "../.test-dist/apps/app/src/components/forms/videoFormDraftFields.js";
+import { submitVideoForm } from "../.test-dist/apps/app/src/components/forms/videoSubmitAdapter.js";
 
-test("U02a: CURRENT free/slot/edit maps exactly to injected free/slot/update", () => {
-  assert.deepEqual(
-    ["free", "slot", "edit"].map((mode) => mapVideoSubmitMode(mode)),
-    ["free", "slot", "update"],
-  );
+test("U02a: CURRENT free/slot/edit maps exactly to injected free/slot/update", async () => {
   const legacy = readFileSync(new URL("../../../src/components/forms/VideoForm.tsx", import.meta.url), "utf8");
   assert.match(legacy, /mode === "slot"\s*\? submitSlotVideo/);
   assert.match(legacy, /mode === "edit"\s*\? updateVideo/);
   assert.match(legacy, /:\s*createFreeVideo;/);
+  const data = new FormData();
+  for (const [mode, expected] of [["free", "free"], ["slot", "slot"], ["edit", "update"]]) {
+    const result = await submitVideoForm(mode, data, async (actualMode, actualData) => {
+      assert.equal(actualMode, expected);
+      assert.strictEqual(actualData, data);
+      return { ok: true, mode: actualMode };
+    });
+    assert.deepEqual(result, { ok: true, mode: expected });
+  }
 });
 
 test("U02a: preserves FormData identity, repeated entries, ordering and File data", async () => {
@@ -37,7 +38,7 @@ test("U02a: preserves FormData identity, repeated entries, ordering and File dat
   for (const mode of ["free", "slot", "edit"]) {
     const returned = await submitVideoForm(mode, data, async (actualMode, actualData) => {
       calls++;
-      assert.equal(actualMode, mapVideoSubmitMode(mode));
+      assert.equal(actualMode, mode === "edit" ? "update" : mode);
       assert.strictEqual(actualData, data, "must not rebuild FormData and drop repeated fields");
       assert.deepEqual([...actualData.entries()], sent);
       assert.strictEqual(actualData.get("icon_file"), file);
@@ -89,35 +90,21 @@ test("U02a: submission adapter contains no network, Next Server Action or direct
   assert.doesNotMatch(source, /\bfetch\s*\(|localStorage|indexedDB|navigator\./);
 });
 
-test("U02b: mandatory member adapters are exact callable references, including AbortSignal", async () => {
+test("U02b: actual members section forwards search and permission ports unchanged", async () => {
+  const { React, target, VideoMembersField } = await videoSectionFixture();
+  const defaults = videoSectionDefaults();
   const controller = new AbortController();
-  const seen = [];
   const searchOutput = {
     items: [{ id: "x_A", x_name: "Alice", score: 0.8, matchedBy: "name" }],
     hasMore: true,
     nextOffset: 20,
     hint: null,
   };
-  const ports = {
-    submit: async () => ({ ok: true }),
-    searchXUsers: async (q, offset, signal) => {
-      seen.push({ q, offset, signal });
-      return searchOutput;
-    },
-    applyPermissionBatch: async () => ({ ok: true }),
+  const searchCalls = [];
+  const searchXUsers = async (query, offset, signal) => {
+    searchCalls.push({ query, offset, signal });
+    return searchOutput;
   };
-  const member = videoMemberAdapterProps(ports);
-  assert.deepEqual(Object.keys(member), ["searchXUsers", "applyPermissionBatch"]);
-  assert.strictEqual(member.searchXUsers, ports.searchXUsers);
-  assert.strictEqual(member.applyPermissionBatch, ports.applyPermissionBatch);
-  assert.ok(!("submit" in member), "member component cannot invoke the VideoForm submit port");
-  assert.strictEqual(await member.searchXUsers("@Alice", 20, controller.signal), searchOutput);
-  assert.deepEqual(seen, [{ q: "@Alice", offset: 20, signal: controller.signal }]);
-  controller.abort();
-  assert.equal(seen[0].signal.aborted, true, "no AbortSignal replacement");
-});
-
-test("U02b: member permission batch forwards all intents and privilege mode unchanged", async () => {
   const input = {
     videoId: "v-17",
     edit_privilege_mode: "event",
@@ -128,71 +115,120 @@ test("U02b: member permission batch forwards all intents and privilege mode unch
     ],
   };
   const denied = { ok: false, message: "forbidden" };
-  let calls = 0;
-  const ports = {
-    submit: async () => ({ ok: true }),
-    searchXUsers: async () => ({ items: [] }),
-    applyPermissionBatch: async (actual) => {
-      calls += 1;
-      assert.strictEqual(actual, input, "do not clone or strip permission intents");
-      return denied;
-    },
+  const permissionCalls = [];
+  const applyPermissionBatch = async (actual) => {
+    permissionCalls.push(actual);
+    return denied;
   };
-  const member = videoMemberAdapterProps(ports);
-  const outcome = await member.applyPermissionBatch(input);
-  assert.strictEqual(outcome, denied, "do not turn permission failure into success");
-  assert.equal(calls, 1);
-  assert.equal(input.intents[1].intent, "off");
-});
+  const findElement = (node, type) => {
+    if (Array.isArray(node)) {
+      for (const child of node) {
+        const found = findElement(child, type);
+        if (found) return found;
+      }
+      return null;
+    }
+    if (!React.isValidElement(node)) return null;
+    if (node.type === type) return node;
+    return findElement(node.props.children, type);
+  };
+  const section = target.members({ ...defaults, searchXUsers, applyPermissionBatch });
+  const memberField = findElement(section, VideoMembersField);
+  assert.ok(memberField, "the actual VideoFormMembersSection must render VideoMembersField");
+  assert.strictEqual(memberField.props.searchXUsers, searchXUsers);
+  assert.strictEqual(memberField.props.applyPermissionBatch, applyPermissionBatch);
+  assert.ok(!("submit" in memberField.props), "member component cannot invoke the VideoForm submit port");
+  const found = await memberField.props.searchXUsers("@Alice", 20, controller.signal);
+  assert.strictEqual(found, searchOutput);
+  assert.deepEqual(searchCalls, [{ query: "@Alice", offset: 20, signal: controller.signal }]);
+  assert.equal(searchCalls[0].signal.aborted, false);
+  const outcome = await memberField.props.applyPermissionBatch(input);
+  assert.strictEqual(outcome, denied);
+  assert.strictEqual(permissionCalls[0], input, "do not clone or strip permission intents");
+  assert.equal(input.edit_privilege_mode, "event");
+  assert.deepEqual(input.intents.map((item) => item.intent), ["on", "off"]);
 
-test("U02b: member adapter exceptions are not swallowed by the port forwarder", async () => {
   const sentinel = new Error("synthetic backend failure");
-  const ports = {
-    submit: async () => ({ ok: true }),
+  const failedSection = target.members({
+    ...defaults,
     searchXUsers: async () => { throw sentinel; },
     applyPermissionBatch: async () => { throw sentinel; },
-  };
-  const member = videoMemberAdapterProps(ports);
-  await assert.rejects(member.searchXUsers("x", 0, new AbortController().signal), (e) => e === sentinel);
-  await assert.rejects(member.applyPermissionBatch({ videoId: "v1", notify: true, intents: [] }), (e) => e === sentinel);
+  });
+  const failedField = findElement(failedSection, VideoMembersField);
+  await assert.rejects(failedField.props.searchXUsers("x", 0, new AbortController().signal), (error) => error === sentinel);
+  await assert.rejects(failedField.props.applyPermissionBatch(input), (error) => error === sentinel);
 });
 
-test("MIG-0714 part A: draft restoration respects every CURRENT section and field lock", () => {
-  const groups = {
-    submitter: ["display_name", "profile_text", "icon_url", "youtube_channel_url", "other_social_links"],
-    video: ["title", "scheduled_time", "music", "music_reference_url", "credit", "youtube_url", "part"],
-    descriptions: ["intro_comment", "highlights", "production_story", "used_software", "closing_comment", "custom_answers", "stage_permission"],
-    members: ["is_collab", "members", "chapters"],
-  };
-  const entries = Object.entries(groups).flatMap(([section, names]) => names.map((name) => [
-    name, section, name === "members" || name === "chapters" ? name : `${section}.${name}`,
-  ]));
-  entries.push(["event_ids", null, "event_ids"]);
-  for (const [name, section, field] of entries) {
-    assert.equal(canRestoreDraftField(name, undefined, undefined), true, name);
-    for (const disabled of Object.keys(groups)) {
-      assert.equal(canRestoreDraftField(name, [disabled], []), section !== disabled, `${name}: ${disabled}`);
+test("MIG-0714 part A: native restoration respects every CURRENT section and field lock", async () => {
+  const { JSDOM } = await import("jsdom");
+  const dom = new JSDOM("<form></form>");
+  try {
+    const form = dom.window.document.querySelector("form");
+    const groups = {
+      submitter: ["display_name", "profile_text", "icon_url", "youtube_channel_url", "other_social_links"],
+      video: ["title", "scheduled_time", "music", "music_reference_url", "credit", "youtube_url", "part"],
+      descriptions: ["intro_comment", "highlights", "production_story", "used_software", "closing_comment", "custom_answers", "stage_permission"],
+      members: ["is_collab", "members", "chapters"],
+    };
+    const entries = Object.entries(groups).flatMap(([section, names]) => names.map((name) => [
+      name, section, name === "members" || name === "chapters" ? name : `${section}.${name}`,
+    ]));
+    entries.push(["event_ids", null, "event_ids"]);
+    const controls = new Map();
+    for (const [name] of entries) {
+      const input = dom.window.document.createElement("input");
+      input.name = name;
+      input.value = "server";
+      form.append(input);
+      controls.set(name, input);
     }
-    for (const [, , disabled] of entries) {
-      assert.equal(canRestoreDraftField(name, [], [disabled]), field !== disabled, `${name}: ${disabled}`);
+    const reset = () => {
+      for (const input of controls.values()) input.value = "server";
+    };
+    for (const [name, section, field] of entries) {
+      reset();
+      restoreVideoDraftControls(form, { [name]: "draft" }, undefined, undefined);
+      assert.equal(controls.get(name).value, "draft", name);
+      for (const disabled of Object.keys(groups)) {
+        reset();
+        restoreVideoDraftControls(form, { [name]: "draft" }, [disabled], []);
+        assert.equal(controls.get(name).value, section !== disabled ? "draft" : "server", `${name}: ${disabled}`);
+      }
+      for (const [, , disabled] of entries) {
+        reset();
+        restoreVideoDraftControls(form, { [name]: "draft" }, [], [disabled]);
+        assert.equal(controls.get(name).value, field !== disabled ? "draft" : "server", `${name}: ${disabled}`);
+      }
+      reset();
+      restoreVideoDraftControls(form, { [name]: "draft" }, Object.keys(groups), [field]);
+      assert.equal(controls.get(name).value, "server", name);
     }
-    assert.equal(canRestoreDraftField(name, Object.keys(groups), [field]), false, name);
+  } finally {
+    dom.window.close();
   }
-  // Chapters and membership have separate field locks in CURRENT.
-  assert.equal(canRestoreDraftField("chapters", [], ["members"]), true);
-  assert.equal(canRestoreDraftField("members", [], ["chapters"]), true);
 });
 
-test("MIG-0714 part A: omitted, unrelated and exact lock names keep CURRENT semantics", () => {
+test("MIG-0714 part A: lock matching is exact and unknown fields retain CURRENT behavior", async () => {
   assert.equal(isSectionDisabled(undefined, "video"), false);
   assert.equal(isFieldDisabled(undefined, "video.title"), false);
   assert.equal(isSectionDisabled(["video"], "video"), true);
   assert.equal(isFieldDisabled(["video.title"], "video.title"), true);
   assert.equal(isFieldDisabled(["VIDEO.TITLE", "video"], "video.title"), false);
-  assert.equal(canRestoreDraftField("title", ["VIDEO"], ["title"]), true);
-  assert.equal(canRestoreDraftField("event_ids", ["video", "members"], []), true);
-  // The draft parser/caller limits actual restored fields; this helper is not authorization.
-  assert.equal(canRestoreDraftField("unknown_field", ["video"], ["unknown_field"]), true);
+  const { JSDOM } = await import("jsdom");
+  const dom = new JSDOM("<form><input name='title' value='server'><input name='unknown_field' value='server'></form>");
+  try {
+    const form = dom.window.document.querySelector("form");
+    const title = form.querySelector('[name="title"]');
+    const unknown = form.querySelector('[name="unknown_field"]');
+    restoreVideoDraftControls(form, { title: "draft", unknown_field: "unknown draft" }, ["VIDEO"], ["title"]);
+    assert.equal(title.value, "draft", "unrelated section/field names do not lock a known field");
+    assert.equal(unknown.value, "unknown draft", "unknown fields remain governed by the parser/caller");
+    title.value = "server";
+    restoreVideoDraftControls(form, { title: "draft" }, ["video"], ["video.title"]);
+    assert.equal(title.value, "server", "exact section and field locks prevent restoration");
+  } finally {
+    dom.window.close();
+  }
 });
 
 test("MIG-0714 part A: restore native controls with CURRENT locks and repeated-value semantics", async () => {

@@ -84,9 +84,11 @@ test("MIG-0701 U04 T08: every Personal route class has a CSS definition", async 
     "settings-x-h", "settings-history-h", "settings-link-h", "settings-discord-h",
   ]);
   const missing = new Set();
-  for (const p of await getTsx("apps/app/src/routes/")) {
+  const routeFiles = await getTsx("apps/app/src/routes/");
+  const formFiles = await getTsx("apps/app/src/components/forms/");
+  for (const p of [...routeFiles, ...formFiles]) {
     const source = (await read(p)).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
-    for (const [, token] of source.matchAll(/(?<![\w-])((?:fn|dash|onb|settings|vcard)-[A-Za-z0-9_-]*[A-Za-z0-9_])/g)) {
+    for (const [, token] of source.matchAll(/(?<![\w-])((?:fn|dash|onb|settings|vcard|vform)-[A-Za-z0-9_-]*[A-Za-z0-9_])/g)) {
       if (!defined.has(token) && !exceptions.has(token)) missing.add(p + ": " + token);
     }
   }
@@ -98,6 +100,55 @@ test("MIG-0701 U04 T07: main imports CSS in CURRENT order", async () => {
     "./styles/current/globals.css", "./styles/current/mobile-hardening.css",
     "./styles/fonts.css", "./styles/video-card.css", "./styles/dashboard.css",
     "./styles/settings.css", "./styles/xid-settings.css", "./styles/onboarding.css", "./styles/entry.css", "./styles/xid-requests.css", "./styles/video-members.css", "./styles/forms-a.css", "./styles/shared-social.css",
-    "./styles/cost-guard-banner.css",
+    "./styles/cost-guard-banner.css", "./styles/video-form.css",
   ]);
 });
+
+test("MIG-0714 B05: nested :global spans preserve balanced selector semantics", () => {
+  const fixtures = [
+    [
+      String.raw`.form :global(.fn-input:not(:disabled):not([readonly])):hover { color: red; }`,
+      String.raw`.vform-form .fn-input:not(:disabled):not([readonly]):hover { color: red; }`,
+    ],
+    [
+      String.raw`.form :global(.fn-input:is(:not(:disabled), :not([readonly]))) .row { color: red; }`,
+      String.raw`.vform-form .fn-input:is(:not(:disabled), :not([readonly])) .vform-row { color: red; }`,
+    ],
+    [
+      String.raw`.form :global(.fn-input:not(:disabled)):global(.fn-btn:hover) .row { color: red; }`,
+      String.raw`.vform-form .fn-input:not(:disabled).fn-btn:hover .vform-row { color: red; }`,
+    ],
+    [
+      String.raw`.form.local :global([data-label="close)"] .fn-input[data-note='escaped\)']) .row { color: red; }`,
+      String.raw`.vform-form.vform-local [data-label="close)"] .fn-input[data-note='escaped\)'] .vform-row { color: red; }`,
+    ],
+  ];
+  for (const [input, expected] of fixtures) assert.equal(portCssModule(input, "vform"), expected);
+});
+
+test("MIG-0714 B05: generated VideoForm CSS preserves input and textarea hover eligibility", async () => {
+  const source = await read("src/components/forms/VideoForm.module.css");
+  const target = await read("apps/app/src/styles/video-form.css");
+  assert.equal(target, portCssModule(source, "vform"), "generated CSS must match CURRENT source");
+  assert.ok(source.includes(".form :global(.fn-input:not(:disabled):not([readonly])):hover"));
+  assert.ok(target.includes(".vform-form .fn-input:not(:disabled):not([readonly]):hover"));
+  assert.ok(source.includes(".form :global(.fn-textarea:not(:disabled)):hover"));
+  assert.ok(target.includes(".vform-form .fn-textarea:not(:disabled):hover"));
+
+  const { JSDOM } = await import("jsdom");
+  const dom = new JSDOM("<form><input id='editable' class='fn-input'><input id='disabled' class='fn-input' disabled><input id='readonly' class='fn-input' readonly><input id='both' class='fn-input' disabled readonly><textarea id='readonly-textarea' class='fn-textarea' readonly></textarea></form>");
+  try {
+    const selector = ".fn-input:not(:disabled):not([readonly])";
+    for (const [id, expected] of [["editable", true], ["disabled", false], ["readonly", false], ["both", false]]) {
+      assert.equal(dom.window.document.getElementById(id).matches(selector), expected, id);
+    }
+    assert.equal(
+      dom.window.document.getElementById("readonly-textarea").matches(".fn-textarea:not(:disabled)"),
+      true,
+      "CURRENT readonly textarea hover eligibility must remain distinct",
+    );
+  } finally {
+    dom.window.close();
+  }
+});
+
