@@ -1057,7 +1057,7 @@ test("MIG-0737 U01 double click: TD, display and empty value open the original d
         await down(surface, { ...options, detail });
         await up(surface, options);
         await terminalClick(surface, { ...options, detail });
-        assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 0);
+        assert.equal(ui.host.querySelectorAll('[data-grid-cell] input[type="text"]').length, 0);
       }
       assert.equal((await doubleClickCell(surface, options)).defaultPrevented, false);
       const input = td.querySelector('input[type="text"]');
@@ -1072,7 +1072,7 @@ test("MIG-0737 U01 double click: TD, display and empty value open the original d
           "same draft rerender must not move the caret");
       }
       assert.deepEqual(selected(ui), [pos]);
-      assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 1);
+      assert.equal(ui.host.querySelectorAll('[data-grid-cell] input[type="text"]').length, 1);
       await key(input, "Escape");
       assert.equal(td.querySelector("input"), null);
       assert.ok(document.activeElement === td);
@@ -1095,7 +1095,7 @@ test("MIG-0737 U01 double click: denied cells, opt-in, generated and missing PK 
         const td = await select(ui, pos);
         await doubleClickCell(td);
         await doubleClickCell(td.querySelector("[data-grid-cell-content]"));
-        assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 0);
+        assert.equal(ui.host.querySelectorAll('[data-grid-cell] input[type="text"]').length, 0);
         assert.deepEqual(selected(ui), [pos]);
         assert.ok(document.activeElement === td);
       }

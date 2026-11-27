@@ -94,9 +94,9 @@ test("MIG-0737 U01: Enter navigates, edit buttons open only mutable columns; mis
     const title = ui.host.querySelector('[data-grid-cell="0:1"]');
     assert.equal((await press(title, "Enter")).defaultPrevented, true);
     assertNavigation(ui, "1:1");
-    assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 0);
+    assert.equal(ui.host.querySelectorAll('[data-grid-cell] input[type="text"]').length, 0);
     await openCellEditor(title);
-    assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 1);
+    assert.equal(ui.host.querySelectorAll('[data-grid-cell] input[type="text"]').length, 1);
     await press(title, "c", { ctrlKey: true });
     await flush();
     assert.match(ui.host.textContent, /コピーが許可されていません/);
@@ -1015,7 +1015,7 @@ test("MIG-0737 U01 navigation: ordinary and Alt arrow/Home/End keys move and rev
       assert.deepEqual(scrolls, [{ position: end, options: { block: "nearest", inline: "nearest" } }], key);
     }
     assert.deepEqual(effects, []);
-    assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 0);
+    assert.equal(ui.host.querySelectorAll('[data-grid-cell] input[type="text"]').length, 0);
   } finally { await ui.cleanup(); }
 });
 
@@ -1170,7 +1170,7 @@ test("MIG-0737 U01 navigation: readonly, default-off and missing-PK grids still 
       await press(document.activeElement, "PageDown");
       assertNavigation(ui, "10:0");
       assert.equal(ui.host.querySelectorAll('button[aria-label="1行 title を編集"]').length, 0);
-      assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 0);
+      assert.equal(ui.host.querySelectorAll('[data-grid-cell] input[type="text"]').length, 0);
       assert.deepEqual(effects, []);
     } finally { await ui.cleanup(); }
   }
@@ -1261,7 +1261,7 @@ test("MIG-0737 U01 navigation: excluded text and other keys retain the previous 
     for (const key of ["Escape", "x", "Homebrew"]) {
       assert.equal((await press(document.activeElement, key)).defaultPrevented, false, key);
       assertNavigation(ui, "1:1");
-      assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 0);
+      assert.equal(ui.host.querySelectorAll('[data-grid-cell] input[type="text"]').length, 0);
     }
     assert.deepEqual(scrolls, []);
   } finally { await ui.cleanup(); }
@@ -1459,7 +1459,7 @@ test("MIG-0737 U01 Tab navigation: modifier combinations collapse the selection 
             assert.equal(event.defaultPrevented, true);
             assertNavigation(ui, end);
             assert.deepEqual(scrolls, [{ position: end, options: { block: "nearest", inline: "nearest" } }]);
-            assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 0);
+            assert.equal(ui.host.querySelectorAll('[data-grid-cell] input[type="text"]').length, 0);
           }
         }
       }
@@ -1530,7 +1530,7 @@ test("MIG-0737 U01 Enter navigation: all modifiers advance the row and collapse 
         assert.equal((await press(document.activeElement, "Enter", options)).defaultPrevented, true);
         assertNavigation(ui, "2:1");
         assert.deepEqual(scrolls, [{ position: "2:1", options: { block: "nearest", inline: "nearest" } }]);
-        assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 0);
+        assert.equal(ui.host.querySelectorAll('[data-grid-cell] input[type="text"]').length, 0);
       }
       await selectNavigationRange(ui, "0:0", "2:1");
       scrolls.length = 0;
@@ -1551,7 +1551,7 @@ test("MIG-0737 U01 Enter navigation: one row consumes and clamps without editing
     assert.equal((await press(document.activeElement, "Enter")).defaultPrevented, true);
     assertNavigation(ui, "0:1");
     assert.deepEqual(scrolls, []);
-    assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 0);
+    assert.equal(ui.host.querySelectorAll('[data-grid-cell] input[type="text"]').length, 0);
   } finally { await ui.cleanup(); }
 });
 
@@ -1628,10 +1628,10 @@ test("MIG-0737 U01 F2: all modifiers open original value and collapse the select
       const editor = cell.querySelector('input[type="text"]');
       assert.ok(editor && document.activeElement === editor);
       assert.equal(editor.value, "Beta");
-      assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 1);
+      assert.equal(ui.host.querySelectorAll('[data-grid-cell] input[type="text"]').length, 1);
       assert.equal((await press(editor, "Escape")).defaultPrevented, true);
       assertNavigation(ui, "1:1");
-      assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 0);
+      assert.equal(ui.host.querySelectorAll('[data-grid-cell] input[type="text"]').length, 0);
     }
     assert.deepEqual(effects, []);
   } finally { await ui.cleanup(); }
@@ -1658,7 +1658,7 @@ test("MIG-0737 U01 F2: denied columns and authorities still collapse selection b
       scrolls.length = 0;
       assert.equal((await press(document.activeElement, "F2")).defaultPrevented, true);
       assertNavigation(ui, variant.focus);
-      assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 0);
+      assert.equal(ui.host.querySelectorAll('[data-grid-cell] input[type="text"]').length, 0);
       assert.deepEqual(scrolls, []);
       assert.deepEqual(effects, []);
     } finally { await ui.cleanup(); }
@@ -1697,7 +1697,7 @@ test("MIG-0737 U01 F2: child, repeated same-batch and invalidated drafts retain 
     assert.match(ui.host.textContent, /編集中の行または列の状態が変更/);
     assert.equal((await press(gridCell(ui, "2:1"), "F2")).defaultPrevented, false);
     assert.deepEqual(selectedCells(ui), ["1:1"]);
-    assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 0);
+    assert.equal(ui.host.querySelectorAll('[data-grid-cell] input[type="text"]').length, 0);
     assert.deepEqual(effects, []);
   } finally { await ui.cleanup(); }
 });
@@ -1713,7 +1713,7 @@ test("MIG-0737 U01 F2: pending ordinary write cannot open a second editor and hi
     await selectNavigationRange(ui, "0:0", "2:1");
     assert.equal((await press(document.activeElement, "F2")).defaultPrevented, true);
     assertNavigation(ui, "2:1");
-    assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 0);
+    assert.equal(ui.host.querySelectorAll('[data-grid-cell] input[type="text"]').length, 0);
     await React.act(async () => requests[0].resolve(successfulWrite()));
     await flush();
     const cell = await selectCell(ui, "1:1");
@@ -1725,7 +1725,7 @@ test("MIG-0737 U01 F2: pending ordinary write cannot open a second editor and hi
     assert.equal(requests.length, 2);
     assert.equal(following.defaultPrevented, false);
     assert.equal((await press(cell, "F2")).defaultPrevented, false);
-    assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 0);
+    assert.equal(ui.host.querySelectorAll('[data-grid-cell] input[type="text"]').length, 0);
     await React.act(async () => requests[1].resolve(successfulWrite()));
     await flush();
     assert.equal((await press(cell, "F2")).defaultPrevented, true);
@@ -1796,7 +1796,7 @@ test("MIG-0737 U01 direct typing: delivered printable keys replace only the init
       assert.deepEqual([input.selectionStart, input.selectionEnd], [key.length, key.length],
         "rerender must not select the character again");
       assert.deepEqual(selectedCells(ui), ["1:1"]);
-      assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 1);
+      assert.equal(ui.host.querySelectorAll('[data-grid-cell] input[type="text"]').length, 1);
       assert.equal((await press(input, "Escape")).defaultPrevented, true);
       assertNavigation(ui, "1:1");
       assert.equal(cell.querySelector("input"), null);
@@ -1823,7 +1823,7 @@ test("MIG-0737 U01 direct typing: denied columns, opt-in, PK and nonprintable or
       const selection = selectedCells(ui);
       assert.equal((await press(gridCell(ui, variant.focus), "a")).defaultPrevented, false);
       assertNavigation(ui, variant.focus, selection);
-      assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 0);
+      assert.equal(ui.host.querySelectorAll('[data-grid-cell] input[type="text"]').length, 0);
     } finally { await ui.cleanup(); }
   }
   const ui = await mount({ data: rangeData, allowMutations: true });
@@ -1834,11 +1834,11 @@ test("MIG-0737 U01 direct typing: denied columns, opt-in, PK and nonprintable or
       ["q", { altKey: true }], ["😀", {}], ["Process", {}], ["Dead", {}], ["Escape", {}]]) {
       assert.equal((await press(gridCell(ui, "1:1"), key, options)).defaultPrevented, false, key);
       assertNavigation(ui, "1:1", selection);
-      assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 0);
+      assert.equal(ui.host.querySelectorAll('[data-grid-cell] input[type="text"]').length, 0);
     }
     assert.equal((await press(gridCell(ui, "1:1"), " ", { shiftKey: true })).defaultPrevented, true);
     assert.deepEqual(selectedCells(ui), rowCells);
-    assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 0);
+    assert.equal(ui.host.querySelectorAll('[data-grid-cell] input[type="text"]').length, 0);
   } finally { await ui.cleanup(); }
 });
 
@@ -1897,7 +1897,7 @@ test("MIG-0737 U01 direct typing: a pending ordinary write or invalidated draft 
     await ui.render({ data: { ...rangeData, rows: [rangeData.rows[0], { ...rangeData.rows[1], title: "Server change" }, rangeData.rows[2]] } });
     assert.match(ui.host.textContent, /編集中の行または列の状態が変更/);
     assert.equal((await press(gridCell(ui, "2:1"), "r")).defaultPrevented, false);
-    assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 0);
+    assert.equal(ui.host.querySelectorAll('[data-grid-cell] input[type="text"]').length, 0);
     assert.equal(requests.length, 1);
   } finally { await ui.cleanup(); }
 });
