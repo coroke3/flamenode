@@ -655,6 +655,50 @@ describe("readPublicData option A: D1 REST API with a read-only token (no networ
     ]) assert.equal(MIGRATED.isReadOnlyStatement(harmless), true, harmless);
   });
 
+  it("rejects SELECT eval() side effects before dispatch even with an overly broad D1 token", async () => {
+    // A custom eval() function simulates a SQLite extension that executes its SQL argument.
+    // This is a conditional capability demonstration, not evidence Cloudflare D1 enables eval().
+    const unchecked = new DatabaseSync(":memory:");
+    const protectedDb = new DatabaseSync(":memory:");
+    for (const sqlite of [unchecked, protectedDb]) {
+      sqlite.exec("CREATE TABLE guard_probe (id INTEGER); INSERT INTO guard_probe VALUES (1)");
+      sqlite.function("eval", (sql) => { sqlite.exec(sql); return 1; });
+    }
+    try {
+      unchecked.prepare("SELECT eval('DELETE FROM guard_probe')").all();
+      assert.equal(unchecked.prepare("SELECT COUNT(*) AS n FROM guard_probe").get().n, 0,
+        "SELECT can mutate when an eval-style extension is available");
+
+      const calls = [];
+      const { db } = MIGRATED.openD1HttpReader({
+        accountId: ACCOUNT, databaseId: DATABASE, token: TOKEN,
+        fetchFn: fakeD1Api(protectedDb, calls),
+      });
+      for (const sql of [
+        "SELECT eval('DELETE FROM guard_probe')",
+        "WITH c AS (SELECT 1) SELECT eval('DELETE FROM guard_probe') FROM c",
+        "SELECT eval /* comment */ ('DELETE FROM guard_probe')",
+        'SELECT "eval"(\'DELETE FROM guard_probe\')',
+        "SELECT [eval]('DELETE FROM guard_probe')",
+        "SELECT [eval] -- comment\n ('DELETE FROM guard_probe')",
+      ]) {
+        assert.equal(MIGRATED.isReadOnlyStatement(sql), false, sql);
+        await assert.rejects(db.prepare(sql).all(), /refuses a non-read statement/, sql);
+      }
+      assert.equal(calls.length, 0, "unsafe statements must not reach D1 HTTP");
+      assert.equal(protectedDb.prepare("SELECT COUNT(*) AS n FROM guard_probe").get().n, 1);
+
+      for (const harmless of [
+        "SELECT 'eval' AS name",
+        'SELECT "eval" AS label',
+        "SELECT 1 /* eval('DELETE FROM guard_probe') */",
+      ]) assert.equal(MIGRATED.isReadOnlyStatement(harmless), true, harmless);
+    } finally {
+      unchecked.close();
+      protectedDb.close();
+    }
+  });
+
   it("rejects NaN, Infinity and oversized D1 read budgets at construction", () => {
     let calls = 0;
     const fetchFn = async () => { calls++; throw new Error("unexpected D1 request"); };

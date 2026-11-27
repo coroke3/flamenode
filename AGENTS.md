@@ -186,6 +186,9 @@ Do not move the entire current tree up-front. Add boundaries only when the activ
 
 ## Work rules
 
+- 2026-11-27 owner policy: 通常の移行PRは個別の人間承認不要。全micro-unit・受入条件・依存・rollback・最新main統合・最終HEADの必須CI成功と独立APPROVEを確認したagentがsquash mergeし、mainで確認して次のREADYへ進む。高リスクは独立した上位Lead agentの追加レビューを要求するが、既定仕様の範囲内のコード統合に人間承認は不要。非本番Phase Gateは証拠に基づく独立Leadレビューで通過可能。本番切替・本番DB/データ移行・Route/Custom Domain/DNS・Secrets・仕様/権限/可視性の意味変更は別途明示承認を維持する。通常main mergeに伴う既存Workers Builds自動実行はこの方針で許可するが、手動deployや本番切替の許可ではない。既存の個別承認待ち記録は履歴であり、本方針が優先する。
+- テストは既存suite・fixture・helperを優先し、既存ファイルへの最小限の回帰ケース追加を原則とする。既存テストで受入条件を証明できる場合は新規テストを作らない。重複・同等ケース、証跡だけのtest-only PR、別ファイルへの細分化を避ける。新規ファイルは既存suiteでは必要な契約を検証できない場合に限り、理由・非重複性をPRへ記録する。必須検証・安全性・失敗系カバレッジを削減したり、未実行をPASSにしたりしない。
+
 - Fix task scope and non-scope before editing.
 - Prefer the smallest coherent change that advances the current gate.
 - For migration writes, use **1 MIG task = 1 short-lived branch = 1 PR = 1 squash merge** unless `GIT_WORKFLOW.md` explicitly allows an exception.
@@ -203,7 +206,7 @@ Do not move the entire current tree up-front. Add boundaries only when the activ
 Use lightweight agents/models for bounded inventory, search, docs and mechanical edits.
 Use stronger reasoning/review for architecture, DB, auth, permissions, security, visibility, routing, destructive changes, gates and final review.
 
-Migration writes by lightweight models (Haiku / Luna / Flash) are limited to MIG tasks whose Work Order (`### MIG-XXXX:` in the phase spec) declares `Model: small` and `Readiness: READY_FOR_SMALL_MODEL`; select them with `npm run migration:next -- --model small` and follow `docs/migration/IMPLEMENTATION_RUNBOOK.md` exactly. First verify all live open PRs via `gh` or GitHub MCP; when `gh` is unavailable use verified `--open-pr-branches`, never `--offline` for new-task claims. Writing or refining Work Orders, reviewing other agents' PRs, high-risk merges and Phase Gates stay with a stronger model or a human; a lightweight model may get a fresh-context higher-tier review and prepare its PR for human merge (runbook E/F); **migration loop agents never auto-merge**.
+Migration writes by lightweight models (Haiku / Luna / Flash) are limited to MIG tasks whose Work Order (`### MIG-XXXX:` in the phase spec) declares `Model: small` and `Readiness: READY_FOR_SMALL_MODEL`; select them with `npm run migration:next -- --model small` and follow `docs/migration/IMPLEMENTATION_RUNBOOK.md` exactly. First verify all live open PRs via `gh` or GitHub MCP; when `gh` is unavailable use verified `--open-pr-branches`, never `--offline` for new-task claims. Writing or refining Work Orders, reviewing other agents' PRs, high-risk merges and Phase Gates stay with a stronger model or a human; a lightweight model may get a fresh-context higher-tier review and prepare its PR for reviewed squash merge (runbook E/F); **eligible agents merge after the final-head gates pass, without per-PR human approval**.
 
 Stop/escalate when:
 

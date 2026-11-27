@@ -85,7 +85,7 @@ No agent may start a second implementation PR for a MIG task that already has an
 - The open Draft PR is a discoverable *advisory* owner lock, not an atomic lock: search again immediately after PR creation. Stop on duplicate MIG PR.
 - Agents on different tasks may only edit their **own** work-item checkpoint. Concurrent changes to the same code path, migration file matrix row, UX/FN/Route/API ledger or permission/schema/auth boundary are prohibited.
 - Before merge, fetch latest main; reconcile dependency/Phase state and any other merged task; only then update the **affected task and newly unblocked tasks** in `STATUS.md`. Do not overwrite the full summary with a stale copy.
-- Re-run required CI/contract checks and independent review on the integrated final head. Move the work-item to DONE with pre-integration evidence; record final CI/review links in a PR comment (not a new work-item commit), then request human squash merge. Next wake reads the new main.
+- Re-run required CI/contract checks and independent review on the integrated final head. Move the work-item to DONE with pre-integration evidence; record final CI/review links in a PR comment (not a new work-item commit), then squash merge after the final-head gates pass (expected SHA), confirm main and continue. No per-PR human approval.
 - `node scripts/check-migration-work-items.mjs` validates local record structure/declared duplicate paths/source commits. A fresh squash clone may need the explicit `--fetch-pr-history` preparation described in `work-items/README.md`; actual live PR state, reviewer identity and CI must still be inspected.
 
 ---
@@ -250,6 +250,10 @@ Do not rewrite a branch after independent review has started unless the reviewer
 
 ## 9. Multi-agent roles
 
+2026-11-27 owner policy: 通常の移行PRは個別の人間承認不要。全micro-unit・受入条件・依存・rollback・最新main統合・最終HEADの必須CI成功と独立APPROVEを確認したagentがsquash mergeし、mainで確認して次のREADYへ進む。高リスクは独立した上位Lead agentの追加レビューを要求するが、既定仕様の範囲内のコード統合に人間承認は不要。非本番Phase Gateは証拠に基づく独立Leadレビューで通過可能。本番切替・本番DB/データ移行・Route/Custom Domain/DNS・Secrets・仕様/権限/可視性の意味変更は別途明示承認を維持する。通常main mergeに伴う既存Workers Builds自動実行はこの方針で許可するが、手動deployや本番切替の許可ではない。既存の個別承認待ち記録は履歴であり、本方針が優先する。
+
+テストは既存suite・fixture・helperを優先し、既存ファイルへの最小限の回帰ケース追加を原則とする。既存テストで受入条件を証明できる場合は新規テストを作らない。重複・同等ケース、証跡だけのtest-only PR、別ファイルへの細分化を避ける。新規ファイルは既存suiteでは必要な契約を検証できない場合に限り、理由・非重複性をPRへ記録する。必須検証・安全性・失敗系カバレッジを削減したり、未実行をPASSにしたりしない。
+
 A migration PR has distinct roles:
 
 ```text
@@ -268,7 +272,7 @@ Rules:
 
 ### High-risk two/three-party rule
 
-The following require an independent reviewer **and Lead/human approval** before merge or production action:
+The following require independent review plus a qualified Lead agent for code merge. Explicit human approval remains required for actual production operations, irreversible data changes, or changes to approved product semantics; routine code merge and non-production gates do not require it:
 
 - Auth/session/account linking
 - DB schema/destructive migration
@@ -498,7 +502,7 @@ The next agent re-reads the branch state and continues from there.
 9. mark work-item REVIEW, request independent review
 10. address findings + rerun validation
 11. after independent review, update work-item DONE and reconcile STATUS task DONE + next READY against latest main
-12. 最終HeadのCI成功・独立レビューを確認して `Merge requested:` をPRに記録。移行ループのagentはmergeせず、人間が対象PRを確認してsquash mergeする。レビュー/merge待ちの間も依存の無い別taskへ進む
+12. 最終HeadのCI成功・独立レビューを確認して `Merge requested:` をPRに記録。agentは最終HEAD・最新main・全ゲートを確認し、expected HEAD指定でsquash mergeする。レビュー/merge待ちの間も依存の無い別taskへ進む
 13. delete branch
 14. next loop starts from updated main
 ```
