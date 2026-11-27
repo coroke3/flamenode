@@ -1035,7 +1035,7 @@ Phase 7 共通契約のとおり。
 
 ### MIG-0717: `/dashboard/edit/:id` の画面（SA-089、MIG-0703 U02 の前半）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — Draft #913 の U01a/U02a/U01b1/U02b1/U02b2a は限定受入済み。U02b2b の EmptyState は #912 と別途 CSS 枠を調整する。#703 の trusted TARGET route / loader / authority / refresh と全 task gate は未完。
+- **Readiness:** NEEDS_REFINEMENT — Draft #913 の U01a/U02a/U01b1/U02b1/U02b2a は限定受入済み。U01b2a の read-scope / attached-completeness 実装は追加済み（exact-head CI / independent review pending）。U02b2b の EmptyState は #912 と別途 CSS 枠を調整する。#703 の trusted TARGET route / loader / authority / refresh と全 task gate は未完。
 - **Recipe:** R-SCREEN
 - **Runtime:** N
 - **Depends on:** MIG-0714 / **Decisions:** D-05 DECIDED, D-16-1, D-16-11
@@ -1051,11 +1051,13 @@ Phase 7 共通契約のとおり。
 - U02b2a: 既存 `apps/app/src/routes/dashboard/edit/Edit.tsx` / `apps/app/test/editPage.test.mjs` のみ。CURRENT `src/components/admin/AdminVideoTabs.tsx` / `AdminResourceTabs.tsx` の表示を private presenter に移し、既存 AppLink / Icon / videoPageHref と global styles を使う。CURRENT source 行の first owner MIG-0705 と過去 evidence は維持する。共有 CSS の追加枠は不要。
 - U02b2b (Lead disposition #913 comment7222399098): `apps/app/src/routes/dashboard/edit/Edit.tsx` の `not_found` inner JSX only、`apps/app/src/styles/empty-state.css`、`apps/app/test/editPage.test.mjs`、`apps/app/scripts/portCssModule.mjs` (one append-only `empty-state` tuple), `apps/app/src/main.tsx` (one import), `apps/app/test/styles.test.mjs` (one CSS parity test/order expectation), this task's Work Order / checkpoint / scoped matrix rows. CURRENT `src/components/ui/EmptyState.tsx` and `.module.css` are display/CSS inputs; no runtime import from `src/**`. Final union order: `vform → status-panel → entry-unslotted → vedit-overview → empty-state`.
 - 後続: edit shell / EmptyState、`apps/app/src/routes/router.tsx`、`apps/app/src/api/videoSubmit.ts`（MIG-0716 の client）。共有ファイルの追加変更は個別の所有権調整と該当 unit の受入後。
-- CURRENT の `app/(auth)/**` / `src/components/**` と `apps/api/**` は範囲外。
+- CURRENT の `app/(auth)/**` / `src/components/**` は範囲外。U01b2a は Lead disposition #913 comment7222761521 による限定例外で、既存 MIG-0630 first-owner の `apps/api/src/routes/personal/edit/{access,editPage,formOptions}.ts`、`packages/contracts/src/personal/edit.ts`、`apps/api/test/personalEdit.parity.test.mjs` の読み取り専用 follow-up のみ。MIG-0630 の所有記録は変更せず、route registration / D1 schema / writes / CURRENT は変更しない。
 #### Micro-units
 - **U01a 読み**: 2 つの canonical GET と初回 options 条件、`kind` ごとの表示。重複 `privileged` は通常、401 / 403 / canonical 404 / unavailable は別表示。依頼元の identity key・動画・mode の変更で中断し、古い応答を破棄する。欠落・途中打ち切りは既存の取得失敗表示へ戻す。
 - **U01b1 options 読み取りの継続**: 未登録の `Edit` から同一の動画・requested mode・中断 signal を使い、offset 0 から順に読む。次の offset は 900 以下で増分 1〜100 の整数。`truncated:false` と `nextOffset:null` で API が示したページ列が完了する。イベントは受信順で ID 重複を拒否し、回答は一致する値だけ重複を許容する。stage answers と候補値は初回の値を採用する。最大 901 リクエストは cursor の数学的上限。
 - **U01b2 form 接続前の受入**: mounted host での取得予算と identity / authority 条件を Lead が確定する。options DTO には subject / version と所属イベント専用の打ち切り flag が無い。U01b1 の完了とは別に、ホスト境界での主体の連続性、入力の完全性と legacy の所属上限、実行時の write authority を検証する。
+- **U01b2a read-scope / attached completeness（Lead disposition #913 comment7222761521）**: `editReadScopeOf` は既にロード済みの authenticated user ID、resolved active X ID、video ID / `updated_at`、resolved privilege/access/section flags と ordered attached/primary event IDs から SHA-256 fingerprint を作る。成功した edit DTO と全 options page が同じ token を返す。continuation は同じ token を1つだけ要求し、missing / duplicate / changed は 409 private,no-store。event title は両endpointで projection が異なるため fingerprint から除外。`att_probe` は101件目まで確認し、`att` は既存上限の100件だけを返す。page-zero の `attachedOptionsTruncated` が true なら client は全 options を公開せず unavailable にする。1つの既存D1 statement・4 bindsを維持し、追加query/write/schema変更なし。これは drift guard であり atomic D1 snapshot ではない。mutable event metadata / questions / answers の完全なsnapshot保証はしない。
+- **U01b2b1 optionsRevision**: 別のbest-effort drift signal候補。COUNT + MAX(updated_at) は同一timestampだけでなく、最大でない行がより新しいが現在のMAXを超えない時も変更を見逃す。完全なrevision保証と記述しない。独立したrevision scheme / snapshot mechanism は別途承認が必要。
 - **U02a summary**: 完了した edit 読みの `permissionSummary` を表示し、現在の resolved mode を permissions リンクへ引き継ぐ。D1 canonical DTO の management card を使用する。
 - **U02b1 overview**: canonical EditAccess の解決済み mode、ownership、offered modes、10 section の可否を CURRENT と同じ順序・文言・見出しで表示する。event title は section title の null 時だけ mode title へ戻り、trim 後の重複を除く。未登録 Edit の header と該当する admin menu の後へ置く。CSS は既存 converter を使い、自 branch の vform 直後へ予約された1 slot のみ追加。#912 統合時の順序は vform → status-panel → entry-unslotted → vedit-overview。converter / 既存 CSS / 他 owner slice は保持する。
 - **U02b2a admin menu**: kind edit、解決済み admin mode、canonical user.role admin がすべて成立するとき、header と overview の間に CURRENT の6リンクを表示する。動画 ID の encoding、public URL helper、明示的な admin query、内容編集の active 状態、nav label と装飾 icon を保持する。switch-only / requested-only admin / 失敗中には表示しない。新規 component/CSS/route を追加しない。
@@ -1074,6 +1076,8 @@ Phase 7 共通契約のとおり。
 | T07 | normal/event/admin overview、全許可/全禁止、複数イベント権限元、switch-only、失敗中 | CURRENT の10項目・文言・空状態・イベント名・accessible headings と CSS を保持し、失敗中は private overview を出さない |
 | T08 | 完全な admin edit、role/mode の不一致、switch-only、未完了・失敗中 | CURRENT の6リンク・encoding・active 状態・header と overview の間の配置を保持し、canonical admin edit 以外では menu を出さない |
 | T09 | canonical `404 {error:not_found}` | CURRENT neutral EmptyState の見出し・説明・info icon・top action・48px/64px spacing を保持し、503/unavailable と混同しない |
+| T10 | edit → options page-zero / continuation、Active X・video.updated_at・attached event ID の変更 | 同一 readScope、missing/duplicate/mismatch continuation は 409 private,no-store。event mode の title projection 差を除いて同じ token |
+| T11 | attached events 100 / 101 件 | 100件は flag false、101件目は page-zero flag true。API は最大100件だけ返し、client は不完全なoptionsを拒否 |
 #### Commands
 ```bash
 npm run build --workspace=@flamenode/app
@@ -1082,9 +1086,9 @@ npm run typecheck
 npm run check:project-docs
 ```
 #### Ledger updates
-`FILE_MIGRATION_MATRIX.md` の edit presenter / EmptyState source-CSS / derived CSS と focused tests を IN_PROGRESS とし、shared registry/import/order rows は既存 owner の証跡を保持して append-only U02b2b slice のみ記録する。CURRENT 行の first owner は維持する。SA-089 の SPA 呼び出し元は write 接続時に `API_MATRIX.md` に記録する。
+`FILE_MIGRATION_MATRIX.md` の edit presenter / EmptyState source-CSS / derived CSS と focused tests を IN_PROGRESS とし、shared registry/import/order rows は既存 owner の証跡を保持して append-only U02b2b slice のみ記録する。U01b2a は既存 MIG-0630 API/contracts/test rows に follow-up evidence のみ追記し、first owner を維持する。`API_MATRIX.md` に readScope / attached overflow / 409 continuation contract を記録する。SA-089 の SPA write 呼び出し元は write 接続時に別途記録する。
 #### DONE checklist
-- [ ] U01〜U03 が DONE、T01〜T08 が PASS
+- [ ] U01〜U03 が DONE、T01〜T11 が PASS
 - [ ] MIG-0651 / 0648 / 0650 が DONE で、client が `packages/contracts` の schema を使っている（D-16-1）
 #### STOP
 - 編集可能 section を SPA 側で決める必要が出たら止める（読みの API が正）。
