@@ -25,12 +25,49 @@ async function validatedRead<T>(
   return parsed.success ? { status: "ok", data: parsed.data } : { status: "unavailable" };
 }
 
+// Diagnostic-specific receipt outcome. "ok" on OpsResult means the transport
+// delivered a receipt, not that the diagnostic is valid. The explicit local
+// marker replaces obsolete data in useApiResult without changing its shared
+// same-key transport-failure retention or inventing a valid server DTO.
+type InvalidDiagnosticReceipt = { readonly diagnosticError: "invalid_receipt" };
+export type DiagnosticReceipt<T> = T | InvalidDiagnosticReceipt;
+
+export function isInvalidDiagnosticReceipt(data: object): data is InvalidDiagnosticReceipt {
+  return "diagnosticError" in data && data.diagnosticError === "invalid_receipt";
+}
+
+async function validatedDiagnosticRead<T>(
+  fetchFn: OpsFetch,
+  path: string,
+  schema: { safeParse(value: unknown): { success: true; data: T } | { success: false } },
+  signal?: AbortSignal,
+): Promise<OpsResult<DiagnosticReceipt<T>>> {
+  let received200 = false;
+  const result = await getJson<unknown>(async (input, init) => {
+    const response = await fetchFn(input, init);
+    received200 = response.status === 200;
+    return response;
+  }, path, signal);
+  const invalidReceipt = (): OpsResult<DiagnosticReceipt<T>> =>
+    ({ status: "ok", data: { diagnosticError: "invalid_receipt" } });
+
+  // A 200 with an unreadable/incomplete body is not a fresh diagnosis.
+  // A real pre-header network error or non-200 transient failure remains
+  // unavailable. Do not turn cancellation into a diagnostic error.
+  if (result.status === "unavailable" && received200 && !signal?.aborted) {
+    return invalidReceipt();
+  }
+  if (result.status !== "ok") return result;
+  const parsed = schema.safeParse(result.data);
+  return parsed.success ? { status: "ok", data: parsed.data } : invalidReceipt();
+}
+
 export function getAdminHealth(
   fetchFn: OpsFetch,
   deep: boolean,
   signal?: AbortSignal,
-): Promise<OpsResult<AdminHealthResponse>> {
-  return validatedRead(
+): Promise<OpsResult<DiagnosticReceipt<AdminHealthResponse>>> {
+  return validatedDiagnosticRead(
     fetchFn,
     `/api/admin-read/ops/health${deep ? "?deep=1" : ""}`,
     AdminHealthResponseSchema,
@@ -42,7 +79,7 @@ export function getAdminSecurity(
   fetchFn: OpsFetch,
   run: boolean,
   signal?: AbortSignal,
-): Promise<OpsResult<AdminSecurityResponse>> {
+): Promise<OpsResult<DiagnosticReceipt<AdminSecurityResponse>>> {
   // CURRENT does not perform any security check on the initial page.
   // Avoid even a no-op diagnostics request until the explicit run link is used.
   if (!run) {
@@ -51,7 +88,7 @@ export function getAdminSecurity(
       data: { status: "all", ran: false, results: [], error: null },
     });
   }
-  return validatedRead(
+  return validatedDiagnosticRead(
     fetchFn,
     "/api/admin-read/ops/security?run=1",
     AdminSecurityResponseSchema,

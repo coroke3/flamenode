@@ -3,7 +3,7 @@ import * as React from "react";
 import { useSearchParams } from "react-router-dom";
 import type { AdminSecurityResponse } from "@flamenode/contracts";
 import type { OpsFetch } from "../../api/read.js";
-import { getAdminSecurity } from "../../api/adminDiagnostics.js";
+import { getAdminSecurity, isInvalidDiagnosticReceipt, type DiagnosticReceipt } from "../../api/adminDiagnostics.js";
 import { ConsolePageHeader } from "../../components/shared/ConsolePageHeader.js";
 import { OpsLink } from "../../components/shared/OpsLink.js";
 import { useApiResult, type OpsDataState } from "../useApiResult.js";
@@ -59,7 +59,7 @@ function hasCompleteSecurityResults(results: AdminSecurityResponse["results"]): 
 export function AdminSecurityView({
   data, shouldRun, initialFilter, onRefresh,
 }: {
-  data: OpsDataState<AdminSecurityResponse>;
+  data: OpsDataState<DiagnosticReceipt<AdminSecurityResponse>>;
   shouldRun: boolean;
   initialFilter: DiagnosticFilter;
   onRefresh: () => void;
@@ -79,14 +79,21 @@ export function AdminSecurityView({
           </OpsLink>
         </section>
       ) : data.status === "loading" ? <p role="status">読み込み中…</p>
-        : data.status === "ok" && data.data.error === null && data.data.ran && hasCompleteSecurityResults(data.data.results) ? (
+        : data.status === "ok" && !isInvalidDiagnosticReceipt(data.data) && data.data.error === null && data.data.ran && hasCompleteSecurityResults(data.data.results) ? (
           <DiagnosticStatusResults kind="security" results={data.data.results}
             initialFilter={initialFilter} onRefresh={onRefresh} />
-        ) : <DiagnosticErrorNotice>
+        ) : <>
+        <DiagnosticErrorNotice>
           {data.status === "anonymous" ? "ログインが必要です。"
             : data.status === "forbidden" || data.status === "notFound" ? "閲覧権限がありません。"
             : "診断結果を取得できませんでした。"}
-        </DiagnosticErrorNotice>}
+        </DiagnosticErrorNotice>
+          {data.status === "ok" && isInvalidDiagnosticReceipt(data.data) ? (
+            <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm" onClick={onRefresh}>
+              最新状態を再チェック
+            </button>
+          ) : null}
+        </>}
     </div>
   );
 }

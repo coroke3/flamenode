@@ -3,7 +3,7 @@ import * as React from "react";
 import { useSearchParams } from "react-router-dom";
 import type { AdminHealthResponse } from "@flamenode/contracts";
 import type { OpsFetch, OpsResult } from "../../api/read.js";
-import { getAdminHealth } from "../../api/adminDiagnostics.js";
+import { getAdminHealth, isInvalidDiagnosticReceipt, type DiagnosticReceipt } from "../../api/adminDiagnostics.js";
 import { AdminSectionTabs } from "../../components/shared/AdminSectionTabs.js";
 import { ConsolePageHeader } from "../../components/shared/ConsolePageHeader.js";
 import { OpsLink } from "../../components/shared/OpsLink.js";
@@ -94,7 +94,7 @@ function hasCompleteHealthResults(results: AdminHealthResponse["results"], fullR
 export function AdminHealthView({
   data, fullRun, initialFilter, onRefresh,
 }: {
-  data: OpsDataState<AdminHealthResponse>;
+  data: OpsDataState<DiagnosticReceipt<AdminHealthResponse>>;
   fullRun: boolean;
   initialFilter: DiagnosticFilter;
   onRefresh: () => void;
@@ -120,17 +120,24 @@ export function AdminHealthView({
       {/* MIG-0626 may return a catalog with zero results before any check runs.
           Until U03, never display an empty deep response as an all-clear. */}
       {data.status === "loading" ? <p role="status">読み込み中…</p>
-        : data.status === "ok" && data.data.error === null && hasCompleteHealthResults(data.data.results, fullRun) ? (
+        : data.status === "ok" && !isInvalidDiagnosticReceipt(data.data) && data.data.error === null && hasCompleteHealthResults(data.data.results, fullRun) ? (
           <DiagnosticStatusResults kind="health" results={data.data.results}
             initialFilter={initialFilter} onRefresh={onRefresh} />
         ) : (
+          <>
           <DiagnosticErrorNotice>
-            {data.status === "unsupported" || (fullRun && data.status === "ok" && data.data.error === null && data.data.results.length === 0)
+            {data.status === "unsupported" || (fullRun && data.status === "ok" && !isInvalidDiagnosticReceipt(data.data) && data.data.error === null && data.data.results.length === 0)
               ? "全体診断は現在利用できません。"
               : data.status === "anonymous" ? "ログインが必要です。"
               : data.status === "forbidden" || data.status === "notFound" ? "閲覧権限がありません。"
               : "診断結果を取得できませんでした。"}
           </DiagnosticErrorNotice>
+          {data.status === "ok" && isInvalidDiagnosticReceipt(data.data) ? (
+            <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm" onClick={onRefresh}>
+              最新状態を再チェック
+            </button>
+          ) : null}
+          </>
         )}
     </div>
   );

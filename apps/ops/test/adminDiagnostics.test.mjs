@@ -124,9 +124,9 @@ test("U01 security is idle without a D1 request; explicit run fetches validated 
 
 test("U01 malformed diagnostic DTO and unsupported deep reads fail closed", async () => {
   assert.deepEqual(await getAdminHealth(async () => response(200, { status: "all", results: [{ ...results[0], status: "secret" }], error: null }), false),
-    { status: "unavailable" });
+    { status: "ok", data: { diagnosticError: "invalid_receipt" } });
   assert.deepEqual(await getAdminSecurity(async () => response(200, { status: "all", ran: true, results: [], error: "unexpected" }), true),
-    { status: "unavailable" });
+    { status: "ok", data: { diagnosticError: "invalid_receipt" } });
   assert.deepEqual(await getAdminHealth(async () => response(501, { error: "deep_unsupported" }), true),
     { status: "unsupported" });
   assert.deepEqual(await getAdminSecurity(async () => response(403, { redirect: "/dashboard" }), true),
@@ -1516,5 +1516,148 @@ test("MIG-0736 Worker detail links are bound to their CURRENT job and pipeline i
         }
       }
     }
+  }
+});
+
+test("MIG-0736 invalid successful diagnostic receipt is distinct from transient transport failure", async () => {
+  for (const read of [
+    (fn, signal) => getAdminHealth(fn, false, signal),
+    (fn, signal) => getAdminHealth(fn, true, signal),
+    (fn, signal) => getAdminSecurity(fn, true, signal),
+  ]) {
+    const invalid = { status: "ok", data: { diagnosticError: "invalid_receipt" } };
+    for (const fn of [
+      async () => response(200, { status: "all", ran: true, error: null }),
+      async () => response(200, { status: "all", ran: true, error: null,
+        results: [{ ...results[0], count: "0" }] }),
+      async () => response(200, { status: "all", ran: true, error: null,
+        results: [{ ...results[0], status: "unexpected" }] }),
+      async () => new Response("{", { status: 200 }),
+      async () => new Response(new ReadableStream({ start(controller) {
+        controller.error(new Error("incomplete receipt"));
+      } }), { status: 200 }),
+    ]) assert.deepEqual(await read(fn), invalid);
+    assert.deepEqual(await read(async () => response(503, {})), { status: "unavailable" });
+    assert.deepEqual(await read(async () => { throw new Error("offline"); }), { status: "unavailable" });
+    assert.deepEqual(await read(async () => new Response("{", { status: 401 })), { status: "anonymous" });
+    assert.deepEqual(await read(async () => new Response("{", { status: 403 })), { status: "forbidden" });
+    assert.deepEqual(await read(async () => response(404, {})), { status: "notFound" });
+    assert.deepEqual(await read(async () => response(501, {})), { status: "unsupported" });
+    const controller = new AbortController();
+    assert.deepEqual(await read(async () => {
+      controller.abort();
+      return new Response("{", { status: 200 });
+    }, controller.signal), { status: "unavailable" });
+  }
+});
+
+test("MIG-0736 invalid 200 replaces old diagnosis and explicit same-key retry recovers", async () => {
+  const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://flamenode.test" });
+  const keys = ["window", "document", "navigator", "HTMLElement", "Node", "ResizeObserver", "IS_REACT_ACT_ENVIRONMENT"];
+  const previous = new Map(keys.map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  try {
+    for (const key of keys) {
+      Object.defineProperty(globalThis, key, {
+        configurable: true,
+        value: key === "IS_REACT_ACT_ENVIRONMENT" ? true
+          : key === "ResizeObserver" ? class { observe() {} disconnect() {} }
+          : dom.window[key],
+      });
+    }
+    for (const [Component, path, endpoint, rows] of [
+      [AdminHealth, "/admin/health", "/api/admin-read/ops/health", operationalResults],
+      [AdminHealth, "/admin/health?deep=1", "/api/admin-read/ops/health?deep=1", deepResults],
+      [AdminSecurity, "/admin/security?run=1", "/api/admin-read/ops/security?run=1", securityResults],
+    ]) {
+      const target = dom.window.document.createElement("div");
+      dom.window.document.body.append(target);
+      const root = createRoot(target);
+      const pending = [];
+      const fetchFn = (url, init) => new Promise((resolve, reject) => {
+        pending.push({ url, init, resolve, reject });
+      });
+      const healthy = label => ({
+        status: "all", ran: true, error: null,
+        results: rows.map((row, index) => ({
+          ...row, ...(row.status === "warn" ? { status: "ok", count: 0, samples: [] } : {}),
+          ...(index === 0 ? { label } : {}),
+        })),
+      });
+      const finish = async (request, value) => {
+        await React.act(async () => { request.resolve(value); });
+      };
+      const confirmHealthy = label => {
+        assert.ok(target.textContent.includes(label), path);
+        assert.match(target.textContent, /WARN はありません/, path);
+        assert.ok(target.querySelector("table"), path);
+      };
+      const retry = async () => {
+        const button = [...target.querySelectorAll("button")]
+          .find(element => element.textContent.trim() === "最新状態を再チェック");
+        assert.ok(button, path);
+        const count = pending.length;
+        await React.act(async () => button.click());
+        assert.equal(pending.length, count + 1, path);
+        const request = pending.at(-1);
+        assert.equal(request.url, endpoint, path);
+        assert.equal(request.init.method, "GET");
+        assert.equal(request.init.credentials, "same-origin");
+        assert.equal(request.init.cache, "no-store");
+        return request;
+      };
+      try {
+        await React.act(async () => root.render(h(MemoryRouter, { initialEntries: [path] }, h(Component, { fetchFn }))));
+        assert.equal(pending.length, 1, path);
+        assert.equal(pending[0].url, endpoint);
+        await finish(pending[0], response(200, healthy("fresh-receipt-0")));
+        confirmHealthy("fresh-receipt-0");
+        for (const [index, invalid] of [
+          () => response(200, { status: "all", ran: true, error: null }),
+          () => new Response("{", { status: 200 }),
+          () => new Response(new ReadableStream({ start(controller) {
+            controller.error(new Error("provider-only-marker"));
+          } }), { status: 200 }),
+          () => response(200, { ...healthy("invalid-private"), results: [
+            { ...rows[0], count: "0" }, ...rows.slice(1),
+          ] }),
+        ].entries()) {
+          const request = await retry();
+          await finish(request, invalid());
+          assert.match(target.textContent, /診断結果を取得できませんでした/, path);
+          assert.doesNotMatch(target.textContent, /WARN はありません|fresh-receipt-|provider-only-marker|invalid-private/, path);
+          assert.equal(target.querySelector("table"), null, path);
+          const next = "fresh-receipt-" + (index + 1);
+          await finish(await retry(), response(200, healthy(next)));
+          confirmHealthy(next);
+        }
+        // Real transient failures preserve the last successful same-key receipt.
+        await finish(await retry(), response(503, {}));
+        confirmHealthy("fresh-receipt-4");
+        const offline = await retry();
+        await React.act(async () => offline.reject(new Error("offline")));
+        confirmHealthy("fresh-receipt-4");
+        // A newer manual refresh wins over an obsolete malformed response.
+        const obsolete = await retry();
+        const current = await retry();
+        assert.equal(obsolete.init.signal.aborted, true);
+        await finish(current, response(200, healthy("fresh-after-race")));
+        await finish(obsolete, new Response("{", { status: 200 }));
+        confirmHealthy("fresh-after-race");
+        // Denial clears the prior receipt and never offers the invalid-receipt retry.
+        await finish(await retry(), new Response("{", { status: 403 }));
+        assert.match(target.textContent, /閲覧権限がありません/, path);
+        assert.doesNotMatch(target.textContent, /fresh-after-race|WARN はありません|最新状態を再チェック/, path);
+        assert.equal(target.querySelector("table"), null, path);
+      } finally {
+        await React.act(async () => root.unmount());
+        target.remove();
+      }
+    }
+  } finally {
+    for (const [key, descriptor] of previous) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+    dom.window.close();
   }
 });
