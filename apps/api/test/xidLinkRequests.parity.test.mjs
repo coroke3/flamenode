@@ -270,6 +270,7 @@ test("SA-091 atomic rejection preserves committed outbox and rolls back CAS or l
     { name: "missing request", routes: ["dm", "channel"], race: "missing", commit: false, actorX: "x_staff" },
     { name: "late channel insert failure", routes: ["dm", "channel"], fault: "channel", commit: false, actorX: "x_staff" },
     { name: "late strict audit failure", routes: ["dm", "channel"], fault: "audit", commit: false, actorX: "x_staff" },
+    { name: "audit insert silently skipped", routes: ["dm", "channel"], fault: "audit-assertion", commit: false, actorX: "x_staff" },
   ];
   for (const scenario of cases) {
     const sqlite = createSqlite();
@@ -312,10 +313,18 @@ test("SA-091 atomic rejection preserves committed outbox and rolls back CAS or l
       } else if (scenario.race === "missing") {
         sqlite.exec("DELETE FROM x_identity_requests WHERE id='reject-fixture'");
       }
+      // Observe the exact injected trigger even when the transaction rolls back.
+      // A generic rejection before the intended late fault must not pass.
+      const faultHits = [];
+      sqlite.function("fixture_fault_hit", (stage) => { faultHits.push(stage); return 0; });
       if (scenario.fault === "channel") {
-        sqlite.exec("CREATE TRIGGER fail_channel BEFORE INSERT ON notification_outbox WHEN NEW.delivery_route='channel' BEGIN SELECT RAISE(ABORT, 'fixture channel failure'); END");
+        sqlite.exec("CREATE TRIGGER fail_channel BEFORE INSERT ON notification_outbox WHEN NEW.delivery_route='channel' BEGIN SELECT fixture_fault_hit('channel'); SELECT RAISE(ABORT, 'fixture channel failure'); END");
       } else if (scenario.fault === "audit") {
-        sqlite.exec("CREATE TRIGGER fail_audit BEFORE INSERT ON audit_logs WHEN NEW.table_name='x_identity_requests' BEGIN SELECT RAISE(ABORT, 'fixture audit failure'); END");
+        sqlite.exec("CREATE TRIGGER fail_audit BEFORE INSERT ON audit_logs WHEN NEW.table_name='x_identity_requests' BEGIN SELECT fixture_fault_hit('audit'); SELECT RAISE(ABORT, 'fixture audit failure'); END");
+      } else if (scenario.fault === "audit-assertion") {
+        // The INSERT itself succeeds with zero rows; the audit count assertion
+        // must fail closed and undo the earlier request and outbox mutations.
+        sqlite.exec("CREATE TRIGGER skip_audit BEFORE INSERT ON audit_logs WHEN NEW.table_name='x_identity_requests' BEGIN SELECT fixture_fault_hit('audit-assertion'); SELECT RAISE(IGNORE); END");
       }
       const beforeRequest = readRequest();
       const beforeOutbox = readOutbox();
@@ -365,6 +374,7 @@ test("SA-091 atomic rejection preserves committed outbox and rolls back CAS or l
         assert.deepEqual(readAudits(), beforeAudits, scenario.name);
         assert.equal(d1.stats.batches, 1, scenario.name);
       }
+      assert.deepEqual(faultHits, scenario.fault ? [scenario.fault] : [], scenario.name);
       assert.deepEqual(sqlite.prepare("SELECT * FROM x_identity_requests WHERE id='unrelated-fixture'").get(), beforeUnrelated, scenario.name);
     } finally {
       sqlite.close();
