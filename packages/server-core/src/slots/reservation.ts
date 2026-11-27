@@ -1128,13 +1128,18 @@ export async function extendSlotGroupCore(
           AND g."start_time" IS ce."start_time"
           AND COALESCE(g."sort_order", 0) = COALESCE(ce."sort_order", 0)
       ), alternate_items AS MATERIALIZED (
-        SELECT json_object('edge_id', edge_id, 'neighbor', json(neighbor_json)) AS item
+        -- Keep a bounded, edge-local invalid marker instead of dropping the
+        -- whole list. Do not expose the invalid slot JSON or let an
+        -- unselected alternative invalidate the mandatory snapshot.
+        SELECT CASE WHEN instr(neighbor_json, '"__invalid_projection":1') > 0
+          THEN json_object('edge_id', edge_id, 'neighbor', NULL, 'invalid_neighbor', 1)
+          ELSE json_object('edge_id', edge_id, 'neighbor', json(neighbor_json))
+        END AS item
         FROM alternate_neighbors WHERE edge_id IS NOT NULL
       )
       SELECT CASE
         WHEN NOT EXISTS (SELECT 1 FROM alternate_neighbors)
-          OR EXISTS (SELECT 1 FROM alternate_neighbors
-                     WHERE edge_id IS NULL OR instr(neighbor_json, '"__invalid_projection":1') > 0)
+          OR EXISTS (SELECT 1 FROM alternate_neighbors WHERE edge_id IS NULL)
           OR (SELECT COALESCE(SUM(length(CAST(item AS BLOB)) + 1), 0) + 2
               FROM alternate_items) > ${MAX_SLOT_GROUP_JSON_BYTES}
         THEN NULL
@@ -1228,14 +1233,19 @@ export async function extendSlotGroupCore(
   if (edge.id === snapshot.cte_edge_id) {
     candidate = parseJsonOrThrow<SlotRow | null>(snapshot.neighbor_json, null) ?? undefined;
   } else {
-    const alternatives = parseJsonOrThrow<{ edge_id: string; neighbor: SlotRow | null }[]>(
-      snapshot.alternate_neighbors_json, [],
-    );
+    const alternatives = parseJsonOrThrow<{
+      edge_id: string;
+      neighbor: SlotRow | null;
+      invalid_neighbor?: 1;
+    }[]>(snapshot.alternate_neighbors_json, []);
     const alternate = alternatives.find((entry) => entry.edge_id === edge.id);
     // A present null neighbor is authoritative. If the optional projection
     // did not fit, retain CURRENT's lookup rather than change valid behavior.
     // The remaining fallback is still an S3 gate, not a budget waiver.
     if (alternate) {
+      if (alternate.invalid_neighbor === 1) {
+        return failOutcome(503, GENERIC_MUTATION_ERROR_MESSAGE);
+      }
       candidate = alternate.neighbor ?? undefined;
     } else {
       callerQueryCount += 1;

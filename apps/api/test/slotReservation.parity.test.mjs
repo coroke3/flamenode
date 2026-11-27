@@ -1669,9 +1669,14 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
-  test("SEC #716: tied-edge fallback bounds its D1 row before mutation", async () => {
+  test("SEC #716: tied-edge invalid candidate is bounded before mutation, including fallback", async () => {
     for (const direction of ["forward", "backward"]) {
-      for (const label of ["x".repeat(180_000), "legacy\u0000label"]) {
+      for (const [label, omitAlternates] of [
+        ["x".repeat(180_000), false],
+        ["legacy\u0000label", false],
+        ["x".repeat(180_000), true],
+        ["legacy\u0000label", true],
+      ]) {
         const w = world();
         const group = {
           event_id: "ev1", start_time: NOW_SEC + 1100, sort_order: 0,
@@ -1691,23 +1696,37 @@ if (runUnderRootTsx(import.meta.url)) {
           sessionToken: token, userId: "u_owner", expires: NOW_SEC * 1000 + 60000,
         });
         let fallbackReads = 0;
+        let snapshotReads = 0;
         const prepare = w.d1.prepare.bind(w.d1);
         w.d1.prepare = sql => {
           const stmt = prepare(sql);
-          if (!sql.includes("WITH fallback_edge")) return stmt;
+          const isFallback = sql.includes("WITH fallback_edge");
+          const isSnapshot = sql.includes("alternate_neighbors AS MATERIALIZED");
+          if (!isFallback && !isSnapshot) return stmt;
           const bind = stmt.bind.bind(stmt);
           stmt.bind = (...values) => {
-            assert.equal(values.length, 4);
+            assert.equal(values.length, isFallback ? 4 : 6);
             const bound = bind(...values);
             const first = bound.first.bind(bound);
             bound.first = async () => {
               const row = await first();
-              fallbackReads++;
               assert.equal(row.invalid_snapshot, 0);
-              assert.deepEqual(JSON.parse(row.neighbor_json), { __invalid_projection: 1 });
-              assert.equal(row.neighbor_json.includes(label), false);
               assert.ok(Buffer.byteLength(JSON.stringify(row), "utf8") < 64 * 1024);
-              return row;
+              if (isFallback) {
+                fallbackReads++;
+                assert.deepEqual(JSON.parse(row.neighbor_json), { __invalid_projection: 1 });
+                assert.equal(row.neighbor_json.includes(label), false);
+                return row;
+              }
+              snapshotReads++;
+              const edgeId = direction === "forward" ? "tie_A" : "tie_a";
+              const alternate = JSON.parse(row.alternate_neighbors_json)
+                .find(entry => entry.edge_id === edgeId);
+              assert.deepEqual(alternate, { edge_id: edgeId, neighbor: null, invalid_neighbor: 1 });
+              assert.equal(row.alternate_neighbors_json.includes(label), false);
+              // Inject omission at the D1 boundary to exercise the retained
+              // fallback independently of the exact aggregate wire threshold.
+              return omitAlternates ? { ...row, alternate_neighbors_json: null } : row;
             };
             return bound;
           };
@@ -1739,15 +1758,64 @@ if (runUnderRootTsx(import.meta.url)) {
             ok: false,
             message: "枠の状態が変更されたか、安全な保存を完了できませんでした。画面を更新してもう一度お試しください。",
           });
-          assert.equal(fallbackReads, 1, "exercise the actual bounded alternate lookup");
-          // Characterize the residual S3 violation; do not claim it meets 3.
-          assert.equal(w.d1.stats.reads - reads, 4, "session + gate + snapshot + fallback");
+          assert.equal(snapshotReads, 1);
+          assert.equal(fallbackReads, omitAlternates ? 1 : 0);
+          // Injected optional omission still needs four attempted reads.
+          assert.equal(w.d1.stats.reads - reads, omitAlternates ? 4 : 3,
+            "session + gate + snapshot; bounded fallback only on omission");
           assert.equal(w.d1.stats.batches - batches, 0);
           assert.deepEqual(state(w), before);
           assert.deepEqual(wakes, []);
         } finally {
           thaw();
         }
+      }
+    }
+  });
+
+  test("SEC #716: an invalid unselected tied neighbor does not poison an occupied edge", async () => {
+    for (const direction of ["forward", "backward"]) {
+      const w = world();
+      const group = {
+        event_id: "ev1", start_time: NOW_SEC + 1100, sort_order: 0,
+        status: "reserved", reserved_by_user_id: "u_owner", x_user_id: "x_owner",
+        reserved_x_id_snapshot: "x_owner", reservation_group_id: "legacy_tied_group",
+        display_name: "Legacy", updated_at: 100, version: 1,
+      };
+      const ids = direction === "forward" ? ["tie_A", "tie_B", "tie_a"] : ["tie_A", "tie_a", "tie_b"];
+      for (const id of ids) insert(w.sqlite, "slots", { ...group, id, slot_label: id });
+      insert(w.sqlite, "slots", {
+        id: direction === "forward" ? "tie_AZ" : "tie_az",
+        event_id: "ev1", start_time: NOW_SEC + 1100, sort_order: 0,
+        status: "available", slot_label: "x".repeat(180_000), updated_at: 100, version: 1,
+      });
+      const token = "s3-unselected-invalid-neighbor";
+      insert(w.sqlite, "session", {
+        sessionToken: token, userId: "u_owner", expires: NOW_SEC * 1000 + 60000,
+      });
+      const before = state(w);
+      const reads = w.d1.stats.reads;
+      const batches = w.d1.stats.batches;
+      const thaw = freeze();
+      try {
+        const response = await app.request(SITE + "/api/events/ev1/slots/tie_A/extend", {
+          method: "POST",
+          headers: {
+            Origin: SITE, cookie: "__Secure-authjs.session-token=" + token,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ direction }),
+        }, { DB: w.d1, NEXT_PUBLIC_SITE_URL: SITE });
+        assert.equal(response.status, 409, direction);
+        assert.equal(response.headers.get("cache-control"), "private, no-store");
+        assert.deepEqual(await response.json(), {
+          ok: false, message: "拡張可能な隣接空き枠がありません。",
+        });
+        assert.equal(w.d1.stats.reads - reads, 3);
+        assert.equal(w.d1.stats.batches - batches, 0);
+        assert.deepEqual(state(w), before);
+      } finally {
+        thaw();
       }
     }
   });
