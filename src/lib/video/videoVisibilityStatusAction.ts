@@ -31,7 +31,7 @@ function isVisibilityPrecommitFailure(error: unknown): boolean {
   );
 }
 
-// Pinned Next 15.5.x recognizes digest, message and $typeof, and follows
+// Pinned Next 15.5.x recognizes digest, message and $$typeof, and follows
 // Error.cause. Inspect descriptors rather than invoking provider getters.
 const MAX_FRAMEWORK_CAUSE_DEPTH = 64;
 const MAX_FRAMEWORK_PROTOTYPE_DEPTH = 16;
@@ -66,15 +66,15 @@ function rethrowVideoStatusFrameworkControl(error: unknown): void | "unavailable
     if (depth >= MAX_FRAMEWORK_CAUSE_DEPTH || seen.has(error)) return "unavailable";
     seen.add(error);
 
-    let metadata: { digest: unknown; message: unknown; $typeof: unknown };
+    let metadata: { digest: unknown; message: unknown; $$typeof: unknown };
     try {
       const digest = readFrameworkData(error, "digest");
       const message = readFrameworkData(error, "message");
-      const marker = readFrameworkData(error, "$typeof");
+      const marker = readFrameworkData(error, "$$typeof");
       metadata = {
         digest: typeof digest === "string" ? digest : undefined,
         message: typeof message === "string" ? message : undefined,
-        $typeof: typeof marker === "symbol" ? marker : undefined,
+        $$typeof: typeof marker === "symbol" ? marker : undefined,
       };
     } catch {
       return "unavailable";
