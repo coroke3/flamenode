@@ -7,7 +7,7 @@ import { getAdminSecurity } from "../../api/adminDiagnostics.js";
 import { ConsolePageHeader } from "../../components/shared/ConsolePageHeader.js";
 import { OpsLink } from "../../components/shared/OpsLink.js";
 import { useApiResult, type OpsDataState } from "../useApiResult.js";
-import { DiagnosticStatusResults, normalizeDiagnosticFilter, type DiagnosticFilter } from "./DiagnosticStatusResults.js";
+import { DiagnosticErrorNotice, DiagnosticStatusResults, normalizeDiagnosticFilter, type DiagnosticFilter } from "./DiagnosticStatusResults.js";
 
 // CURRENT runSecurityChecks and the mounted Hono /ops/security?run=1
 // both return these ten check identities, including the two static INFO rows.
@@ -82,11 +82,11 @@ export function AdminSecurityView({
         : data.status === "ok" && data.data.error === null && data.data.ran && hasCompleteSecurityResults(data.data.results) ? (
           <DiagnosticStatusResults kind="security" results={data.data.results}
             initialFilter={initialFilter} onRefresh={onRefresh} />
-        ) : <p role="alert" style={{ marginTop: 20 }}>
+        ) : <DiagnosticErrorNotice>
           {data.status === "anonymous" ? "ログインが必要です。"
             : data.status === "forbidden" || data.status === "notFound" ? "閲覧権限がありません。"
             : "診断結果を取得できませんでした。"}
-        </p>}
+        </DiagnosticErrorNotice>}
     </div>
   );
 }

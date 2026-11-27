@@ -20,6 +20,23 @@ function badgeClass(status: DiagnosticResult["status"], kind: DiagnosticKind): s
     : "fn-badge-warning";
 }
 
+/** CURRENT health/security error panel, retaining sanitized TARGET messages. */
+export function DiagnosticErrorNotice({ children }: { children: React.ReactNode }): React.ReactElement {
+  return (
+    <div role="alert" style={{
+        marginTop: 20,
+        padding: "12px 16px",
+        background: "var(--bg-surface)",
+        border: "1px solid var(--color-danger, #e53e3e)",
+        borderRadius: "var(--radius-md)",
+        color: "var(--color-danger, #e53e3e)",
+        fontSize: 13,
+      }}>
+      {children}
+    </div>
+  );
+}
+
 export function DiagnosticStatusResults({
   kind, results, initialFilter = "all", onRefresh,
 }: {

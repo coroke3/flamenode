@@ -128,6 +128,50 @@ test("U01 health preserves deep and integrity navigation; errors never show diag
   assert.doesNotMatch(unsupported, /注意/);
 });
 
+test("MIG-0736 health and security errors retain CURRENT error panel without result data", () => {
+  const cases = [
+    [{ status: "unavailable" }, "診断結果を取得できませんでした。"],
+    [{ status: "anonymous" }, "ログインが必要です。"],
+    [{ status: "forbidden" }, "閲覧権限がありません。"],
+    [{ status: "notFound" }, "閲覧権限がありません。"],
+  ];
+  for (const [View, path, mode, rows] of [
+    [AdminHealthView, "/admin/health", { fullRun: false }, operationalResults],
+    [AdminSecurityView, "/admin/security?run=1", { shouldRun: true }, securityResults],
+  ]) {
+    const failedReceipt = { status: "ok", data: {
+      status: "all", ran: true, results: rows, error: "query_failed",
+    } };
+    const allCases = [...cases, [failedReceipt, "診断結果を取得できませんでした。"]];
+    if (View === AdminHealthView) allCases.push(
+      [{ status: "unsupported" }, "全体診断は現在利用できません。"]);
+    for (const [data, message] of allCases) {
+      const html = render(h(View, { data, ...mode, initialFilter: "all", onRefresh: () => {} }), path);
+      const dom = new JSDOM(html);
+      try {
+        const doc = dom.window.document;
+        const panels = doc.querySelectorAll('[role="alert"]');
+        assert.equal(panels.length, 1, path);
+        const panel = panels[0];
+        assert.equal(panel.tagName, "DIV");
+        assert.equal(panel.textContent.trim(), message);
+        // Read SSR's serialized style: jsdom may not parse CSS custom-property values.
+        const style = panel.getAttribute("style");
+        for (const declaration of [
+          "margin-top:20px", "padding:12px 16px", "background:var(--bg-surface)",
+          "border:1px solid var(--color-danger, #e53e3e)",
+          "border-radius:var(--radius-md)", "color:var(--color-danger, #e53e3e)", "font-size:13px",
+        ]) assert.ok(style?.split(";").includes(declaration), path + ": " + declaration);
+        assert.equal(doc.querySelectorAll("table").length, 0);
+        assert.equal(doc.querySelectorAll('nav[aria-label="状態フィルタ"]').length, 0);
+        assert.doesNotMatch(html, /query_failed/);
+      } finally {
+        dom.window.close();
+      }
+    }
+  }
+});
+
 test("MIG-0736 operational health requires all five distinct CURRENT check identities", async () => {
   const clean = operationalResults.map(result => result.status === "warn"
     ? { ...result, status: "ok", count: 0, samples: [] } : result);

@@ -8,7 +8,7 @@ import { AdminSectionTabs } from "../../components/shared/AdminSectionTabs.js";
 import { ConsolePageHeader } from "../../components/shared/ConsolePageHeader.js";
 import { OpsLink } from "../../components/shared/OpsLink.js";
 import { useApiResult, type OpsDataState } from "../useApiResult.js";
-import { DiagnosticStatusResults, normalizeDiagnosticFilter, type DiagnosticFilter } from "./DiagnosticStatusResults.js";
+import { DiagnosticErrorNotice, DiagnosticStatusResults, normalizeDiagnosticFilter, type DiagnosticFilter } from "./DiagnosticStatusResults.js";
 
 // CURRENT runOperationalHealthChecks and Hono GET /ops/health return these five
 // identities. A valid DTO with missing, duplicate or unexpected rows is not
@@ -77,13 +77,13 @@ export function AdminHealthView({
           <DiagnosticStatusResults kind="health" results={data.data.results}
             initialFilter={initialFilter} onRefresh={onRefresh} />
         ) : (
-          <p role="alert" style={{ marginTop: 20 }}>
+          <DiagnosticErrorNotice>
             {data.status === "unsupported" || (fullRun && data.status === "ok" && data.data.error === null && data.data.results.length === 0)
               ? "全体診断は現在利用できません。"
               : data.status === "anonymous" ? "ログインが必要です。"
               : data.status === "forbidden" || data.status === "notFound" ? "閲覧権限がありません。"
               : "診断結果を取得できませんでした。"}
-          </p>
+          </DiagnosticErrorNotice>
         )}
     </div>
   );
