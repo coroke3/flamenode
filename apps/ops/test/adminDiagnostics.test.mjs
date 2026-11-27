@@ -9,7 +9,7 @@ import { JSDOM } from "jsdom";
 import { getAdminHealth, getAdminSecurity, getAdminWorkers, getAdminIntegrity } from "../.test-dist/apps/ops/src/api/adminDiagnostics.js";
 import { AdminHealth, AdminHealthView } from "../.test-dist/apps/ops/src/routes/admin/AdminHealth.js";
 import { AdminSecurity, AdminSecurityView } from "../.test-dist/apps/ops/src/routes/admin/AdminSecurity.js";
-import { AdminWorkersView } from "../.test-dist/apps/ops/src/routes/admin/AdminWorkers.js";
+import { AdminWorkers, AdminWorkersView } from "../.test-dist/apps/ops/src/routes/admin/AdminWorkers.js";
 import { AdminIntegrity, AdminIntegrityView } from "../.test-dist/apps/ops/src/routes/admin/AdminIntegrity.js";
 import { DiagnosticStatusResults, normalizeDiagnosticFilter } from "../.test-dist/apps/ops/src/routes/admin/DiagnosticStatusResults.js";
 
@@ -1013,6 +1013,120 @@ test("MIG-0736 diagnostic history rejects obsolete run receipts and filter-only 
         await React.act(async () => root.unmount());
         target.remove();
       }
+    }
+  } finally {
+    for (const key of keys) {
+      const descriptor = previous.get(key);
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+    dom.window.close();
+  }
+});
+
+
+// Exercise the mounted refresh controller, rather than just handing a denial
+// to AdminWorkersView. The transport deliberately ignores cancellation.
+test("MIG-0736 Worker refresh rejects late receipts after authority loss", async () => {
+  const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://flamenode.test" });
+  const keys = ["window", "document", "navigator", "HTMLElement", "Node", "ResizeObserver", "IS_REACT_ACT_ENVIRONMENT"];
+  const previous = new Map(keys.map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  try {
+    for (const key of keys) {
+      Object.defineProperty(globalThis, key, {
+        configurable: true,
+        value: key === "IS_REACT_ACT_ENVIRONMENT" ? true
+          : key === "ResizeObserver" ? class { observe() {} disconnect() {} }
+          : dom.window[key],
+      });
+    }
+    const target = dom.window.document.createElement("div");
+    dom.window.document.body.append(target);
+    const root = createRoot(target);
+    const pending = [];
+    const fetchFn = (url, init) => new Promise(resolve => {
+      pending.push({ url, init, resolve });
+    });
+    const refresh = async () => {
+      const button = [...target.querySelectorAll("button")]
+        .find(node => node.textContent.trim() === "最新状態へ更新");
+      assert.ok(button, "refresh remains available");
+      const count = pending.length;
+      await React.act(async () => { button.click(); });
+      assert.equal(pending.length, count + 1);
+      const request = pending.at(-1);
+      assert.equal(request.url, "/api/admin-read/ops/workers");
+      assert.equal(request.init.method, "GET");
+      assert.equal(request.init.cache, "no-store");
+      assert.equal(request.init.credentials, "same-origin");
+      assert.equal(request.init.signal.aborted, false);
+      return request;
+    };
+    const finish = async (request, status, body) => {
+      await React.act(async () => { request.resolve(response(status, body)); });
+    };
+    const snapshot = label => ({ ...workerMonitoringFixture(), overallMessage: label });
+    const show = async (request, label) => {
+      await finish(request, 200, { snapshot: snapshot(label), error: null });
+      assert.ok(target.textContent.includes(label), label);
+      assert.equal(target.querySelectorAll("table").length, 3);
+    };
+    const assertNoSnapshot = (message, prior, late) => {
+      assert.ok([...target.querySelectorAll('[role="alert"]')]
+        .some(node => node.textContent.trim() === message), message);
+      assert.equal(target.querySelectorAll("table").length, 0);
+      for (const marker of [prior, late, "Queue wake 最終失敗", "sync_failed", "wake_failed"]) {
+        assert.equal(target.textContent.includes(marker), false, marker);
+      }
+    };
+    try {
+      await React.act(async () => {
+        root.render(h(MemoryRouter, { initialEntries: ["/admin/workers"] }, h(AdminWorkers, { fetchFn })));
+      });
+      assert.equal(pending.length, 1);
+      assert.match(target.textContent, /読み込み中/);
+      assert.equal(target.querySelectorAll("table").length, 0);
+      await show(pending[0], "private-worker-0");
+      const cases = [
+        [401, {}, "ログインが必要です。"],
+        [403, { redirect: "/dashboard" }, "閲覧権限がありません。"],
+        [404, {}, "閲覧権限がありません。"],
+        [501, {}, "監視機能は現在利用できません。"],
+      ];
+      for (const [i, [status, body, message]] of cases.entries()) {
+        const prior = "private-worker-" + i;
+        const late = "obsolete-worker-" + i;
+        const obsolete = await refresh();
+        const current = await refresh();
+        assert.equal(obsolete.init.signal.aborted, true);
+        await finish(current, status, body);
+        assertNoSnapshot(message, prior, late);
+        // Even a complete, well-formed older response must not restore tables.
+        await finish(obsolete, 200, { snapshot: snapshot(late), error: null });
+        assertNoSnapshot(message, prior, late);
+        await show(await refresh(), "private-worker-" + (i + 1));
+      }
+      // A shape-valid but incomplete current snapshot must also clear old data.
+      const obsolete = await refresh();
+      const current = await refresh();
+      assert.equal(obsolete.init.signal.aborted, true);
+      await finish(current, 200, {
+        snapshot: { ...snapshot("incomplete-worker"), jobs: [] }, error: null,
+      });
+      assertNoSnapshot("監視情報の取得に失敗しました。", "private-worker-4", "incomplete-worker");
+      await finish(obsolete, 200, { snapshot: snapshot("obsolete-incomplete"), error: null });
+      assertNoSnapshot("監視情報の取得に失敗しました。", "private-worker-4", "obsolete-incomplete");
+      await show(await refresh(), "recovered-worker");
+      // Unmount aborts the outstanding request as well.
+      const departing = await refresh();
+      await React.act(async () => root.unmount());
+      assert.equal(departing.init.signal.aborted, true);
+      await finish(departing, 200, { snapshot: snapshot("after-unmount"), error: null });
+      assert.equal(target.textContent, "");
+    } finally {
+      // unmount() is harmless after the successful explicit unmount above.
+      await React.act(async () => root.unmount());
+      target.remove();
     }
   } finally {
     for (const key of keys) {
