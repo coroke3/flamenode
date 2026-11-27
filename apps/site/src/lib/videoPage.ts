@@ -52,7 +52,7 @@ const PUBLIC_YOUTUBE_HOSTS = new Set(["youtube.com", "www.youtube.com", "m.youtu
 /** Public snapshot text is not an outbound URL authorization. Only absolute
  * web URLs may be linked; a "YouTube channel" additionally needs a trusted
  * YouTube host over HTTPS. Invalid/legacy values render as plain text instead. */
-function safePublicExternalUrl(value: string | null | undefined, youtubeChannel = false): string | null {
+function safePublicExternalUrl(value: unknown, youtubeChannel = false): string | null {
   if (typeof value !== "string") return null;
   const normalized = normalizeHttpUrl(value, { maxLength: 500 });
   if (normalized === null) return null;
@@ -64,6 +64,25 @@ function safePublicExternalUrl(value: string | null | undefined, youtubeChannel 
     : null;
 }
 
+/**
+ * Validate raw snapshot link values before the shared display normalizer trims
+ * controls or coerces non-strings (including singleton arrays) into URLs.
+ * Keep its legacy normalization behavior for the other display fields.
+ */
+function normalizeVideoDetailForBuild(payload: unknown) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const snapshot = payload as Parameters<typeof normalizeStaticVideoDetail>[0];
+  const raw = snapshot.video;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  return normalizeStaticVideoDetail({
+    ...snapshot,
+    video: {
+      ...raw,
+      creator_youtube_channel_url: safePublicExternalUrl(raw.creator_youtube_channel_url, true),
+      music_reference_url: safePublicExternalUrl(raw.music_reference_url),
+    },
+  });
+}
 
 export function buildVideoPages(
   payload: unknown,
@@ -73,7 +92,7 @@ export function buildVideoPages(
   relatedAllowedIds: ReadonlySet<string> | null = null,
   allowedEventIds: ReadonlySet<string> | null = null,
 ): VideoPage[] {
-  const normalized = normalizeStaticVideoDetail((payload ?? {}) as Parameters<typeof normalizeStaticVideoDetail>[0]);
+  const normalized = normalizeVideoDetailForBuild(payload);
   if (!normalized || normalized.video.visibility_status !== "public") throw new VideoPageBuildError(key);
   // Reject a valid-digest snapshot whose entity ID disagrees with its manifest-authorized key.
   // Otherwise an allowed object could publish a page under a different route (including its alias).
@@ -130,14 +149,14 @@ export function buildVideoPages(
       xUserId: creatorId,
       iconUrl: cachedGoogleImageUrl(video.creator_icon_url),
       profileHref: creatorHref,
-      youtubeChannelUrl: safePublicExternalUrl(video.creator_youtube_channel_url, true),
+      youtubeChannelUrl: video.creator_youtube_channel_url ?? null,
     },
     publishedLabel: video.scheduled_time ? formatUnix(video.scheduled_time, { dateOnly: true }) : null,
     thumbnailUrl: youtubeId ? youtubeThumbUrl(youtubeId, "maxresdefault") : null,
     hasYoutube: Boolean(youtubeId),
     music: video.music,
     credit: video.credit,
-    musicReferenceUrl: safePublicExternalUrl(video.music_reference_url),
+    musicReferenceUrl: video.music_reference_url,
     introComment: video.intro_comment,
     softwareLabel: vm.softwareLabel,
     highlights: video.highlights,
@@ -263,7 +282,7 @@ export async function loadVideoPagesForBuild(
     eventDetails.set(eventId, publicEventDetail(eventPayload, eventId));
   };
   const buildWithPlaylist = async (payload: unknown, key: string): Promise<void> => {
-    const normalized = normalizeStaticVideoDetail((payload ?? {}) as Parameters<typeof normalizeStaticVideoDetail>[0]);
+    const normalized = normalizeVideoDetailForBuild(payload);
     const references = normalized
       ? [...new Set([...normalized.eventIds, ...normalized.publicEvents.map((event) => event.id)])]
       : [];
@@ -274,7 +293,7 @@ export async function loadVideoPagesForBuild(
     const eventId = built[0]?.data.primaryEvent?.id;
     // Normalize for rendering, but never let the generic string/number coercers
     // turn arrays or objects into a valid authorization key or future timestamp.
-    const video = normalizeStaticVideoDetail((payload ?? {}) as Parameters<typeof normalizeStaticVideoDetail>[0])?.video;
+    const video = normalized?.video;
     const rawVideo = payload && typeof payload === "object" && !Array.isArray(payload)
       ? (payload as { video?: unknown }).video
       : null;

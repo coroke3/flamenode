@@ -574,6 +574,12 @@ test("U12: public video external links use the CURRENT URL boundary in both buil
   const pad = (url, length) => url + "a".repeat(length - url.length);
   const expand = (url) => url + "界".repeat(500 - url.length);
   const cases = [
+    ["leading tab", "\t" + music, "\t" + channel, null, null],
+    ["trailing newline", music + "\n", channel + "\n", null, null],
+    ["surrounding CR", "\r" + music + "\r", "\r" + channel + "\r", null, null],
+    ["singleton array", [music], [channel], null, null],
+    ["malformed object", { toString: null }, { toString: null }, null, null],
+    ["absent URL", null, null, null, null],
     ["leading NUL", "\u0000" + music, "\u0000" + channel, null, null],
     ["trailing C0", music + "\u001f", channel + "\u001f", null, null],
     ["embedded tab", "https://exa\tmple.com/m", "https://www.you\ttube.com/@creator", null, null],
