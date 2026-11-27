@@ -1544,6 +1544,69 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+  test("S3 #725: tied legacy group edges preserve CURRENT neighbor and three reads", async () => {
+    for (const direction of ["forward", "backward"]) {
+      for (const availableBetween of [true, false]) {
+        const a = world();
+        const b = world();
+        for (const w of [a, b]) {
+          const group = {
+            event_id: "ev1", start_time: NOW_SEC + 1100, sort_order: 0,
+            status: "reserved", reserved_by_user_id: "u_owner", x_user_id: "x_owner",
+            reserved_x_id_snapshot: "x_owner", reservation_group_id: "legacy_tied_group",
+            display_name: "Legacy", updated_at: 100, version: 1,
+          };
+          for (const id of ["tie_A", "tie_a"]) {
+            insert(w.sqlite, "slots", { ...group, id, slot_label: id });
+          }
+          if (availableBetween) {
+            insert(w.sqlite, "slots", {
+              id: "tie_Z", event_id: "ev1", start_time: NOW_SEC + 1100,
+              sort_order: 0, status: "available", slot_label: "Between",
+              updated_at: 100, version: 1,
+            });
+          }
+        }
+        const token = "s3-tied-group-session";
+        insert(b.sqlite, "session", {
+          sessionToken: token, userId: "u_owner", expires: NOW_SEC * 1000 + 60000,
+        });
+        const args = { eventId: "ev1", slot_id: "tie_A", direction };
+        const thawA = freeze();
+        let expected;
+        try {
+          expected = await runCurrent(a, "u_owner", "extend", args);
+        } finally {
+          thawA();
+        }
+        const reads = b.d1.stats.reads;
+        const batches = b.d1.stats.batches;
+        const thawB = freeze();
+        try {
+          const response = await app.request(SITE + "/api/events/ev1/slots/tie_A/extend", {
+            method: "POST",
+            headers: {
+              Origin: SITE, cookie: "__Secure-authjs.session-token=" + token,
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({ direction }),
+          }, { DB: b.d1, NEXT_PUBLIC_SITE_URL: SITE });
+          const result = await response.json();
+          assert.equal(expected.result.ok, availableBetween, direction + " CURRENT");
+          if (availableBetween) assert.equal(expected.result.slotId, "tie_Z");
+          assert.equal(response.status, availableBetween ? 200 : 409);
+          assert.equal(response.headers.get("cache-control"), "private, no-store");
+          assert.deepEqual(result, expected.result, direction + " result parity");
+          assert.deepEqual(state(b), state(a), direction + " atomic state parity");
+          assert.equal(b.d1.stats.reads - reads, 3, direction + " tied-edge S3 read budget");
+          assert.equal(b.d1.stats.batches - batches, availableBetween ? 1 : 0);
+        } finally {
+          thawB();
+        }
+      }
+    }
+  });
+
   test("S3 #725: real HTTPS cookie checks latest major ToS and recovery without stale acceptance", async () => {
     const w = world();
     insert(w.sqlite, "session", {

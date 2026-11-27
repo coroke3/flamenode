@@ -144,18 +144,28 @@ function invalidJsonSnapshot(snapshot: object): boolean {
 // including the *second* layer of escaping for embedded JSON strings. This
 // prevents a 37KiB SQL string-row from becoming a >64KiB D1 transport row.
 // Reject all oversized columns atomically with an explicit sentinel.
-function boundedFirstD1SnapshotSql(query: string, fields: readonly string[]): string {
+function boundedFirstD1SnapshotSql(
+  query: string,
+  fields: readonly string[],
+  optionalField?: string,
+): string {
   const items = fields.map(field => `p."${field}"`);
   const total = items.map(item =>
     `length(CAST(json_quote(${item}) AS BLOB))`).join(" + ");
   const projection = fields.map((field, index) =>
     `CASE WHEN sz."bytes" > ${MAX_FIRST_D1_SNAPSHOT_BYTES} THEN NULL ELSE ${items[index]} END AS "${field}"`,
   ).join(", ");
+  // An optional optimization must not make an otherwise valid mandatory
+  // snapshot fail the transport budget. Keep its value only if both fit.
+  const optionalProjection = optionalField === undefined ? "" :
+    `, CASE WHEN sz."bytes" + length(CAST(json_quote(p."${optionalField}") AS BLOB))
+          > ${MAX_FIRST_D1_SNAPSHOT_BYTES} THEN NULL
+          ELSE p."${optionalField}" END AS "${optionalField}"`;
   return `WITH projected_snapshot AS MATERIALIZED (${query}),
     snapshot_bytes AS MATERIALIZED (
       SELECT (${total}) AS "bytes" FROM projected_snapshot p
     )
-    SELECT ${projection},
+    SELECT ${projection}${optionalProjection},
            CASE WHEN sz."bytes" > ${MAX_FIRST_D1_SNAPSHOT_BYTES}
              THEN 1 ELSE 0 END AS "invalid_snapshot"
     FROM projected_snapshot p CROSS JOIN snapshot_bytes sz`;
@@ -1091,13 +1101,44 @@ export async function extendSlotGroupCore(
         WHERE s."event_id" = ce."event_id" AND ${neighborConditionSql("s", "ce", input.direction)}
         ORDER BY ${neighborOrderSql("s", input.direction)}
         LIMIT 1
-      ) n) AS neighbor_json
+      ) n) AS neighbor_json,
+      -- CURRENT uses JS localeCompare for the group's edge, while the
+      -- neighbor lookup uses SQLite binary order. Only equal-time/order
+      -- group members can disagree with cte_edge. Project their corresponding
+      -- SQL neighbors in this same snapshot, bounded by the existing group
+      -- JSON and outer wire limits. Omit the optional projection on overflow.
+      (WITH alternate_neighbors AS MATERIALIZED (
+        SELECT CASE WHEN ${invalidSqlText('g."id"', MAX_LEGACY_RECORD_ID_BYTES)}
+                    THEN NULL ELSE g."id" END AS edge_id,
+               (SELECT ${slotJsonObjectSql("n")}
+                  FROM "slots" n
+                 WHERE n."event_id" = g."event_id"
+                   AND ${neighborConditionSql("n", "g", input.direction)}
+                 ORDER BY ${neighborOrderSql("n", input.direction)}
+                 LIMIT 1) AS neighbor_json
+        FROM group_rows g CROSS JOIN cte_edge ce
+        WHERE g."id" <> ce."id"
+          AND g."start_time" IS ce."start_time"
+          AND COALESCE(g."sort_order", 0) = COALESCE(ce."sort_order", 0)
+      ), alternate_items AS MATERIALIZED (
+        SELECT json_object('edge_id', edge_id, 'neighbor', json(neighbor_json)) AS item
+        FROM alternate_neighbors WHERE edge_id IS NOT NULL
+      )
+      SELECT CASE
+        WHEN NOT EXISTS (SELECT 1 FROM alternate_neighbors)
+          OR EXISTS (SELECT 1 FROM alternate_neighbors
+                     WHERE edge_id IS NULL OR instr(neighbor_json, '"__invalid_projection":1') > 0)
+          OR (SELECT COALESCE(SUM(length(CAST(item AS BLOB)) + 1), 0) + 2
+              FROM alternate_items) > ${MAX_SLOT_GROUP_JSON_BYTES}
+        THEN NULL
+        ELSE (SELECT json_group_array(json(item)) FROM alternate_items)
+      END) AS alternate_neighbors_json
   `;
   const snapshot = await rawDb
     .prepare(boundedFirstD1SnapshotSql(query, [
       "event_json", "anchor_json", "approved_x_json", "staff_json",
       "group_json", "cte_edge_id", "neighbor_json",
-    ]))
+    ], "alternate_neighbors_json"))
     .bind(input.slotId, input.eventId, input.eventId, ctx.authUserId, input.eventId, ctx.authUserId)
     .first<{
       event_json: string | null;
@@ -1107,6 +1148,7 @@ export async function extendSlotGroupCore(
       group_json: string | null;
       cte_edge_id: string | null;
       neighbor_json: string | null;
+      alternate_neighbors_json: string | null;
     }>();
   if (!snapshot || invalidJsonSnapshot(snapshot)) {
     return failOutcome(503, GENERIC_MUTATION_ERROR_MESSAGE);
@@ -1174,10 +1216,21 @@ export async function extendSlotGroupCore(
   }
 
   const edge = input.direction === "backward" ? groupRows[0]! : groupRows[groupRows.length - 1]!;
-  const candidate =
-    edge.id === snapshot.cte_edge_id
-      ? parseJsonOrThrow<SlotRow | null>(snapshot.neighbor_json, null) ?? undefined
+  let candidate: SlotRow | undefined;
+  if (edge.id === snapshot.cte_edge_id) {
+    candidate = parseJsonOrThrow<SlotRow | null>(snapshot.neighbor_json, null) ?? undefined;
+  } else {
+    const alternatives = parseJsonOrThrow<{ edge_id: string; neighbor: SlotRow | null }[]>(
+      snapshot.alternate_neighbors_json, [],
+    );
+    const alternate = alternatives.find((entry) => entry.edge_id === edge.id);
+    // A present null neighbor is authoritative. If the optional projection
+    // did not fit, retain CURRENT's lookup rather than change valid behavior.
+    // The remaining fallback is still an S3 gate, not a budget waiver.
+    candidate = alternate
+      ? alternate.neighbor ?? undefined
       : await loadOrderedNeighborFallback(db, edge, input.direction);
+  }
   if (!candidate || candidate.status !== "available") {
     return failOutcome(409, "拡張可能な隣接空き枠がありません。");
   }
