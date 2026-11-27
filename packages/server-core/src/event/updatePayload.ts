@@ -4,7 +4,7 @@ import { and, eq, or } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { ServerCoreDb } from "../db.ts";
 import type { WriteAuditLogInput } from "../audit/types.ts";
-import { planAtomicAuditMutationBudget } from "../audit/mutate.ts";
+import { planAtomicAuditMutationBudget, type AtomicAuditMutationInput } from "../audit/mutate.ts";
 import { MAX_STAGE_PERMISSION_QUESTIONS } from "@flamenode/domain/event/limits";
 import {
   buildVideoFormSettingsJson,
@@ -382,4 +382,56 @@ export function buildStageQuestionD1MutationBatch(input: {
     audits,
     budget,
   };
+}
+
+/** SA-023 U03s: combine caller-owned event/Queue/other-family DML with a
+ * validated stage subplan. No DB access or mutation takes place here.
+ * Caller MUST supply exact, authorized, scoped server snapshots and
+ * an *actual* request-wide pre-mutation logical D1 read count.
+ * The returned object goes to ONE mutateWithAudit invocation. */
+export function combineEventStageD1MutationBatch(input: {
+  base: Pick<AtomicAuditMutationInput,
+    "mutationStatements" | "expectedMutationChanges" | "audits" |
+    "preMutationAssertions" | "postMutationAssertions" | "postAuditStatements" | "preloaded">;
+  stage: {
+    ok: true;
+    mutationStatements: BatchItem<"sqlite">[];
+    expectedMutationChanges: number[];
+    audits: WriteAuditLogInput[];
+  };
+  callerQueryCount: number;
+}):
+  | { ok: false; reason: "invalid_base" | "query_budget" }
+  | {
+      ok: true;
+      plan: Pick<AtomicAuditMutationInput,
+        "mutationStatements" | "expectedMutationChanges" | "audits" |
+        "preMutationAssertions" | "postMutationAssertions" |
+        "postAuditStatements" | "preloaded" | "callerQueryCount">;
+      budget: ReturnType<typeof planAtomicAuditMutationBudget>;
+    } {
+  const baseExpected = input.base.expectedMutationChanges;
+  if (!Array.isArray(baseExpected) ||
+      baseExpected.length !== input.base.mutationStatements.length ||
+      input.stage.expectedMutationChanges.length !== input.stage.mutationStatements.length ||
+      [...baseExpected, ...input.stage.expectedMutationChanges].some(
+        value => !Number.isSafeInteger(value) || value < 0
+      ) ||
+      [...input.base.audits, ...input.stage.audits].some(audit => audit.strict !== true) ||
+      !Number.isSafeInteger(input.callerQueryCount) || input.callerQueryCount < 0) {
+    return { ok: false, reason: "invalid_base" };
+  }
+  const plan = {
+    mutationStatements: [...input.base.mutationStatements, ...input.stage.mutationStatements],
+    expectedMutationChanges: [...baseExpected, ...input.stage.expectedMutationChanges],
+    audits: [...input.base.audits, ...input.stage.audits],
+    preMutationAssertions: input.base.preMutationAssertions,
+    postMutationAssertions: input.base.postMutationAssertions,
+    postAuditStatements: input.base.postAuditStatements,
+    preloaded: input.base.preloaded,
+    callerQueryCount: input.callerQueryCount,
+  };
+  const budget = planAtomicAuditMutationBudget(plan);
+  if (!budget.withinLimit) return { ok: false, reason: "query_budget" };
+  return { ok: true, plan, budget };
 }

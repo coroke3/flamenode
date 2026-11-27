@@ -2168,3 +2168,96 @@ test("MIG-0652 U03r: stage insert IDs must be fresh and unique, retained updates
   ]);
   assert.equal(f.d1.stats.batches, 0);
 });
+
+/** U03s: event CAS and stage CAS must share one audited D1 transaction. */
+async function eventStageCombinedSqliteFixture() {
+  const f = stageUpdateSqliteFixture();
+  const { and, eq } = await import("drizzle-orm");
+  const { buildStageQuestionD1MutationBatch, combineEventStageD1MutationBatch } =
+    await import("@flamenode/server-core/event/updatePayload");
+  const eventBefore = f.sqlite.prepare("SELECT * FROM events WHERE id = ?").get(event.id);
+  const eventAfter = { ...eventBefore, title: "Event updated", updated_at: eventBefore.updated_at + 1 };
+  const stageNext = { ...f.before, id: "ignored_regenerated", label: "Stage updated",
+    updated_at: f.before.updated_at + 1 };
+  const stage = buildStageQuestionD1MutationBatch({
+    db: f.db, eventId: event.id, actorUserId: "u_admin", callerQueryCount: 18,
+    existing: [f.before], next: [stageNext], deletedAnswers: [],
+  });
+  assert.equal(stage.ok, true);
+  const base = {
+    mutationStatements: [f.db.update(schema.events)
+      .set({ title: eventAfter.title, updated_at: eventAfter.updated_at })
+      .where(and(eq(schema.events.id, eventBefore.id),
+        eq(schema.events.updated_at, eventBefore.updated_at)))],
+    expectedMutationChanges: [1],
+    audits: [{
+      table_name: "events", target_id: event.id, operation: "UPDATE",
+      before: { ...eventBefore }, after: eventAfter, actor_user_id: "u_admin",
+      context: "event-update:basic", retention_class: "normal", strict: true,
+    }],
+  };
+  const combined = combineEventStageD1MutationBatch({
+    base, stage, callerQueryCount: 18,
+  });
+  assert.equal(combined.ok, true);
+  assert.deepEqual(combined.plan.expectedMutationChanges, [1, 1]);
+  assert.equal(combined.budget.mutationStatementCount, 2);
+  return { ...f, eventBefore, eventAfter, stage, base, combined };
+}
+
+test("MIG-0652 U03s SQLite: event CAS and stage CAS commit in one strict-audit D1 batch", async () => {
+  const f = await eventStageCombinedSqliteFixture();
+  const auditIds = await mutateWithAudit(f.db, f.combined.plan);
+  assert.equal(auditIds.length, 2);
+  assert.equal(f.d1.stats.batches, 1);
+  assert.equal(f.sqlite.prepare("SELECT title FROM events WHERE id = ?").get(event.id).title,
+    "Event updated");
+  assert.equal(f.sqlite.prepare("SELECT label FROM event_custom_questions WHERE id = ?")
+    .get(f.before.id).label, "Stage updated");
+  assert.deepEqual(f.sqlite.prepare("SELECT table_name FROM audit_logs ORDER BY rowid")
+    .all().map(row => row.table_name), ["events", "event_custom_questions"]);
+});
+
+test("MIG-0652 U03s SQLite: stale stage CAS rolls back already successful event update", async () => {
+  const f = await eventStageCombinedSqliteFixture();
+  f.sqlite.prepare("UPDATE event_custom_questions SET updated_at = updated_at + 2 WHERE id = ?")
+    .run(f.before.id);
+  await assert.rejects(mutateWithAudit(f.db, f.combined.plan));
+  assert.equal(f.sqlite.prepare("SELECT title FROM events WHERE id = ?").get(event.id).title,
+    f.eventBefore.title);
+  assert.equal(f.sqlite.prepare("SELECT label FROM event_custom_questions WHERE id = ?")
+    .get(f.before.id).label, f.before.label);
+  assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+  assert.equal(f.d1.stats.batches, 1);
+});
+
+test("MIG-0652 U03s SQLite: stale event CAS aborts stage mutation and all audits", async () => {
+  const f = await eventStageCombinedSqliteFixture();
+  f.sqlite.prepare("UPDATE events SET updated_at = updated_at + 2 WHERE id = ?")
+    .run(event.id);
+  await assert.rejects(mutateWithAudit(f.db, f.combined.plan));
+  assert.equal(f.sqlite.prepare("SELECT label FROM event_custom_questions WHERE id = ?")
+    .get(f.before.id).label, f.before.label);
+  assert.equal(f.sqlite.prepare("SELECT title FROM events WHERE id = ?").get(event.id).title,
+    f.eventBefore.title);
+  assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+  assert.equal(f.d1.stats.batches, 1);
+});
+
+test("MIG-0652 U03s: combined event-stage budget fails closed for overspend and invalid audits", async () => {
+  const f = await eventStageCombinedSqliteFixture();
+  const { combineEventStageD1MutationBatch } =
+    await import("@flamenode/server-core/event/updatePayload");
+  assert.deepEqual(combineEventStageD1MutationBatch({
+    base: f.base, stage: f.stage, callerQueryCount: 50,
+  }), { ok: false, reason: "query_budget" });
+  assert.deepEqual(combineEventStageD1MutationBatch({
+    base: { ...f.base, audits: [{ ...f.base.audits[0], strict: false }] },
+    stage: f.stage, callerQueryCount: 18,
+  }), { ok: false, reason: "invalid_base" });
+  assert.deepEqual(combineEventStageD1MutationBatch({
+    base: { ...f.base, expectedMutationChanges: [] },
+    stage: f.stage, callerQueryCount: 18,
+  }), { ok: false, reason: "invalid_base" });
+  assert.equal(f.d1.stats.batches, 0);
+});
