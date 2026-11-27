@@ -95,7 +95,7 @@ export function resolveWranglerCli(root = process.cwd()) {
   return path.join(root, "node_modules", "wrangler", "bin", "wrangler.js");
 }
 
-export function runRemoteD1Command(sql, { scriptName, root = process.cwd() }) {
+export function runRemoteD1Command(sql, { scriptName, root = process.cwd(), redactFailureDetails = false }) {
   const databaseTarget = resolveRemoteD1ExecuteTarget(root);
   const normalized = normalizeRemoteD1Sql(sql);
   const wranglerCli = resolveWranglerCli(root);
@@ -116,18 +116,23 @@ export function runRemoteD1Command(sql, { scriptName, root = process.cwd() }) {
         cwd: root,
         encoding: "utf8",
         maxBuffer: 16 * 1024 * 1024,
+        // Explicit pipes prevent execFileSync from echoing child stderr before
+        // a privacy-sensitive caller can report its own fixed failure message.
+        ...(redactFailureDetails ? { stdio: "pipe" } : {}),
       },
     );
     return parseWranglerD1Json(output);
   } catch (error) {
-    console.error(
-      `[${scriptName}] remote D1 query failed: ${formatCommandFailure(error)}`,
-    );
+    if (!redactFailureDetails) {
+      console.error(
+        `[${scriptName}] remote D1 query failed: ${formatCommandFailure(error)}`,
+      );
+    }
     throw error;
   }
 }
 
-export function runRemoteD1File(sqlPath, { scriptName, root = process.cwd() }) {
+export function runRemoteD1File(sqlPath, { scriptName, root = process.cwd(), redactFailureDetails = false }) {
   const sql = normalizeRemoteD1Sql(fs.readFileSync(sqlPath, "utf8"));
-  return runRemoteD1Command(sql, { scriptName, root });
+  return runRemoteD1Command(sql, { scriptName, root, redactFailureDetails });
 }

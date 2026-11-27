@@ -154,6 +154,10 @@ test("SEC-726 explicit remote read-only path uses argument-vector Wrangler and a
     fs.writeFileSync(path.join(dir, "node_modules/wrangler/bin/wrangler.js"), [
       'const fs = require("node:fs");',
       'fs.writeFileSync(process.env.SEC726_CAPTURE, JSON.stringify(process.argv.slice(2)));',
+      'const mode = process.env.SEC726_PROVIDER_CASE;',
+      'if (mode) process.stderr.write("PRIVATE_STDERR_selected_identity\\n");',
+      'if (mode === "nonzero") { process.stdout.write("PRIVATE_STDOUT_selected_identity\\n"); process.exit(7); }',
+      'if (mode === "malformed-json") { process.stdout.write("[PRIVATE_STDOUT_selected_identity"); process.exit(0); }',
       'const count = process.env.SEC726_MALFORMED === "1" ? "  " : 0;',
       'process.stdout.write(JSON.stringify([{results:[{unsafe_selected_legacy_ids:count}]}]));',
     ].join("\n"));
@@ -161,6 +165,7 @@ test("SEC-726 explicit remote read-only path uses argument-vector Wrangler and a
       'database_id = "11111111-1111-4111-8111-111111111111"\n');
     const env = {
       ...process.env, SEC726_CAPTURE: capture,
+      NODE_NO_WARNINGS: "1",
       FLAMENODE_D1_DATABASE_ID: "", CLOUDFLARE_D1_DATABASE_ID: "",
     };
     const result = spawnSync(process.execPath, [SCRIPT, "--remote"], {
@@ -180,6 +185,22 @@ test("SEC-726 explicit remote read-only path uses argument-vector Wrangler and a
     assert.equal(malformed.status, 2);
     assert.match(malformed.stderr, /BLOCKED/);
     assert.doesNotMatch(malformed.stdout, /unsafe_selected_legacy_ids=0/);
+    for (const mode of ["nonzero", "malformed-json"]) {
+      const failed = spawnSync(process.execPath, [SCRIPT, "--remote"], {
+        cwd: dir, env: { ...env, SEC726_PROVIDER_CASE: mode }, encoding: "utf8",
+      });
+      assert.equal(failed.status, 2, mode);
+      assert.equal(failed.stdout, "", mode);
+      assert.equal(failed.stderr,
+        "[check:sec-726-active-x] BLOCKED: unable to verify selected identity safety.\n", mode);
+      assert.doesNotMatch(failed.stdout + failed.stderr, /PRIVATE_|selected_identity/, mode);
+    }
+    const noisySuccess = spawnSync(process.execPath, [SCRIPT, "--remote"], {
+      cwd: dir, env: { ...env, SEC726_PROVIDER_CASE: "success-stderr" }, encoding: "utf8",
+    });
+    assert.equal(noisySuccess.status, 0);
+    assert.equal(noisySuccess.stdout, result.stdout, "successful aggregate output stays unchanged");
+    assert.equal(noisySuccess.stderr, "", "successful child stderr must not disclose provider details");
     fs.rmSync(capture);
     fs.writeFileSync(path.join(dir, "wrangler.toml"),
       'database_id = "00000000-0000-0000-0000-000000000000"\n');

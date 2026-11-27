@@ -43,7 +43,7 @@ function inspect(mode) {
   if (!fs.existsSync(SQL_PATH)) throw new Error("SEC-726 aggregate SQL file is missing.");
   if (mode.remote) {
     assertRemoteD1Configured(SCRIPT, ROOT);
-    return runRemoteD1File(SQL_PATH, { scriptName: SCRIPT, root: ROOT });
+    return runRemoteD1File(SQL_PATH, { scriptName: SCRIPT, root: ROOT, redactFailureDetails: true });
   }
   if (!fs.existsSync(mode.file)) throw new Error("Local SQLite database does not exist.");
   const db = new DatabaseSync(mode.file, { readOnly: true });
