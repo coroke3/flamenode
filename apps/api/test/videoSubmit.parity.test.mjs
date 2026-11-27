@@ -883,7 +883,7 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
-  test("U03a SA-088: CURRENT reservation group denial order and absolute cap, no writes", async () => {
+  test("U03a SA-088: CURRENT reservation group denial order and absolute cap, no writes (including preflight)", async () => {
     const { submitSlotVideo } = await import("../../../src/lib/actions/video/submitSlotVideo.ts");
     const inconsistent = "連続枠の予約者情報が不整合です。運営へ連絡してください。";
     const cases = [
@@ -905,6 +905,40 @@ if (runUnderRootTsx(import.meta.url)) {
         message: "連続枠に別の作品が紐づいています。" },
       { name: "gap exceeds configured part boundary", sibling: { start_time: 1901 },
         message: "連続していない枠をまとめて提出できません。" },
+      // The same late group denial is deliberately present in each preflight fixture.
+      // These cases lock CURRENT ordering without adding a new deadline or receipt policy.
+      { name: "archived duplicate precedes invalid member JSON and group denial",
+        duplicateStatus: "archived", youtubeUrl: "https://youtu.be/dQw4w9WgXcQ",
+        form: { is_collab: "true", members_json: "not-json" },
+        sibling: { reserved_by_user_id: "u_notos" },
+        message: "このYouTube動画は既に登録されています。" },
+      { name: "voided duplicate does not mask invalid member JSON",
+        duplicateStatus: "voided", youtubeUrl: "https://youtu.be/dQw4w9WgXcQ",
+        form: { is_collab: "true", members_json: "not-json" },
+        sibling: { reserved_by_user_id: "u_notos" },
+        message: "合作メンバーの JSON が不正です。" },
+      { name: "existing linked video is excluded from duplicate lookup",
+        duplicateStatus: "public", youtubeUrl: "https://youtu.be/dQw4w9WgXcQ",
+        anchor: { video_id: "v_group_other" },
+        form: { is_collab: "true", members_json: "not-json" },
+        sibling: { video_id: "v_group_other", reserved_by_user_id: "u_notos" },
+        message: "合作メンバーの JSON が不正です。" },
+      { name: "required custom answer precedes missing music and group denial",
+        question: true, requiredFields: ["music"],
+        sibling: { reserved_by_user_id: "u_notos" },
+        message: "枠応募理由を入力してください。" },
+      { name: "answered custom question reaches required music before group denial",
+        question: true, requiredFields: ["music"],
+        form: { "custom_answer:ev_closed:slot_reason": "応募します" },
+        sibling: { reserved_by_user_id: "u_notos" },
+        message: "「使用楽曲」は必須です。" },
+      { name: "forged form part cannot satisfy missing authoritative part",
+        requiredFields: ["part"], form: { part: "偽の部" },
+        sibling: { reserved_by_user_id: "u_notos" },
+        message: "「部」は必須です。" },
+      { name: "configured slot part satisfies required part even with empty form part",
+        requiredFields: ["part"], parts: ["第1部"], form: { part: "" },
+        sibling: { reserved_by_user_id: "u_notos" }, message: inconsistent },
       { name: "single already-submitted slot", count: 1,
         anchor: { reservation_group_id: null, status: "submitted", video_id: "v_group_other" },
         message: "予約中の枠だけ作品を提出できます。" },
@@ -916,11 +950,22 @@ if (runUnderRootTsx(import.meta.url)) {
       for (const scenario of cases) {
         const w = seedWorld();
         try {
-          w.sqlite.prepare("UPDATE events SET slot_part_gap_minutes=15, max_slots_per_video=1, parts_json=NULL, required_video_fields_json=NULL WHERE id='ev_closed'").run();
-          if (scenario.anchor?.video_id || scenario.sibling?.video_id) {
+          w.sqlite.prepare("UPDATE events SET slot_part_gap_minutes=15, max_slots_per_video=1, parts_json=?, required_video_fields_json=? WHERE id='ev_closed'")
+            .run(scenario.parts ? JSON.stringify(scenario.parts) : null,
+              scenario.requiredFields ? JSON.stringify(scenario.requiredFields) : null);
+          if (scenario.question) {
+            insert(w.sqlite, "event_custom_questions", {
+              id: "q_slot_reason", event_id: "ev_closed", question_key: "slot_reason",
+              label: "枠応募理由", type: "text", is_active: 1, required: 1,
+              sort_order: 1, visibility: "review", updated_at: 100,
+            });
+          }
+          if (scenario.anchor?.video_id || scenario.sibling?.video_id || scenario.duplicateStatus) {
             insert(w.sqlite, "videos", {
               id: "v_group_other", creator_x_user_id: "x_owner", submitted_by_user_id: "u_owner",
-              creator_display_name: "Owner", title: "Previously linked", visibility_status: "pending",
+              creator_display_name: "Owner", title: "Previously linked",
+              visibility_status: scenario.duplicateStatus ?? "pending",
+              ...(scenario.duplicateStatus ? { youtube_video_id: "dQw4w9WgXcQ" } : {}),
               created_at: 100, updated_at: 100,
             });
           }
@@ -956,8 +1001,9 @@ if (runUnderRootTsx(import.meta.url)) {
               activeXId: "x_owner", approvedXIds: ["x_owner"], hasPendingXRequest: false,
             };
           };
-          const fd = baseForm({ youtubeUrl: "" });
+          const fd = baseForm({ youtubeUrl: scenario.youtubeUrl ?? "" });
           fd.set("slot_id", "slot_submit");
+          for (const [key, value] of Object.entries(scenario.form ?? {})) fd.set(key, value);
           const actual = await submitSlotVideo(fd);
           assert.deepEqual(actual, { ok: false, message: scenario.message }, scenario.name);
           assert.equal(guardCalls, 1, scenario.name);
