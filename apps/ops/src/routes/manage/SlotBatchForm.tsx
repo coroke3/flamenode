@@ -17,6 +17,17 @@ export type SlotMutationResult = {
   pendingPublicReflection?: boolean;
 };
 
+// Use a supplied terminal count only. Do not infer a whole-operation
+// success/count from a provisional chunk response.
+export function slotBatchSuccessMessage(result: SlotMutationResult, verb: "generate" | "clear"): string {
+  const count = result.created;
+  const hasCount = typeof count === "number" && Number.isSafeInteger(count) && count >= 0;
+  return verb === "generate"
+    ? hasCount ? `${count} 件の枠を生成しました。` : "枠を生成しました。"
+    : hasCount ? `${count} 件の空き枠を削除しました。` : "空き枠を削除しました。";
+
+}
+
 export type SlotBatchFormProps = {
   eventId: string;
   totalSlots: number;
@@ -120,7 +131,7 @@ export function SlotBatchForm({
     };
   }, [context]);
 
-  const perform = async (action: () => Promise<SlotMutationResult>, success: string) => {
+  const perform = async (action: () => Promise<SlotMutationResult>, success: (result: SlotMutationResult) => string) => {
     // React state may not commit between two rapid submits; claim the lock
     // synchronously so one user gesture cannot dispatch duplicate writes.
     if (contextRef.current !== context || busyRef.current === context ||
@@ -137,7 +148,7 @@ export function SlotBatchForm({
       if (!result.ok) {
         setError(result.message || "枠操作に失敗しました。");
       } else {
-        const message = result.message ?? success;
+        const message = result.message ?? success(result);
         setNotice(result.pendingPublicReflection
           ? message + " 公開画面への反映は処理中です。" : message);
         onChanged?.();
@@ -165,7 +176,7 @@ export function SlotBatchForm({
       setNotice(null);
       return;
     }
-    void perform(() => onGenerate(parsed.value), "枠を生成しました。");
+    void perform(() => onGenerate(parsed.value), result => slotBatchSuccessMessage(result, "generate"));
   };
 
   const form = <div className="manage-slot-batch-form">
@@ -234,7 +245,7 @@ export function SlotBatchForm({
         if (contextRef.current !== context || busyRef.current === context ||
             writeBlocked || canStartWrite?.() === false || confirmClearFor !== eventId) return;
         setConfirmClearFor(null);
-        void perform(onClearAvailable, "空き枠を削除しました。");
+        void perform(onClearAvailable, result => slotBatchSuccessMessage(result, "clear"));
       }}
     />}
   </div>;

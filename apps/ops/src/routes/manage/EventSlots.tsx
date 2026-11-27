@@ -3,7 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import type { OpsFetch, OpsResult } from "../../api/read.js";
 import { listSlots, normalizeSlotFilter, type ManageSlotsList } from "../../api/manageSlots.js";
 import { SlotList, type SlotListOperation, type SlotListActionResult } from "./SlotList.js";
-import { SlotBatchForm, type SlotGenerateRequest, type SlotMutationResult } from "./SlotBatchForm.js";
+import { SlotBatchForm, slotBatchSuccessMessage, type SlotGenerateRequest, type SlotMutationResult } from "./SlotBatchForm.js";
 
 /** U02b only: explicit, all-or-nothing callback injection; no HTTP write client. */
 export type SlotWriteActions = {
@@ -213,20 +213,11 @@ export function EventSlots({ eventId, fetchFn, writeActions }: {
         }
       }
     };
-    // Use a supplied terminal count only. Do not infer a whole-operation
-    // success/count from a provisional chunk response.
-    const batchMessage = (result: SlotMutationResult, verb: "generate" | "clear") => {
-      const count = result.created;
-      const hasCount = typeof count === "number" && Number.isSafeInteger(count) && count >= 0;
-      return verb === "generate"
-        ? hasCount ? `${count} 件の枠を生成しました。` : "枠を生成しました。"
-        : hasCount ? `${count} 件の空き枠を削除しました。` : "空き枠を削除しました。";
-    };
     return {
       onGenerate: request => track(() => onGenerate(request), false,
-        result => batchMessage(result, "generate")),
+        result => slotBatchSuccessMessage(result, "generate")),
       onClearAvailable: () => track(onClearAvailable, false,
-        result => batchMessage(result, "clear")),
+        result => slotBatchSuccessMessage(result, "clear")),
       onAction: operation => track(() => onAction(operation), true,
         () => "枠を更新しました。"),
       canManageSubmittedSlots,

@@ -534,3 +534,82 @@ test("MIG-0722 U02b: batch clear uses shared danger confirmation without weakeni
     }
   }
 });
+
+
+test("MIG-0722 U02b: standalone batch receipts preserve terminal counts and explicit messages", async () => {
+  const dom = new JSDOM("<!doctype html><div id='root'></div>", {
+    url: "https://flamenode.test/manage/events/ev1/slots",
+  });
+  const keys = ["window", "document", "Element", "HTMLElement", "Node", "navigator", "FormData"];
+  const previous = new Map(keys.map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  const prevAct = globalThis.IS_REACT_ACT_ENVIRONMENT;
+  for (const key of keys) Object.defineProperty(globalThis, key, {
+    configurable: true, writable: true, value: dom.window[key],
+  });
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const { createRoot } = await import("react-dom/client");
+  const root = createRoot(dom.window.document.getElementById("root"));
+  try {
+    const doc = dom.window.document;
+    let result, refreshed = 0;
+    const calls = [];
+    const onGenerate = async body => { calls.push(["generate", body]); return result; };
+    const onClearAvailable = async () => { calls.push(["clear"]); return result; };
+    const onChanged = () => { refreshed++; };
+    await React.act(async () => root.render(React.createElement(SlotBatchForm, {
+      eventId: "ev1", totalSlots: 0, onGenerate, onClearAvailable, onChanged,
+    })));
+    const button = label => [...doc.querySelectorAll("button")]
+      .find(node => node.textContent.trim() === label);
+    await React.act(async () => button("時間なし").click());
+    const cases = [
+      ["generate", { created: 7, pendingPublicReflection: true }, "7 件の枠を生成しました。 公開画面への反映は処理中です。"],
+      ["clear", { created: 3 }, "3 件の空き枠を削除しました。"],
+      ["clear", { created: 0 }, "0 件の空き枠を削除しました。"],
+      ["generate", {}, "枠を生成しました。"],
+      ["clear", { created: -1 }, "空き枠を削除しました。"],
+      ["generate", { created: 1.5 }, "枠を生成しました。"],
+      ["clear", { created: Number.POSITIVE_INFINITY }, "空き枠を削除しました。"],
+      ["generate", { created: "7" }, "枠を生成しました。"],
+      ["generate", { created: 9, message: "明示応答" }, "明示応答"],
+    ];
+    for (const [kind, fields, expected] of cases) {
+      result = { ok: true, ...fields };
+      const before = calls.length;
+      if (kind === "generate") {
+        const form = doc.querySelector('form[aria-label="枠の一括生成"]');
+        form.querySelector('[name="count"]').value = "10";
+        await React.act(async () => form.dispatchEvent(new dom.window.Event("submit", {
+          bubbles: true, cancelable: true,
+        })));
+        assert.deepEqual(calls.at(-1), ["generate", {
+          mode: "count", count: 10, label_prefix: "No.", start_index: 1,
+        }]);
+      } else {
+        await React.act(async () => button("空き枠を全削除").click());
+        assert.equal(calls.length, before, "confirmation is not a write");
+        await React.act(async () => button("全削除する").click());
+        assert.deepEqual(calls.at(-1), ["clear"]);
+      }
+      assert.equal(calls.length, before + 1);
+      assert.equal(refreshed, calls.length);
+      assert.equal(doc.querySelector('.manage-slot-batch-form [role="status"]').textContent, expected);
+      assert.equal(doc.querySelector('.manage-slot-batch-form [role="alert"]'), null);
+    }
+    result = { ok: false, created: 10, message: "失敗" };
+    await React.act(async () => button("空き枠を全削除").click());
+    await React.act(async () => button("全削除する").click());
+    assert.equal(doc.querySelector('.manage-slot-batch-form [role="status"]'), null);
+    assert.equal(doc.querySelector('.manage-slot-batch-form [role="alert"]').textContent, "失敗");
+    assert.equal(refreshed, cases.length, "failed receipt never triggers batch success refresh");
+    assert.equal(calls.length, cases.length + 1);
+  } finally {
+    await React.act(async () => root.unmount());
+    for (const [key, descriptor] of previous) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+    globalThis.IS_REACT_ACT_ENVIRONMENT = prevAct;
+    dom.window.close();
+  }
+});
