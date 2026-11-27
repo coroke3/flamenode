@@ -44,11 +44,11 @@ function setup({ cookieSession = false } = {}) {
 
 test("S3 budget: every successful route uses <= 3 pre-reads and exactly 1 batch", async () => {
   const cases = [
-    ["POST", "/api/admin/announcements", { ...VALID, id: "a-b" }, null, 2],
-    ["PUT", "/api/admin/announcements/a-b", { ...VALID, title: "N", base_updated_at: 100 }, (s) => s.prepare("INSERT INTO announcements VALUES ('a-b','O','B','info',0,NULL,NULL,'all','x',50,100)").run(), 3],
+    ["POST", "/api/admin/announcements", { ...VALID, id: "a-b" }, null, 1],
+    ["PUT", "/api/admin/announcements/a-b", { ...VALID, title: "N", base_updated_at: 100 }, (s) => s.prepare("INSERT INTO announcements VALUES ('a-b','O','B','info',0,NULL,NULL,'all','x',50,100)").run(), 2],
     ["DELETE", "/api/admin/announcements/a-b", undefined, (s) => s.prepare("INSERT INTO announcements VALUES ('a-b','O','B','info',0,NULL,NULL,'all','x',50,100)").run(), 3],
-    ["POST", "/api/admin/api-endpoints", { event_id: "ev-1" }, (s) => seedEvent(s), 3],
-    ["PATCH", "/api/admin/api-endpoints/ev-1", { public_api_enabled: false }, (s) => seedEvent(s, { public_api_enabled: 1 }), 3],
+    ["POST", "/api/admin/api-endpoints", { event_id: "ev-1" }, (s) => seedEvent(s), 2],
+    ["PATCH", "/api/admin/api-endpoints/ev-1", { public_api_enabled: false }, (s) => seedEvent(s, { public_api_enabled: 1 }), 2],
   ];
   for (const [method, path, body, seed, expectedReads] of cases) {
     const { sqlite, request, stats } = setup();
@@ -59,6 +59,16 @@ test("S3 budget: every successful route uses <= 3 pre-reads and exactly 1 batch"
     assert.equal(stats.reads, expectedReads, `${method} ${path} reads`);
     assert.equal(stats.batches, 1, `${method} ${path} batches`);
   }
+});
+
+test("missing CostGuard settings row preserves the authenticated user and fails as maintenance", async () => {
+  const { sqlite, request, stats } = setup();
+  sqlite.prepare('DELETE FROM system_settings WHERE id = "default"').run();
+  const response = await request("POST", "/api/admin/announcements", { ...VALID, id: "missing-settings" });
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).reason, "maintenance_mode");
+  assert.equal(stats.reads, 1, "one joined admission read");
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM announcements").get().n, 0);
 });
 
 test("S3 budget parity: guard-fed audit equals audit that reads settings/actor itself", async () => {
@@ -211,6 +221,67 @@ function guardApp({ user, requiredRole, activeX: activeXOptions, settings = "nor
   return { ...d1, post };
 }
 const U = (role, x = null) => ({ name: "n", email: null, image: null, role, is_banned: 0, active_x_user_id: x });
+
+test("combined admission read fallback preserves ToS and CostGuard failure classes", async () => {
+  const run = async (failure) => {
+    const d1 = createAdminD1();
+    seedBase(d1.sqlite);
+    const originalPrepare = d1.db.prepare.bind(d1.db);
+    const db = {
+      prepare(query) {
+        const statement = originalPrepare(query);
+        return {
+          ...statement,
+          bind(...values) {
+            const bound = statement.bind(...values);
+            return {
+              ...bound,
+              first: async (...args) => {
+                if (query.includes('LEFT JOIN "system_settings" s')) {
+                  throw new Error("combined admission provider failure");
+                }
+                if (failure === "tos" && query.includes('FROM "user" u')) {
+                  throw new Error("tos provider failure");
+                }
+                if (failure === "cost" && query.includes("FROM system_settings")) {
+                  throw new Error("cost guard provider failure");
+                }
+                return bound.first(...args);
+              },
+            };
+          },
+        };
+      },
+    };
+    const options = { loadSiteUrl: () => SITE, allowLocalPreview: () => false, requiredRole: "admin" };
+    const app = new Hono();
+    app.use("*", originGuardMiddleware(options));
+    app.use("*", async (c, next) => {
+      c.set("user", { ...ADMIN });
+      c.set("sessionState", "user");
+      await next();
+    });
+    app.use("*", writeGuardMiddleware(options));
+    app.use("*", costGuardMiddleware("manage_event_update"));
+    app.post("/w", (c) => c.json({ ok: true }));
+    const response = await app.request("/w", { method: "POST", headers: { Origin: SITE } }, { DB: db });
+    return { response, reads: d1.stats.reads };
+  };
+
+  const recovered = await run("none");
+  assert.equal(recovered.response.status, 200);
+  assert.equal(recovered.reads, 2, "ToS and CostGuard source-specific fallback reads");
+
+  const tosFailure = await run("tos");
+  assert.equal(tosFailure.response.status, 503);
+  assert.equal((await tosFailure.response.json()).reason, "db_unavailable");
+  assert.equal(tosFailure.reads, 0);
+
+  const costFailure = await run("cost");
+  assert.equal(costFailure.response.status, 503);
+  assert.equal((await costFailure.response.json()).reason, "cost_guard_blocked");
+  assert.equal(costFailure.reads, 1);
+});
 
 test("requiredRole default is admin (moderator denied); null allows any authenticated user", async () => {
   assert.equal((await guardApp({ user: U("user") }).post()).status, 403);
@@ -387,10 +458,12 @@ test("audit rows are identical whether settings/actor are preloaded by guards or
     const statement = db.run(sql`INSERT INTO announcements (id, title, body, created_at, updated_at) VALUES (${"a1"}, ${"t"}, ${"b"}, ${1}, ${1})`);
     let preloaded;
     if (preloadedFrom === "guards") {
-      const { evaluateCostGuardWithSettings } = await import("../src/middleware/costGuard.ts");
-      const cost = await evaluateCostGuardWithSettings(d1.db, "admin_announcement_broadcast");
-      const user = d1.sqlite.prepare("SELECT u.discord_id, u.name AS discord_name, u.active_x_user_id, u.image AS user_image, x.x_name, x.icon_url AS x_icon_url FROM \"user\" u LEFT JOIN x_users x ON x.id = u.active_x_user_id WHERE u.id = 'admin-1'").get();
-      preloaded = { settings: cost.auditSettings, actorSnapshotJsonById: { "admin-1": JSON.stringify(actorSnapshotFromRow(user)) } };
+      const { evaluateCostGuardSnapshot } = await import("../src/middleware/costGuard.ts");
+      const { loadTosState } = await import("../src/middleware/writeOrigin.ts");
+      const admission = await loadTosState(d1.db, "admin-1", undefined, true);
+      assert.ok(admission);
+      const cost = evaluateCostGuardSnapshot({ row: admission.cost_guard_settings ?? null }, "admin_announcement_broadcast");
+      preloaded = { settings: cost.auditSettings, actorSnapshotJsonById: { "admin-1": admission.actor_snapshot_json } };
     }
     const before = d1.stats.reads;
     await mutateWithAudit(db, { mutationStatements: [statement], expectedMutationChanges: [1], audits, preloaded });
