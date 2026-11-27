@@ -114,6 +114,10 @@ function scanOversizedKvMirror(raw: string): ParsedOperationModeKvMirror | null 
   // a comma. Longer tokens, strings and containers use the full scanner.
   // The next state still requires a value, so a trailing comma is invalid.
   const scalarArrayRun = /(?:(?:true|false|null|-?(?:0|[1-9][0-9]{0,15})(?:\.[0-9]{1,16})?(?:[eE][+-]?[0-9]{1,6})?)[ \t\r\n]{0,16},[ \t\r\n]{0,16}){2,256}/y;
+  // Only nested object members may be skipped: root keys can change mode
+  // or updated_at. Require complete comma-delimited scalar members; all
+  // escaped or longer keys/values and containers use the general scanner.
+  const scalarObjectRun = /(?:"[^"\\\u0000-\u001f]{0,32}"[ \t\r\n]{0,16}:[ \t\r\n]{0,16}(?:true|false|null|-?(?:0|[1-9][0-9]{0,15})(?:\.[0-9]{1,16})?(?:[eE][+-]?[0-9]{1,6})?|"[^"\\\u0000-\u001f]{0,32}")[ \t\r\n]{0,16},[ \t\r\n]{0,16}){2,256}/y;
   // One byte per open container; only the root needs a decoded property key.
   // Grow with actual nesting rather than allocating one object per frame.
   const OBJECT_FIRST_KEY = 0, OBJECT_KEY = 1, OBJECT_COLON = 2,
@@ -179,6 +183,13 @@ function scanOversizedKvMirror(raw: string): ParsedOperationModeKvMirror | null 
             i++; depth--; break;
           }
           if (raw[i] !== '"') return null;
+          if (depth > 1 && state === OBJECT_KEY) {
+            scalarObjectRun.lastIndex = i;
+            if (scalarObjectRun.test(raw)) {
+              i = scalarObjectRun.lastIndex;
+              break;
+            }
+          }
           const token = stringToken();
           if (depth === 1) rootKey = smallString(token);
           stack[top] = OBJECT_COLON;

@@ -730,3 +730,50 @@ test("MIG-0661 T09 / #916: scalar array batches preserve grammar at batch and fa
     assert.equal(d1.count, 0);
   }
 });
+
+test("MIG-0661 T09 / #916: nested object scalar batches never skip root mode or timestamp", async () => {
+  const pad = "X".repeat(70 * 1024);
+  const prefix = '{"mode":"normal","updated_at":1,"reason":"' + pad + '"';
+  const members = '"mode":"static_only","updated_at":0,"x":true,"y":null,"":-0,';
+  const dense = members.repeat(2000);
+  const nested = (s) => prefix + ',"extra":{"first":1,' + s + '},"mode":"maintenance"}';
+  const cases = [
+    ...[0, 1, 2, 3, 255, 256, 257, 258, 511, 512, 513].map((count) =>
+      [nested('"x":1,'.repeat(count) + '"last":0'), "maintenance", 1, true]),
+    [nested(dense + '"last":0'), "maintenance", 1, true],
+    [nested(dense + '"\\u006dode":"static_only","x":"\\u0061","nested":{"mode":"static_only"},"array":[1,2,3]'), "maintenance", 1, true],
+    [nested(dense + '"' + "x".repeat(33) + '":"' + "y".repeat(33) + '","large":' + "9".repeat(70000)), "maintenance", 1, true],
+    [nested(dense + '"x" :' + " ".repeat(17) + '0,"y":-1.2e+1234567'), "maintenance", 1, true],
+    [nested(dense + '"🚀":"日本語","":0'), "maintenance", 1, true],
+    [prefix + ',' + dense + '"mode":"read_only","updated_at":2}', "read_only", 2, true],
+    [prefix + ',' + dense + '"x":0}', "static_only", 0, true],
+    [prefix + ',' + dense + '"mode":null}', null, null, true],
+    [prefix + ',' + dense + '"updated_at":null}', null, null, true],
+    ...['"x":01','"x":1.','"x":1e+','"x":truex','"x":nullx','"x":0\u00a0','"x":0\u2028','"x":0,','',
+      '"x":"\\x"','"\\u000Z":0','"x":"a\u0001b"','"x" 0','"x":0 "y":1'].map((tail) =>
+      [nested(dense + tail), null, null, false]),
+  ];
+  for (const [raw, mode, updatedAt, syntaxValid] of cases) {
+    assert.ok(Buffer.byteLength(raw, "utf8") > 64 * 1024);
+    if (syntaxValid) {
+      const reference = JSON.parse(raw);
+      if (mode !== null) {
+        assert.equal(reference.mode, mode);
+        assert.equal(reference.updated_at, updatedAt);
+      } else {
+        assert.ok(reference.mode === null || reference.updated_at === null);
+      }
+    } else assert.throws(() => JSON.parse(raw), SyntaxError);
+    resetOperationModeCachesForTests();
+    const d1 = { count: 0 }, kv = { count: 0 };
+    const binding = kvResponse(raw, kv);
+    const env = { DB: unavailableD1(d1), KV: binding };
+    const expectedMode = mode ?? "normal";
+    assert.equal(await resolvePublicOperationMode(env, { allowD1: false }), expectedMode);
+    assert.deepEqual(await readOperationModeKvMirror(binding), mode === null
+      ? null : { mode, updated_at: updatedAt, reason: null });
+    assert.deepEqual(await requestWith(env), { mode: expectedMode, reason: null });
+    assert.equal(kv.count, 1);
+    assert.equal(d1.count, 0);
+  }
+});
