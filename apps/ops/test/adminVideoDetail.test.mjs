@@ -286,8 +286,25 @@ test("MIG-0729 U02: 404, 403, invalid DTO and mismatched private detail are fail
     { status: "invalid" });
   assert.deepEqual(await loadAdminVideoDetail(async () => json(200, { ...detail, event: null, moderationCases: "invalid" }), "video-1", null),
     { status: "invalid" });
+  for (const fn of [
+    async () => new Response("{", { status: 200 }),
+    async () => new Response(new ReadableStream({ start(controller) {
+      controller.error(new Error("private-provider-detail"));
+    } }), { status: 200 }),
+  ]) assert.deepEqual(await loadAdminVideoDetail(fn, "video-1", null), { status: "invalid" });
   assert.deepEqual(await loadAdminVideoDetail(async () => json(503, {}), "video-1", null),
     { status: "unavailable" });
+  assert.deepEqual(await loadAdminVideoDetail(async () => { throw new Error("offline"); }, "video-1", null),
+    { status: "unavailable" });
+  assert.deepEqual(await loadAdminVideoDetail(async () => new Response("{", { status: 401 }), "video-1", null),
+    { status: "anonymous" });
+  assert.deepEqual(await loadAdminVideoDetail(async () => new Response("{", { status: 403 }), "video-1", null),
+    { status: "forbidden" });
+  const controller = new AbortController();
+  assert.deepEqual(await loadAdminVideoDetail(async () => {
+    controller.abort();
+    return new Response("{", { status: 200 });
+  }, "video-1", null, controller.signal), { status: "unavailable" });
   assert.deepEqual(await loadAdminVideoDetail(async () => json(200, detail), "", null),
     { status: "notFound" });
 });
@@ -797,7 +814,7 @@ test("MIG-0729 U02: mounted detail rejects another event response before enablin
 });
 
 test("MIG-0729 U02: same-key invalid detail refresh evicts private content and controls but 503 retains CURRENT state", async () => {
-  for (const failure of ["event", "video", "schema", "503"]) {
+  for (const failure of ["event", "video", "schema", "json", "stream", "503", "network", "403"]) {
     await withMutationDom(async ({ dom, root }) => {
       const gets = [], posts = [];
       const initial = {
@@ -811,7 +828,16 @@ test("MIG-0729 U02: same-key invalid detail refresh evicts private content and c
         }
         gets.push(path);
         if (gets.length === 1) return json(200, initial);
+        if (gets.length > 2) return json(200, {
+          ...initial, video: { ...initial.video, title: "RECOVERED_CURRENT_TITLE", intro_comment: "RECOVERED_CURRENT_CONTENT" },
+        });
         if (failure === "503") return json(503, {});
+        if (failure === "network") throw new Error("offline");
+        if (failure === "403") return new Response("{", { status: 403 });
+        if (failure === "json") return new Response("{", { status: 200 });
+        if (failure === "stream") return new Response(new ReadableStream({ start(controller) {
+          controller.error(new Error("PRIVATE_PROVIDER_DETAIL"));
+        } }), { status: 200 });
         return json(200, {
           ...initial,
           event: failure === "event" ? "other-event" : initial.event,
@@ -838,17 +864,32 @@ test("MIG-0729 U02: same-key invalid detail refresh evicts private content and c
       assert.deepEqual(posts, ["/api/admin/videos/video-1/status"], "never replay POST");
       const content = dom.window.document.body.textContent;
       assert.doesNotMatch(content, /INVALID_RECEIPT_TITLE/);
-      if (failure === "503") {
+      if (failure === "503" || failure === "network") {
         assert.match(content, /PREVIOUS_PRIVATE_TITLE/);
         assert.match(content, /PREVIOUS_PRIVATE_CONTENT/);
         assert.match(content, /APPROVED_RECEIPT/);
         assert.ok(findApprove());
         assert.ok(dom.window.document.querySelector('[name="private_note"]'));
       } else {
-        assert.match(content, /作品詳細を取得できませんでした/);
-        assert.doesNotMatch(content, /PREVIOUS_PRIVATE_TITLE|PREVIOUS_PRIVATE_CONTENT|APPROVED_RECEIPT/);
+        assert.match(content, failure === "403" ? /管理者権限がありません/ : /作品詳細を取得できませんでした/);
+        assert.doesNotMatch(content, /PREVIOUS_PRIVATE_TITLE|PREVIOUS_PRIVATE_CONTENT|APPROVED_RECEIPT|PRIVATE_PROVIDER_DETAIL/);
         assert.equal(findApprove(), undefined);
         assert.equal(dom.window.document.querySelector('[name="private_note"]'), null);
+        const retry = [...dom.window.document.querySelectorAll("button")]
+          .find(b => b.textContent.trim() === "作品詳細を再取得");
+        if (failure === "403") {
+          assert.equal(retry, undefined);
+        } else {
+          assert.ok(retry);
+          await React.act(async () => retry.click());
+          assert.deepEqual(gets, Array(3).fill("/api/admin-read/videos/video-1?event=event-a"));
+          assert.deepEqual(posts, ["/api/admin/videos/video-1/status"], "retry reads only");
+          const recovered = dom.window.document.body.textContent;
+          assert.match(recovered, /RECOVERED_CURRENT_TITLE/);
+          assert.match(recovered, /RECOVERED_CURRENT_CONTENT/);
+          assert.doesNotMatch(recovered, /PREVIOUS_PRIVATE_TITLE|PREVIOUS_PRIVATE_CONTENT|APPROVED_RECEIPT|PRIVATE_PROVIDER_DETAIL/);
+          assert.ok(findApprove());
+        }
       }
     });
   }

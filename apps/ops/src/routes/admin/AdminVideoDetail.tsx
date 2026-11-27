@@ -317,7 +317,7 @@ export function AdminVideoDetail({ fetchFn = browserFetch }: { fetchFn?: OpsFetc
   const load = React.useCallback(
     async (signal: AbortSignal) => {
       const receipt = await loadAdminVideoDetail(fetchFn, id, eventId, signal);
-      // A parsed but invalid 200 must replace the cached snapshot, unlike a
+      // An unreadable or invalid 200 must replace the cached snapshot, unlike a
       // transient unavailable response. Null is a local, non-renderable
       // snapshot; do not widen the shared Ops read or change other screens.
       return receipt.status === "invalid" ? { status: "ok" as const, data: null } : receipt;
@@ -335,6 +335,11 @@ export function AdminVideoDetail({ fetchFn = browserFetch }: { fetchFn?: OpsFetc
         : result.status === "anonymous" ? "ログインが必要です。"
         : result.status === "forbidden" ? "管理者権限がありません。"
         : "作品詳細を取得できませんでした。"}</p>
+      {result.status === "ok" && result.data === null ? (
+        <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm" onClick={refresh}>
+          作品詳細を再取得
+        </button>
+      ) : null}
     </section>
   );
 

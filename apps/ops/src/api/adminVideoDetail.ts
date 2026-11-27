@@ -79,7 +79,18 @@ export async function loadAdminVideoDetail(
 ): Promise<AdminVideoDetailResult> {
   if (!videoId || videoId.length > 256) return { status: "notFound" };
   const url = `/api/admin-read/videos/${encodeURIComponent(videoId)}${event ? `?event=${encodeURIComponent(event)}` : ""}`;
-  const response = await getJson<unknown>(fetchFn, url, signal);
+  // A received HTTP 200 with an unreadable body is an invalid private
+  // receipt, not an ordinary pre-header/network or non-200 transport failure.
+  // Keep shared getJson authorization and cancellation handling unchanged.
+  let received200 = false;
+  const response = await getJson<unknown>(async (path, init) => {
+    const received = await fetchFn(path, init);
+    received200 = received.status === 200;
+    return received;
+  }, url, signal);
+  if (response.status === "unavailable" && received200 && !signal?.aborted) {
+    return { status: "invalid" };
+  }
   if (response.status !== "ok") return response;
   const parsed = AdminVideoDetailResponseSchema.safeParse(response.data);
   // The Hono read handler echoes c.req.query("event")?.trim() || null.
