@@ -907,12 +907,11 @@ if (runUnderRootTsx(import.meta.url)) {
     const originalError = console.error;
     const validRow = { videoId: "av-pending-1", eventId: "a-open", primaryEventId: "a-ended" };
     const fkRow = (fkIndex, value) => ({ kind: "fk", fkIndex, value, videoId: null, eventId: null, primaryEventId: null });
-    // Canonical video_members PATCH, DELETE and signed import all use the
-    // tagged FK + release CTE. Keep a valid FK receipt so release-field faults
-    // reach their own checks after the FK-first validation stage.
+    // POST/import use the tagged FK + release CTE. PATCH/DELETE use the
+    // snapshot-inclusive CTE and must be tested against its actual row shape.
     const releaseRow = (row = validRow) => ({ kind: "release", fkIndex: null, value: null, ...row });
     const receiptWithRows = (fkRows, rows) => ({ success: true, results: [...fkRows, ...rows] });
-    const invalid = [
+    const invalidTagged = [
       () => ({ success: true }),
       fkRows => ({ ...receiptWithRows(fkRows, [releaseRow()]), success: false }),
       () => ({ success: true, results: null }),
@@ -928,9 +927,54 @@ if (runUnderRootTsx(import.meta.url)) {
         get() { throw new Error("row_not_found"); },
       }),
     ];
+    const invalidSnapshot = [
+      () => ({ success: true }),
+      receipt => ({ ...receipt, success: false }),
+      receipt => ({ ...receipt, results: null }),
+      receipt => ({ ...receipt, results: "not-an-array" }),
+      receipt => ({
+        ...receipt,
+        results: receipt.results.map(row => {
+          const copy = { ...row };
+          delete copy.id;
+          return copy;
+        }),
+      }),
+      receipt => ({
+        ...receipt,
+        results: receipt.results.map(row => ({ ...row, __mig0638_snapshot_count: 3 })),
+      }),
+      receipt => ({
+        ...receipt,
+        results: receipt.results.map(row => ({ ...row, __mig0638_fk_0_expected: "unrequested" })),
+      }),
+      receipt => ({
+        ...receipt,
+        results: receipt.results.map(row => ({ ...row, __mig0638_release_event_id: 42 })),
+      }),
+      receipt => ({
+        ...receipt,
+        results: receipt.results.map(row => Object.defineProperty(
+          { ...row },
+          "__mig0638_release_event_id",
+          { get() { throw new Error("preview_required"); } },
+        )),
+      }),
+      () => Object.defineProperty({ success: true }, "results", {
+        get() { throw new Error("row_not_found"); },
+      }),
+    ];
+    const providerFaults = ["prepare", "bind", "all"].map(stage => ({
+      stage,
+      error: new Error("FOREIGN KEY constraint failed: RELEASE_CANARY"),
+    }));
     const faults = [
-      ...invalid.map(receipt => ({ stage: "all", receipt })),
-      ...["prepare", "bind", "all"].map(stage => ({ stage, error: new Error("FOREIGN KEY constraint failed: RELEASE_CANARY") })),
+      ...invalidTagged.map(receipt => ({ stage: "all", receipt })),
+      ...providerFaults,
+    ];
+    const snapshotFaults = [
+      ...invalidSnapshot.map(receipt => ({ stage: "all", receipt })),
+      ...providerFaults,
     ];
     const logs = [];
     let injected = 0;
@@ -942,17 +986,23 @@ if (runUnderRootTsx(import.meta.url)) {
         ["DELETE", "/data", deleteBody],
         ["POST", "/import", apply],
       ]) {
-        const fkRows = method === "POST"
-          ? [fkRow(0, "av-pending-1")]
-          : [fkRow(0, "alice_x"), fkRow(1, "av-pending-1")];
+        const snapshotCte = method !== "POST";
+        const methodFaults = snapshotCte ? snapshotFaults : faults;
+        const fkRows = method === "POST" ? [fkRow(0, "av-pending-1")] : [];
         const expectedBinds = method === "POST" ? ["av-pending-1", "av-pending-1"] : null;
-        for (const fault of faults) {
+        const schemaFkColumns = honoSqlite
+          .prepare('PRAGMA foreign_key_list("video_members")')
+          .all()
+          .map(row => row.from);
+        for (const fault of methodFaults) {
           resetAllCaches();
           const prior = injected;
+          let actualReadError = null;
           honoD1.prepare = sql => {
             const releaseLookup = sql.includes('LEFT JOIN "video_events" ve ON ve."video_id" = v."id"');
-            const combinedLookup = sql.startsWith("WITH snapshot AS (") ||
-              sql.startsWith("WITH fk AS (") || sql.startsWith("WITH fk_0 AS (");
+            const combinedLookup = snapshotCte
+              ? sql.startsWith("WITH snapshot AS (")
+              : sql.startsWith("WITH fk AS (") || sql.startsWith("WITH fk_0 AS (");
             if (!releaseLookup || !combinedLookup) return originalPrepare(sql);
             if (fault.stage === "prepare") { injected++; throw fault.error; }
             const stmt = originalPrepare(sql);
@@ -967,8 +1017,8 @@ if (runUnderRootTsx(import.meta.url)) {
                     method === "PATCH" ? "name" : null,
                     method === "PATCH" ? "Edited Member" : null,
                   ]);
-                  assert.equal(params.length, 7);
-                  assert.deepEqual([...params.slice(3, -1)].sort(), ["user_id", "video_id", "x_user_id"]);
+                  assert.equal(params.length, 4 + schemaFkColumns.length);
+                  assert.deepEqual([...params.slice(3, -1)].sort(), [...schemaFkColumns].sort());
                   assert.ok(typeof params[params.length - 1] === "string" && params[params.length - 1].includes(" "));
                 }
                 if (fault.stage === "bind") { injected++; throw fault.error; }
@@ -977,7 +1027,14 @@ if (runUnderRootTsx(import.meta.url)) {
                   async all() {
                     injected++;
                     if (fault.error) throw fault.error;
-                    return fault.receipt(fkRows);
+                    if (!snapshotCte) return fault.receipt(fkRows);
+                    try {
+                      const actual = await stmt.bind(...params).all();
+                      return fault.receipt(actual);
+                    } catch (error) {
+                      actualReadError = error instanceof Error ? error.message : String(error);
+                      throw error;
+                    }
                   },
                 };
               },
@@ -985,6 +1042,9 @@ if (runUnderRootTsx(import.meta.url)) {
           };
           const response = await callHono(method, path, body);
           assert.equal(injected, prior + 1, method + " " + path + " " + fault.stage);
+          if (snapshotCte && fault.stage === "all" && !fault.error) {
+            assert.equal(actualReadError, null, method + " " + path + " underlying snapshot CTE read");
+          }
           assert.equal(response.status, 500);
           assert.deepEqual(response.body, { error: "internal_error" });
           assert.match(response.headers.get("cache-control"), /private.*no-store/);
