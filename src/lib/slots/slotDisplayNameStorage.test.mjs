@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
-  slotDisplayNameStorageKey, readPersistedSlotDisplayName, persistSlotDisplayName,
+  slotDisplayNameStorageKey, readPersistedSlotDisplayName, persistSlotDisplayName, reusableSlotDisplayName,
 } from "./slotDisplayNameStorage.ts";
 
 test("SEC-899: null-X viewers never read or write any persistent name", () => {
@@ -53,4 +53,14 @@ test("SEC-899: CURRENT reservation path uses scoped read and guarded save only",
   assert.match(current, /persistSlotDisplayName\(/);
   assert.doesNotMatch(current, /localStorage\.getItem\(LEGACY_SLOT_DISPLAY_NAME_KEY\)/);
   assert.doesNotMatch(current, /slotDisplayNameStorageKey\(viewerXId\)/);
+});
+
+test("SEC-899: switching between null-X accounts never prefills the next reservation", () => {
+  assert.equal(reusableSlotDisplayName("", "Alice"), "");
+  assert.equal(reusableSlotDisplayName("", "Bob"), "");
+  assert.equal(reusableSlotDisplayName("unassigned", "Alice"), "Alice");
+  assert.equal(reusableSlotDisplayName("beta", "Bob"), "Bob");
+  const source = readFileSync(fileURLToPath(new URL("../../components/event/SlotGrid.tsx", import.meta.url)), "utf8");
+  assert.match(source, /setReserveDisplayName\(reusableSlotDisplayName\(normalizeXId\(viewerXId \?\? ""\), savedName\)\)/);
+  assert.match(source, /setSavedName\(reusableSlotDisplayName\(normalizeXId\(viewerXId \?\? ""\), dn\)\)/);
 });

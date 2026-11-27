@@ -32,7 +32,7 @@ import { areSlotsInSamePart } from "@/lib/utils/slotGroupingCore";
 import type { SlotViewerRelation } from "@/lib/slots/slotIdentityCore";
 import { redirectForGuardReason as redirectForGuard } from "@/lib/client/guardRedirect";
 import { normalizeXId } from "@/lib/utils/xid";
-import { readPersistedSlotDisplayName, persistSlotDisplayName } from "@/lib/slots/slotDisplayNameStorage";
+import { readPersistedSlotDisplayName, persistSlotDisplayName, reusableSlotDisplayName } from "@/lib/slots/slotDisplayNameStorage";
 import { computeFloatingMenuPosition } from "@/lib/ui/floatingMenuPosition";
 import { buildConsecutiveSlotGuidance } from "@/lib/slots/slotGuidance";
 import {
@@ -414,7 +414,7 @@ export function SlotGrid({
     setError(null);
     setSuccess(null);
     setReserveTarget({ slot, label: formatSlotLabel(slot) });
-    setReserveDisplayName(savedName);
+    setReserveDisplayName(reusableSlotDisplayName(normalizeXId(viewerXId ?? ""), savedName));
     setReserveCount("1");
   };
   const previewSlot = React.useCallback((slotId: string) => {
@@ -443,7 +443,7 @@ export function SlotGrid({
     if (dn) {
       // Keep the current-dialog preference in memory even for Discord-only viewers.
       // Never persist an unassigned viewer or import ambiguous legacy names.
-      setSavedName(dn);
+      setSavedName(reusableSlotDisplayName(normalizeXId(viewerXId ?? ""), dn));
       persistSlotDisplayName(
         normalizeXId(viewerXId ?? ""),
         dn,

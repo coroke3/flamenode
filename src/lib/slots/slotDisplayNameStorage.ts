@@ -35,3 +35,8 @@ export function persistSlotDisplayName(
     // Browser storage may be disabled; UI state remains usable.
   }
 }
+
+/** The anonymous/null-X viewer has no account-stable cache scope, even in React memory. */
+export function reusableSlotDisplayName(normalizedXId: string, savedName: string): string {
+  return normalizedXId ? savedName : "";
+}
