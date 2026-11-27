@@ -15,6 +15,12 @@ export interface SlotReservationResult {
   pendingPublicReflection?: boolean;
 }
 
+/** Transport metadata stays outside the provisional server DTO (never trust a body status). */
+export interface SlotReservationResponse {
+  readonly status: number;
+  readonly result: SlotReservationResult;
+}
+
 export interface ReserveSlotInput {
   display_name: string;
   consecutive_count: number;
@@ -47,7 +53,7 @@ async function post(
   path: string,
   body: Record<string, unknown> | undefined,
   fetcher: typeof fetch,
-): Promise<SlotReservationResult> {
+): Promise<SlotReservationResponse> {
   const response = await fetcher(path, {
     method: "POST",
     // A mutation endpoint must not redirect/replay its POST to another URL.
@@ -66,7 +72,7 @@ async function post(
   if (!response.ok && result.ok) {
     throw new TypeError("Invalid slot reservation response: success on error status");
   }
-  return result;
+  return { status: response.status, result };
 }
 
 const slotPath = (eventId: string, slotId: string) =>
@@ -77,7 +83,7 @@ export function reserveSlot(
   slotId: string,
   input: ReserveSlotInput,
   fetcher: typeof fetch = fetch,
-): Promise<SlotReservationResult> {
+): Promise<SlotReservationResponse> {
   return post(`${slotPath(eventId, slotId)}/reserve`, {
     display_name: input.display_name,
     consecutive_count: input.consecutive_count,
@@ -89,7 +95,7 @@ export function releaseSlot(
   eventId: string,
   slotId: string,
   fetcher: typeof fetch = fetch,
-): Promise<SlotReservationResult> {
+): Promise<SlotReservationResponse> {
   return post(`${slotPath(eventId, slotId)}/release`, undefined, fetcher);
 }
 
@@ -98,7 +104,7 @@ export function extendSlot(
   slotId: string,
   input: ExtendSlotInput,
   fetcher: typeof fetch = fetch,
-): Promise<SlotReservationResult> {
+): Promise<SlotReservationResponse> {
   return post(`${slotPath(eventId, slotId)}/extend`, {
     direction: input.direction,
     ...(input.operator_override === undefined ? {} : { operator_override: input.operator_override }),
@@ -109,7 +115,7 @@ export function mergeSlotGroup(
   eventId: string,
   input: MergeSlotGroupInput,
   fetcher: typeof fetch = fetch,
-): Promise<SlotReservationResult> {
+): Promise<SlotReservationResponse> {
   return post(`/api/events/${encodeURIComponent(eventId)}/slot-groups/merge`, {
     gap_slot_id: input.gap_slot_id,
     display_name: input.display_name,
@@ -186,7 +192,7 @@ export function describeSlotMutationResult(
 /** U03g: unmounted mutation outcome; U04 must validate the canonical DTO first. */
 export type SlotMutationOutcome =
   | (Extract<SlotMutationFeedback, { kind: "success" }> & { refresh: true; slotId: string | undefined })
-  | (Extract<SlotMutationFeedback, { kind: "failure" }> & { refresh: false })
+  | (Extract<SlotMutationFeedback, { kind: "failure" }> & { refresh: boolean })
   | { kind: "redirect"; path: string; refresh: false }
   | { kind: "communication-error"; message: string; refresh: true };
 
@@ -201,16 +207,17 @@ const COMMUNICATION_ERROR_MESSAGE =
  */
 export async function runSlotMutation(
   presentation: SlotMutationPresentation,
-  mutate: () => Promise<SlotReservationResult>,
+  mutate: () => Promise<SlotReservationResponse>,
   getCurrentPath: () => string | null | undefined,
 ): Promise<SlotMutationOutcome> {
-  let result: SlotReservationResult;
+  let response: SlotReservationResponse;
   try {
-    result = await mutate();
+    response = await mutate();
   } catch {
     // TARGET uses HTTP, not Next control-flow exceptions.
     return { kind: "communication-error", message: COMMUNICATION_ERROR_MESSAGE, refresh: true };
   }
+  const { status, result } = response;
   if (!result.ok) {
     const path = getGuardRedirectPath(result.reason, getCurrentPath());
     if (path) return { kind: "redirect", path, refresh: false };
@@ -219,7 +226,8 @@ export async function runSlotMutation(
   if (feedback.kind === "success") {
     return { ...feedback, slotId: result.slotId, refresh: true };
   }
-  // CURRENT returns after a typed denial, including a 409 race loss.
-  // Work Order T02 requests a refresh instead; leave that decision to Lead.
-  return { ...feedback, refresh: false };
+  // T02: an actual HTTP 409 typed denial requests authoritative read-only
+  // refresh; never infer conflict from DTO fields or retry the mutation.
+  // Guard redirects above retain precedence; other typed denials are unchanged.
+  return { ...feedback, refresh: status === 409 };
 }

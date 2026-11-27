@@ -35,7 +35,8 @@ function assertPost(call, expectedUrl, body) {
 test("U02 reserve sends the CURRENT form keys without slot_id in the JSON body", async () => {
   const srv = server(200, { ok: true, slotId: "s1", slotCount: 2, groupSize: 2, pendingPublicReflection: true });
   const result = await reserveSlot("autumn", "s1", { display_name: "制作者", consecutive_count: 2 }, srv.fetcher);
-  assert.equal(result.pendingPublicReflection, true);
+  assert.equal(result.status, 200);
+  assert.equal(result.result.pendingPublicReflection, true);
   assertPost(srv.calls[0], "/api/events/autumn/slots/s1/reserve", {
     display_name: "制作者", consecutive_count: 2,
   });
@@ -58,7 +59,7 @@ test("U02 operator override is present only when explicitly supplied", async () 
 
 test("U02 release POST has no JSON body", async () => {
   const srv = server(200, { ok: true });
-  assert.deepEqual(await releaseSlot("e", "s", srv.fetcher), { ok: true });
+  assert.deepEqual(await releaseSlot("e", "s", srv.fetcher), { status: 200, result: { ok: true } });
   assertPost(srv.calls[0], "/api/events/e/slots/s/release", undefined);
 });
 
@@ -85,13 +86,13 @@ test("U03c SA-067/068 forward only an explicitly supplied operator override", as
     const srv = server(403, denied);
     assert.deepEqual(await extendSlot("my/event", "slot?#", {
       direction: "backward", ...flag,
-    }, srv.fetcher), denied, "client cannot turn a denial into success");
+    }, srv.fetcher), { status: 403, result: denied }, "client cannot turn a denial into success");
     assertPost(srv.calls[0], "/api/events/my%2Fevent/slots/slot%3F%23/extend", {
       direction: "backward", ...flag,
     });
     assert.deepEqual(await mergeSlotGroup("my/event", {
       gap_slot_id: "gap-slot", display_name: "運営", ...flag,
-    }, srv.fetcher), denied);
+    }, srv.fetcher), { status: 403, result: denied });
     assertPost(srv.calls[1], "/api/events/my%2Fevent/slot-groups/merge", {
       gap_slot_id: "gap-slot", display_name: "運営", ...flag,
     });
@@ -103,10 +104,10 @@ test("U02 409 race loser and 403 guard denial preserve error payload for CURRENT
   const raced = server(409, { ok: false, message: "先に確保されました" });
   assert.deepEqual(await reserveSlot("e", "s", {
     display_name: "a", consecutive_count: 1,
-  }, raced.fetcher), { ok: false, message: "先に確保されました" });
+  }, raced.fetcher), { status: 409, result: { ok: false, message: "先に確保されました" } });
   const guarded = server(403, { ok: false, reason: "tos_required", message: "同意が必要です" });
   assert.deepEqual(await releaseSlot("e", "s", guarded.fetcher), {
-    ok: false, reason: "tos_required", message: "同意が必要です",
+    status: 403, result: { ok: false, reason: "tos_required", message: "同意が必要です" },
   });
 });
 
@@ -143,7 +144,7 @@ test("U03d SA-065..068 preserve complete success and guard/race DTOs through rea
         requests++;
         return Response.json(payload, { status });
       });
-      assert.deepEqual(result, payload, `${id} HTTP ${status}: preserve exact DTO`);
+      assert.deepEqual(result, { status, result: payload }, `${id} HTTP ${status}: preserve exact DTO and actual transport status`);
       assert.equal(requests, 1, `${id}: never retry a mutation`);
     }
   }
@@ -311,9 +312,10 @@ test("U03g SA-065..068 guard redirect precedes failure display and sanitizes nex
 });
 
 test("U03g ordinary denied settlement preserves CURRENT error and does not replay or refresh", async () => {
-  // T02 asks for a 409 refresh; this characterizes CURRENT only, not T02 acceptance.
+  // Non-409 denials retain CURRENT behavior, even if their body claims conflict.
   const denials = [
-    [409, { ok: false, message: "先に確保されました" }],
+    [200, { ok: false, status: 409, reason: "conflict", message: "先に確保されました" }],
+    [403, { ok: false, status: 409, httpStatus: 409, message: "先に確保されました" }],
     [403, { ok: false, reason: "banned", message: "利用停止中" }],
     [503, { ok: false, reason: "db_unavailable" }],
     [429, { ok: false, reason: "cost_guard_blocked", message: "" }],
@@ -326,6 +328,52 @@ test("U03g ordinary denied settlement preserves CURRENT error and does not repla
         () => settlementPath);
       assert.deepEqual(result, {
         ...describeSlotMutationResult(settlementPresentations[index], payload), refresh: false,
+      }, id);
+      assert.equal(requests, 1);
+    }
+  }
+});
+
+test("U03j T02 actual HTTP 409 requests read-only refresh with guard precedence and no retry", async () => {
+  for (const [index, [id, mutate]] of slotMutationCalls.entries()) {
+    const presentation = settlementPresentations[index];
+    for (const payload of [
+      { ok: false, message: "先に確保されました" },
+      { ok: false, status: 200, httpStatus: 403, message: "" },
+      { ok: false, reason: "conflict", pendingPublicReflection: true },
+    ]) {
+      let requests = 0;
+      const outcome = await runSlotMutation(presentation,
+        () => mutate(async () => { requests++; return Response.json(payload, { status: 409 }); }),
+        () => settlementPath);
+      assert.deepEqual(outcome, {
+        ...describeSlotMutationResult(presentation, payload), refresh: true,
+      }, id);
+      assert.equal(requests, 1, id + ": one POST only");
+    }
+    let requests = 0;
+    const guarded = await runSlotMutation(presentation,
+      () => mutate(async () => {
+        requests++;
+        return Response.json({ ok: false, reason: "tos_required", message: "同意が必要です" }, { status: 409 });
+      }), () => settlementPath);
+    assert.deepEqual(guarded, {
+      kind: "redirect", path: "/onboarding?next=" + encodeURIComponent(settlementPath), refresh: false,
+    }, id);
+    assert.equal(requests, 1);
+    for (const respond of [
+      () => Response.json({ ok: true }, { status: 409 }),
+      () => Response.json({ ok: "false" }, { status: 409 }),
+      () => new Response("invalid JSON", { status: 409 }),
+    ]) {
+      let requests = 0;
+      const outcome = await runSlotMutation(presentation,
+        () => mutate(async () => { requests++; return respond(); }),
+        () => { throw new Error("invalid response must not consult navigation"); });
+      assert.deepEqual(outcome, {
+        kind: "communication-error",
+        message: "通信エラーが発生しました。状態を再取得してもう一度お試しください。",
+        refresh: true,
       }, id);
       assert.equal(requests, 1);
     }
