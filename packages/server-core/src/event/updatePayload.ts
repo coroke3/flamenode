@@ -246,18 +246,28 @@ export function projectStageQuestionUpdate<
  * This helper is deliberately not a route or DB executor. */
 export function buildStageQuestionD1MutationBatch(input: {
   db: ServerCoreDb;
+  eventId: string;
   existing: readonly (typeof eventCustomQuestions.$inferSelect)[];
   next: readonly (typeof eventCustomQuestions.$inferSelect)[];
   deletedAnswers: readonly (typeof videoCustomAnswers.$inferSelect)[];
   actorUserId: string;
 }):
-  | { ok: false; reason: Exclude<StageQuestionMutationPlan<never, never, never>, { ok: true }>["reason"] }
+  | { ok: false; reason: Exclude<StageQuestionMutationPlan<never, never, never>, { ok: true }>["reason"] | "event_scope" }
   | {
       ok: true;
       mutationStatements: BatchItem<"sqlite">[];
       expectedMutationChanges: number[];
       audits: WriteAuditLogInput[];
     } {
+  // Fail closed on foreign-event snapshots *before* generating any SQL.
+  // The caller must still SELECT by event, enforce the 18/20 read caps and
+  // authenticate; this is a second defense against accidentally mixed rows.
+  if (!input.eventId ||
+      input.existing.some(row => row.event_id !== input.eventId) ||
+      input.next.some(row => row.event_id !== input.eventId) ||
+      input.deletedAnswers.some(row => row.event_id !== input.eventId)) {
+    return { ok: false, reason: "event_scope" };
+  }
   const stage = planStageQuestionMutationSteps(input);
   if (!stage.ok) return stage;
   const mutationStatements: BatchItem<"sqlite">[] = [];

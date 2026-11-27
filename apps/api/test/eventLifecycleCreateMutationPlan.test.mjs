@@ -1971,7 +1971,7 @@ async function stageMixedSqliteFixture() {
     ["delete_answers", "delete_questions", "update_question", "insert_questions"]);
   assert.deepEqual(stage.expectedMutationChanges, [2, 1, 1, 2]);
   const mutationPlan = buildStageQuestionD1MutationBatch({
-    db: f.db, existing, next, deletedAnswers: f.answers, actorUserId: "u_admin",
+    db: f.db, eventId: event.id, existing, next, deletedAnswers: f.answers, actorUserId: "u_admin",
   });
   assert.equal(mutationPlan.ok, true);
   assert.deepEqual(mutationPlan.expectedMutationChanges, stage.expectedMutationChanges);
@@ -2056,13 +2056,33 @@ test("MIG-0652 U03n: shared D1 mutation builder rejects over-cap and foreign ans
     ...f.before, id: "stage_cap_" + index, question_key: "stage_permission_cap_" + index,
   }));
   assert.deepEqual(buildStageQuestionD1MutationBatch({
-    db: f.db, existing: [], next: rows, deletedAnswers: [], actorUserId: "u_admin",
+    db: f.db, eventId: event.id, existing: [], next: rows, deletedAnswers: [], actorUserId: "u_admin",
   }), { ok: false, reason: "stage_limit" });
   assert.deepEqual(buildStageQuestionD1MutationBatch({
-    db: f.db, existing: [f.before], next: [],
+    db: f.db, eventId: event.id, existing: [f.before], next: [],
     deletedAnswers: [{ video_id: "foreign", event_id: event.id, question_id: "other",
       answer_text: "", answer_json: null, created_at: now, updated_at: now }],
     actorUserId: "u_admin",
   }), { ok: false, reason: "unrelated_answer" });
+  assert.equal(f.d1.stats.batches, 0);
+});
+
+test("MIG-0652 U03o: shared stage builder rejects foreign event snapshots before any D1 statement", async () => {
+  const { buildStageQuestionD1MutationBatch } = await import("@flamenode/server-core/event/updatePayload");
+  const f = stageUpdateSqliteFixture();
+  const answer = { video_id: "v1", event_id: event.id, question_id: f.before.id,
+    answer_text: "old", answer_json: null, created_at: now, updated_at: now };
+  const base = { db: f.db, eventId: event.id, actorUserId: "u_admin",
+    existing: [f.before], next: [], deletedAnswers: [answer] };
+  const reject = value => assert.deepEqual(buildStageQuestionD1MutationBatch(value),
+    { ok: false, reason: "event_scope" });
+  reject({ ...base, eventId: "" });
+  reject({ ...base, eventId: "different_event" });
+  reject({ ...base, existing: [{ ...f.before, event_id: "foreign_event" }] });
+  reject({ ...base, next: [{ ...f.before, event_id: "foreign_event" }] });
+  reject({ ...base, deletedAnswers: [{ ...answer, event_id: "foreign_event" }] });
+  const good = buildStageQuestionD1MutationBatch(base);
+  assert.equal(good.ok, true);
+  assert.deepEqual(good.expectedMutationChanges, [1, 1]);
   assert.equal(f.d1.stats.batches, 0);
 });
