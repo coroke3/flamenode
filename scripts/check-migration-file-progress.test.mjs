@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {execFileSync,spawnSync} from "node:child_process";
-import {fileURLToPath} from "node:url";
+import {fileURLToPath,pathToFileURL} from "node:url";
 import {validateFileProgress,parseFileRows,parsePageLedger,parseRouteHandlerLedger,parseActionLedger,isTrackedSourceCandidate,prCommitCheck} from "./check-migration-file-progress.mjs";
 
 const currentRoutes="| Route | Current file | Class | Role |\n| --- | --- | --- | --- |\n| \x60/about\x60 | \x60app/(public)/about/page.tsx\x60 | VISUAL_SCREEN | public |";
@@ -202,6 +202,42 @@ test("PR commit check: old main commit and base fail, branch commit passes",()=>
  assert.equal(check(branch),true);
  assert.equal(check("d".repeat(40)),false);
  fs.rmSync(dir,{recursive:true,force:true});
+});
+
+test("changedFileInputs reads the full baseline ledger above 1 MiB and fails closed on missing Git data",async(t)=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),"file-progress-large-ledger-"));
+ t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+ const git=(...a)=>execFileSync("git",["-c","user.name=t","-c","user.email=t@t","-c","commit.gpgsign=false",...a],{cwd:dir,encoding:"utf8"}).trim();
+ fs.mkdirSync(path.join(dir,"scripts"));
+ fs.mkdirSync(path.join(dir,"docs/migration"),{recursive:true});
+ for(const name of ["check-migration-file-progress.mjs","check-migration-work-items.mjs"]){
+  fs.copyFileSync(fileURLToPath(new URL(name,import.meta.url)),path.join(dir,"scripts",name));
+ }
+ git("init","-q");
+ git("commit","-q","--allow-empty","-m","no ledger");
+ const missingLedgerBase=git("rev-parse","HEAD");
+ const ledgerPath="docs/migration/FILE_MIGRATION_MATRIX.md";
+ const tailMarker="<!-- baseline ledger tail: 完全な証跡 -->\n";
+ const baselineMatrix=matrix+"\n"+"<!-- baseline evidence 台帳 -->\n".repeat(40_000)+tailMarker;
+ assert.ok(Buffer.byteLength(baselineMatrix,"utf8")>1024*1024);
+ fs.writeFileSync(path.join(dir,ledgerPath),baselineMatrix);
+ git("add",ledgerPath);
+ git("commit","-q","-m","large baseline ledger");
+ const baseSha=git("rev-parse","HEAD");
+ // Reading the working tree or HEAD instead of the committed base must not pass.
+ fs.writeFileSync(path.join(dir,ledgerPath),matrix+"\n<!-- current ledger -->\n");
+ git("commit","-q","-am","change ledger after base");
+ const script=path.join(dir,"scripts/check-migration-file-progress.mjs");
+ const {changedFileInputs}=await import(pathToFileURL(script).href);
+ const input=changedFileInputs(baseSha);
+ assert.deepEqual(input.changedPaths,[ledgerPath]);
+ assert.deepEqual(Buffer.from(input.baseMatrix,"utf8"),Buffer.from(baselineMatrix,"utf8"));
+ assert.ok(input.baseMatrix.endsWith(tailMarker));
+ // A valid commit that lacks the ledger must still fail the real CLI, not return an empty baseline.
+ const r=spawnSync(process.execPath,[script],{env:{...process.env,CI:"true",MIGRATION_FILE_BASE_SHA:missingLedgerBase},encoding:"utf8"});
+ assert.equal(r.status,1);
+ assert.match(r.stderr,/git changed-file validation unavailable/);
+ assert.doesNotMatch(r.stdout,/\[migration-file\] PASS/);
 });
 
 test("CLI fails closed in CI without MIGRATION_FILE_BASE_SHA",()=>{

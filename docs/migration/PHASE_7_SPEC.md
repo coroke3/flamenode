@@ -992,7 +992,7 @@ Phase 7 共通契約のとおり。
 
 ### MIG-0716: `/entry/slotted` と `/entry/unslotted` の画面（SA-086, SA-088、MIG-0703 U01 の後半）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — BLOCKED（D-16-11: MIG-0714 の `VideoForm` を使う）。読みは MIG-0623 で DONE。書き込みは契約先行で、merge は MIG-0651・0648・0650 の DONE 後
+- **Readiness:** NEEDS_REFINEMENT — MIG-0714 の component 依存は解消（D-16-11）。Lead は着手時に最新 CURRENT・既存 read client・共有 path の live owner を確認し、最小の契約先行 unit を具体化して着手可（読み MIG-0623 DONE）。共有 `videoCollaborators` は #464 / MIG-0715 の現 owner と直列調整し、重複作成・無断編集しない。#703 の trusted TARGET route / loader / authority / refresh 受入と、MIG-0651・0648・0650 DONE の merge gate は維持。
 - **Recipe:** R-SCREEN
 - **Runtime:** N
 - **Depends on:** MIG-0714 / **Decisions:** D-05 DECIDED, D-16-1, D-16-11
@@ -1035,7 +1035,7 @@ Phase 7 共通契約のとおり。
 
 ### MIG-0717: `/dashboard/edit/:id` の画面（SA-089、MIG-0703 U02 の前半）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — BLOCKED（D-16-11: MIG-0714 の `VideoForm` を使う）。読みは MIG-0630 で DONE。書き込みは契約先行で、merge は MIG-0651・0648・0650 の DONE 後
+- **Readiness:** NEEDS_REFINEMENT — MIG-0714 の component 依存は解消（D-16-11）。Lead は着手時に最新 CURRENT・既存 read client・MIG-0716 と共有する adapter / router 等の live owner を確認し、最小の契約先行 unit を具体化して着手可（読み MIG-0630 DONE）。#703 の trusted TARGET route / loader / authority / refresh 受入と、MIG-0651・0648・0650 DONE の merge gate は維持。
 - **Recipe:** R-SCREEN
 - **Runtime:** N
 - **Depends on:** MIG-0714 / **Decisions:** D-05 DECIDED, D-16-1, D-16-11
