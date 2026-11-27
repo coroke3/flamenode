@@ -66,7 +66,7 @@ const MONITOR_JOB_DETAILS = new Map<string, string>([
   ["fast-jobs:slot-deadline-reminders", "/admin/notifications"],
   ["content-jobs:cleanup", "/admin/static-builds"],
 ]);
-const MONITOR_PIPELINE_DETAILS = new Map<string, string>([
+const MONITOR_PIPELINE_DETAILS = new Map<PipelineSnapshot["id"], string>([
   ["notifications", "/admin/notifications"],
   ["static", "/admin/static-builds"],
   ["youtube", "/admin/youtube-sync"],
