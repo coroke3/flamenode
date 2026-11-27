@@ -42,6 +42,8 @@ Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 
 ## Loop / handoff rules
 
+**2026-11-27 P0 recovery:** [approved recovery decisions](OPEN_DECISIONS.md#2026-11-27-owner-delegated-bottleneck-recovery-approved-direction-execution-gates-remain). Prioritize #714/#727 auth prerequisite and shared S3 follow-up (#692/#724/#725/#893/#691), #456/#685/#693 CPU evidence, then dependent API/UI and approved #696 form decomposition. Existing Draft ownership remains; no task promoted to DONE from policy alone. 5–8 active focus lanes, serial final merge, existing test reuse. Cloudflare release gate #773 remains separate.
+
 2026-11-27 owner policy: 通常の移行PRは個別の人間承認不要。全micro-unit・受入条件・依存・rollback・最新main統合・最終HEADの必須CI成功と独立APPROVEを確認したagentがsquash mergeし、mainで確認して次のREADYへ進む。高リスクは独立した上位Lead agentの追加レビューを要求するが、既定仕様の範囲内のコード統合に人間承認は不要。非本番Phase Gateは証拠に基づく独立Leadレビューで通過可能。本番切替・本番DB/データ移行・Route/Custom Domain/DNS・Secrets・仕様/権限/可視性の意味変更は別途明示承認を維持する。通常main mergeに伴う既存Workers Builds自動実行はこの方針で許可するが、手動deployや本番切替の許可ではない。既存の個別承認待ち記録は履歴であり、本方針が優先する。
 
 テストは既存suite・fixture・helperを優先し、既存ファイルへの最小限の回帰ケース追加を原則とする。既存テストで受入条件を証明できる場合は新規テストを作らない。重複・同等ケース、証跡だけのtest-only PR、別ファイルへの細分化を避ける。新規ファイルは既存suiteでは必要な契約を検証できない場合に限り、理由・非重複性をPRへ記録する。必須検証・安全性・失敗系カバレッジを削減したり、未実行をPASSにしたりしない。
