@@ -29,6 +29,8 @@ test("MIG-0652 U01: 20 unique parts maximum, in original order", () => {
 
 test("MIG-0652 U01: CURRENT eventForm export points to same domain function", async () => {
   const legacy = await readFile(new URL("../../../src/lib/event/eventForm.ts", import.meta.url), "utf8");
-  assert.ok(legacy.includes('export { buildPartsJson } from "@flamenode/domain/event";'));
+  const current = await import("../../../src/lib/event/eventForm.ts");
+  assert.equal(current.buildPartsJson, buildPartsJson);
+  assert.ok(legacy.includes('from "@flamenode/domain/event/form";'));
   assert.ok(!legacy.includes("export function buildPartsJson("));
 });

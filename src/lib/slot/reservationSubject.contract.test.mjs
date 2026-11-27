@@ -17,8 +17,12 @@ const eventFormSource = await readFile(
   new URL("../../components/admin/EventForm.tsx", import.meta.url),
   "utf8",
 );
-const eventFormSchema = await readFile(
+const eventFormBridge = await readFile(
   new URL("../event/eventForm.ts", import.meta.url),
+  "utf8",
+);
+const eventFormSchema = await readFile(
+  new URL("../../../packages/domain/src/event/form.ts", import.meta.url),
   "utf8",
 );
 
@@ -87,6 +91,7 @@ test("EventFormはmax_slots 1-20とstage質問4件上限を反映", () => {
     eventFormSource,
     /ステージ・権利確認質問は最大\{MAX_STAGE_PERMISSION_QUESTIONS\}件です/,
   );
+  assert.match(eventFormBridge, /export\s*\{[^}]*\beventSchema\b[^}]*\}\s*from\s*"@flamenode\/domain\/event\/form"/s);
   assert.match(eventFormSchema, /min\(MIN_SLOTS_PER_VIDEO\)/);
   assert.match(eventFormSchema, /max\(MAX_SLOTS_PER_VIDEO\)/);
 });

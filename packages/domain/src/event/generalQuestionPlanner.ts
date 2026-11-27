@@ -31,7 +31,7 @@ function normalizeQuestionKey(raw: unknown): string {
 function isStagePermissionQuestionKey(key: string): boolean {
   return key === "stage_permission" || key.startsWith("stage_permission_");
 }
-function parseQuestionType(value: unknown): GeneralQuestionPlannerType {
+export function parseGeneralQuestionType(value: unknown): GeneralQuestionPlannerType {
   if (typeof value === "string" && VALID_TYPES.has(value)) return value as GeneralQuestionPlannerType;
   return "textarea";
 }
@@ -63,6 +63,11 @@ function parseOptionsJson(raw: string | null | undefined): string[] {
 function serializeOptionsJson(options: readonly string[] | null | undefined): string | null {
   const normalized = parseOptionsJson(JSON.stringify(options ?? []));
   return normalized.length > 0 ? JSON.stringify(normalized) : null;
+}
+
+/** Same normalization used by CURRENT's FormData reader before row planning. */
+export function normalizeGeneralQuestionOptions(options: readonly string[]): string[] {
+  return parseOptionsJson(JSON.stringify(options));
 }
 
 export function plannedGeneralQuestionsFromDraftsCore(args: {
@@ -97,7 +102,7 @@ export function plannedGeneralQuestionsFromDraftsCore(args: {
       return { ok: false, message: "カスタム質問の質問名を入力してください。" };
     }
 
-    const type = parseQuestionType(draft.type);
+    const type = parseGeneralQuestionType(draft.type);
     const optionsJson = questionTypeNeedsOptions(type)
       ? serializeOptionsJson(draft.options)
       : null;

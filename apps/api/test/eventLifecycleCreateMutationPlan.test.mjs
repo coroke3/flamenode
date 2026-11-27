@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
+import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
 import * as schema from "@flamenode/db/schema";
 import {
@@ -17,6 +18,9 @@ import {
 import { mutateWithAudit } from "@flamenode/server-core/audit/mutate";
 import { buildEventChangeQueueBatch } from "@flamenode/server-core/staticRebuild/hooks";
 import { createSqlite, createD1, insert } from "./support/personalHarness.mjs";
+import { createAdminRoutes } from "../src/routes/admin/index.ts";
+import { eventCreateRoutes } from "../src/eventLifecycle/createRoute.ts";
+import { snapshotFromEvent } from "@flamenode/domain/eventTemplates";
 
 const db = drizzle(createD1(createSqlite()), { schema });
 const now = 1794115200;
@@ -24,6 +28,11 @@ const owner = buildEventCreateOwnerStaffRow({
   staffId: "es_owner", eventId: "ev_create", actorUserId: "u_admin",
   verifiedOwnerIdentity: { x_user_id: "x_approved", display_name: "Approved" }, now,
 });
+const ownerSnapshot = {
+  identity: { x_user_id: "x_approved", display_name: "Approved" },
+  persistedActiveX: { type: "text", hex: Buffer.from("x_approved").toString("hex").toUpperCase() },
+  displayName: { type: "text", hex: Buffer.from("Approved").toString("hex").toUpperCase() },
+};
 const event = buildEventCreateFields({
   id: "ev_create",
   data: {
@@ -59,18 +68,24 @@ const makePlan = (overrides = {}) => {
     db, eventRow: event, ownerRow: owner,
     questionRows, questionChunks: overrides.questionChunks ?? planned?.chunks ?? [],
     queue: { statements: [], expectedChanges: [], acceptedTargetCount: 0 },
-    actorUserId: "u_admin", hasRenameTombstone: false,
+    actorUserId: "u_admin", ownerSnapshot, hasRenameTombstone: false,
     ...overrides,
   });
 };
 
 /** Transactional D1 on the complete migrated schema; unlike createD1 this fake
  * models D1 batch BEGIN/ROLLBACK and per-statement changes() assertions. */
-function createAtomicCreateHarness() {
+function createAtomicCreateHarness({ beforeBatch = null, beforeRead = null } = {}) {
   const sqlite = createSqlite();
-  const stats = { batches: 0, statements: 0, maxBinds: 0 };
+  const stats = { batches: 0, statements: 0, reads: 0, batchStatements: 0, maxBinds: 0 };
+  let inBatch = false;
   const execSql = (sqlText, params, arrays = false) => {
     stats.statements += 1;
+    if (inBatch) stats.batchStatements++;
+    else {
+      stats.reads++;
+      beforeRead?.(sqlite, sqlText, stats.reads);
+    }
     stats.maxBinds = Math.max(stats.maxBinds, params.length);
     const stmt = sqlite.prepare(sqlText);
     if (arrays) stmt.setReturnArrays(true);
@@ -92,6 +107,8 @@ function createAtomicCreateHarness() {
     stats, prepare: (sqlText) => prepare(sqlText),
     batch: async (statements) => {
       stats.batches += 1;
+      beforeBatch?.(sqlite);
+      inBatch = true;
       sqlite.exec("BEGIN");
       try {
         const result = statements.map(s => {
@@ -104,6 +121,8 @@ function createAtomicCreateHarness() {
       } catch (error) {
         sqlite.exec("ROLLBACK");
         throw error;
+      } finally {
+        inBatch = false;
       }
     },
   };
@@ -125,7 +144,7 @@ function createExecutableWritePlan(
     db, eventRow: event, ownerRow,
     questionRows, questionChunks: planned.chunks,
     queue,
-    actorUserId: "u_admin", hasRenameTombstone: false,
+    actorUserId: "u_admin", ownerSnapshot, hasRenameTombstone: false,
   });
   assert.equal(plan.ok, true);
   return plan;
@@ -348,12 +367,9 @@ test("MIG-0652 U02 SQLite T08: revoking a linked owner after planning but before
 test("MIG-0652 U02 SQLite T09: forged owner display name cannot be audited or committed", async () => {
   const { sqlite, d1, db } = createAtomicCreateHarness();
   seedCreateActor(sqlite);
-  const plan = createExecutableWritePlan(db,
-    { statements: [], expectedChanges: [], acceptedTargetCount: 0 },
-    { ...owner, display_name: "FORGED" });
-  assert.equal(plan.preMutationAssertions.length, 1);
-  await assert.rejects(mutateWithAudit(db, plan));
-  assert.equal(d1.stats.batches, 1);
+  const plan = makePlan({ db, ownerRow: { ...owner, display_name: "FORGED" } });
+  assert.deepEqual(plan, { ok: false, message: EVENT_CREATE_INVALID_PLAN });
+  assert.equal(d1.stats.batches, 0, "decoded owner fields must match the authoritative snapshot before planning");
   for (const table of ["events", "event_staff", "event_custom_questions", "audit_logs"]) {
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM " + table).get().n, 0);
   }
@@ -512,11 +528,10 @@ test("MIG-0652 U02 atomic create: source keeps unmounted route and no premature 
   const app = await readFile(new URL("../src/routes/events/index.ts", import.meta.url), "utf8");
   const source = await readFile(new URL("../../../src/lib/actions/event-admin.ts", import.meta.url), "utf8");
   assert.doesNotMatch(app, /createMutationPlan|createRoute/);
-  assert.match(core, /planD1AuditMutationBudget\(/);
-  assert.match(core, /mutationAssertionCount: mutationStatements.length/);
-  assert.match(core, /preMutationAssertionCount: preMutationAssertions.length/);
+  assert.match(core, /planAtomicAuditMutationBudget\(write\)/);
+  assert.match(core, /mutationStatements, expectedMutationChanges, preMutationAssertions, audits/);
   assert.match(core, /approval_status/);
-  assert.match(core, /xUsers\.x_name\} = \$\{ownerRow\.display_name/);
+  assert.match(core, /hex\(CAST\(\$\{xUsers\.x_name\} AS BLOB\)\) = \$\{ownerSnapshot\.displayName\.hex/);
   assert.ok(core.includes("EVENT_ID_PATTERN.test(eventRow.id)"));
   assert.doesNotMatch(core, /staticRebuildWakeSource:/);
   assert.match(source, /const mutationStatements = \[/);
@@ -525,4 +540,396 @@ test("MIG-0652 U02 atomic create: source keeps unmounted route and no premature 
   assert.match(source, /public_api_enabled: 0/);
   assert.match(core, /eventRow\.public_api_enabled !== 0/);
   assert.match(core, /ownerRow\.custom_permission_keys_json !== null/);
+});
+
+const SITE = "https://app.flamenode.example";
+const SESSION_TOKEN = "11111111-1111-4111-8111-111111111111";
+const SESSION_COOKIE = "__Secure-authjs.session-token=" + SESSION_TOKEN;
+const CREATE_BODY = { id: "ev_create", title: " New Event ", max_slots_per_video: "20" };
+
+/** Actual admin parent and cookie session over the existing transactional D1. */
+function createRouteFixture(options = {}) {
+  const harness = createAtomicCreateHarness(options);
+  const { sqlite, d1 } = harness;
+  seedCreateActor(sqlite, options);
+  sqlite.prepare('UPDATE "user" SET role = ?, is_banned = ?, is_tos_accepted = ? WHERE id = ?')
+    .run(options.role ?? "admin", options.isBanned ?? 0, options.tosAccepted ?? 1, "u_admin");
+  sqlite.prepare("UPDATE system_settings SET operation_mode = ?, audit_max_payload_bytes = 120000 WHERE id = 'default'")
+    .run(options.mode ?? "normal");
+  insert(sqlite, "session", {
+    sessionToken: SESSION_TOKEN, userId: "u_admin",
+    expires: Date.now() + (options.expired ? -60_000 : 86_400_000),
+  });
+  const admin = createAdminRoutes();
+  admin.route("/events", eventCreateRoutes);
+  const app = new Hono();
+  app.route("/api/admin", admin);
+  let externalCalls = 0;
+  const external = () => { externalCalls++; throw new Error("unexpected external call"); };
+  const env = { DB: d1, NEXT_PUBLIC_SITE_URL: SITE,
+    BUCKET: { get: external, put: external, delete: external },
+    STATIC_REBUILD_QUEUE: { send: external, sendBatch: external },
+  };
+  const request = (body = CREATE_BODY, { cookie = SESSION_COOKIE, origin = SITE, raw, headers = {} } = {}) =>
+    app.request(SITE + "/api/admin/events", {
+      method: "POST",
+      headers: { "content-type": "application/json",
+        ...(origin === null ? {} : { Origin: origin }),
+        ...(cookie === null ? {} : { Cookie: cookie }), ...headers,
+      },
+      body: raw ?? JSON.stringify(body),
+    }, env);
+  return { ...harness, request, app, env, externalCalls: () => externalCalls };
+}
+
+function assertNoCreatedRows(sqlite) {
+  for (const table of ["events", "event_staff", "event_custom_questions", "audit_logs", "static_rebuild_queue"]) {
+    assert.equal(sqlite.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n, 0, table);
+  }
+}
+
+function addApprovedLink(sqlite, id, { name = id, role = "owner", status = "approved" } = {}) {
+  insert(sqlite, "x_users", { id, x_name: name, approval_status: status });
+  insert(sqlite, "x_user_account_links", { x_user_id: id, auth_user_id: "u_admin", link_role: role });
+}
+
+function seedTemplate(sqlite, count = 1) {
+  const templateEvent = { ...event, required_video_fields_json: '["music"]',
+    review_settings: '{"approved":true}', editable_fields: '["title"]', repeat_rules: '["weekly"]' };
+  const rows = Array.from({ length: count }, (_, i) => ({
+    question_key: "template_" + i, label: "Template " + i, description: "description",
+    type: "textarea", required: 0, options_json: null, placeholder: "placeholder",
+    max_length: 1000, sort_order: i, is_active: 1, visibility: "review",
+  }));
+  const snapshot = snapshotFromEvent(templateEvent, rows,
+    '{"stage_permissions":[{"id":"stage_permission_template","enabled":true,"label":"Template stage"}]}');
+  insert(sqlite, "event_templates", {
+    id: "et_test", name: "Template", settings_json: JSON.stringify(snapshot),
+    created_by_user_id: "u_admin", created_at: 100, updated_at: 100,
+  });
+  return snapshot;
+}
+
+test("MIG-0652 U03: real-cookie admin create persists exact fields, owner, audit and Queue in one batch", async () => {
+  const { sqlite, d1, request, externalCalls } = createRouteFixture();
+  const response = await request({ ...CREATE_BODY, visibility_status: "public",
+    icon_url: "https://user:secret@example.com/icon", youtube_description_template: " line1\r\nline2 ",
+    public_api_enabled: "1", review_settings: "untrusted", editable_fields: "untrusted", repeat_rules: "untrusted",
+    custom_questions_present: "1", custom_question_id: ["stage_permission_a", "stage_permission_a"],
+    custom_question_enabled: ["1", "1"], custom_question_required: ["0", "1"],
+    custom_question_label: [" First label ", "Ignored label"],
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true, eventId: "ev_create", pendingPublicReflection: true });
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
+  const row = sqlite.prepare("SELECT * FROM events").get();
+  assert.equal(row.title, "New Event");
+  assert.equal(row.max_slots_per_video, 20, "CURRENT form cap is 20, not the unrelated event limit 3");
+  assert.equal(row.visibility_status, "public");
+  assert.equal(row.public_api_enabled, 0);
+  assert.equal(row.icon_url, null);
+  assert.equal(row.youtube_description_template, "line1\nline2");
+  for (const key of ["review_settings", "editable_fields", "repeat_rules"]) assert.equal(row[key], null);
+  const ownerRow = sqlite.prepare("SELECT * FROM event_staff").get();
+  assert.equal(ownerRow.x_user_id, "x_approved");
+  assert.equal(ownerRow.permission_preset, "owner");
+  assert.equal(ownerRow.is_public, 1);
+  assert.equal(ownerRow.public_role_label, "主催");
+  assert.equal(ownerRow.custom_permission_keys_json, null);
+  const question = sqlite.prepare("SELECT * FROM event_custom_questions").get();
+  assert.equal(question.label, "First label");
+  assert.equal(question.required, 1, "duplicate stage IDs merge required with OR");
+  const audits = sqlite.prepare("SELECT table_name, after_json FROM audit_logs").all();
+  assert.equal(audits.length, 3);
+  assert.deepEqual(JSON.parse(audits.find(a => a.table_name === "events").after_json), { ...row });
+  assert.equal(d1.stats.reads, 7, "session + terms + CostGuard + duplicate + tombstone + linked-X resolution + exact owner");
+  assert.equal(d1.stats.batches, 1);
+  assert.ok(d1.stats.statements <= 50);
+  assert.ok(d1.stats.maxBinds <= 100);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 9);
+  assert.equal(externalCalls(), 0, "no R2, Queue wake or remote side effect");
+});
+
+test("MIG-0652 U03: template defaults inherit only when presence flags are absent", async () => {
+  for (const explicitEmpty of [false, true]) {
+    const { sqlite, d1, request } = createRouteFixture();
+    const snapshot = seedTemplate(sqlite);
+    const body = { ...CREATE_BODY, template_id: "et_test", review_settings: "form override",
+      ...(explicitEmpty ? { required_video_fields_present: "1", required_video_fields_json: "[]",
+        general_custom_questions_present: "1", general_custom_question_key: [] } : {}),
+    };
+    const response = await request(body);
+    assert.equal(response.status, 200);
+    const row = sqlite.prepare("SELECT * FROM events").get();
+    assert.equal(row.required_video_fields_json, explicitEmpty ? null : snapshot.required_video_fields_json);
+    for (const key of ["review_settings", "editable_fields", "repeat_rules"]) assert.equal(row[key], snapshot[key]);
+    const questions = sqlite.prepare("SELECT question_key FROM event_custom_questions").all();
+    assert.deepEqual(questions.map(q => q.question_key), explicitEmpty ? [] : ["template_0"]);
+    assert.equal(d1.stats.reads, 8, "template costs one read, audit preloads do not reread");
+    assert.equal(d1.stats.batches, 1);
+  }
+});
+
+test("MIG-0652 U03: ordered repeated controls preserve scalar last value and first presence flag", async () => {
+  const { sqlite, request } = createRouteFixture();
+  seedTemplate(sqlite);
+  const response = await request({ ...CREATE_BODY, template_id: "et_test", title: ["first", "last"],
+    required_video_fields_present: ["0", "1"], required_video_fields_json: "[]",
+    general_custom_questions_present: "1", general_custom_question_key: ["q_one"],
+    general_custom_question_type: ["checkbox"], general_custom_question_label: [" Choices "],
+    general_custom_question_options: [" a \na\nb"], general_custom_question_enabled: ["0"],
+  });
+  assert.equal(response.status, 200);
+  assert.equal(sqlite.prepare("SELECT title FROM events").get().title, "last");
+  assert.equal(sqlite.prepare("SELECT required_video_fields_json FROM events").get().required_video_fields_json, '["music"]');
+  const q = sqlite.prepare("SELECT * FROM event_custom_questions").get();
+  assert.equal(q.label, "Choices");
+  assert.equal(q.options_json, '["a","b"]');
+  assert.equal(q.is_active, 0, "disabled definitions remain persisted and audited");
+});
+
+test("MIG-0652 U03: full 18-question template/stage create remains within actual D1 bounds", async (t) => {
+  const { sqlite, d1, request } = createRouteFixture();
+  seedTemplate(sqlite, 14);
+  const response = await request({ ...CREATE_BODY, template_id: "et_test", custom_questions_present: "1",
+    custom_question_id: Array.from({ length: 4 }, (_, i) => "stage_permission_" + i),
+    custom_question_enabled: ["1", "1", "1", "1"],
+    custom_question_label: ["a", "b", "c", "d"],
+  });
+  assert.equal(response.status, 200);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM event_custom_questions").get().n, 18);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 20);
+  assert.equal(d1.stats.reads, 8);
+  assert.equal(d1.stats.batches, 1);
+  assert.equal(d1.stats.statements, d1.stats.reads + d1.stats.batchStatements);
+  assert.ok(d1.stats.statements <= 50);
+  assert.ok(d1.stats.maxBinds <= 100);
+  t.diagnostic("full 18-question route D1 counters: " + JSON.stringify(d1.stats));
+});
+
+test("MIG-0652 U03: CURRENT Active-X normalization, fallback, manager links and raw alias selection", async () => {
+  const cases = [
+    { selectedX: null }, { selectedX: "stale" }, { selectedX: " @X_APPROVED " },
+    { selectedX: "@X_APPROVED", second: "x_other" },
+    { selectedX: null, manager: true },
+    { selectedX: null, second: "x_other", denied: true },
+    { selectedX: "stale", second: "x_other", denied: true },
+  ];
+  for (const item of cases) {
+    const { sqlite, request } = createRouteFixture(item);
+    if (item.second) addApprovedLink(sqlite, item.second);
+    if (item.manager) sqlite.prepare("UPDATE x_user_account_links SET link_role = 'manager'").run();
+    const response = await request();
+    assert.equal(response.status, item.denied ? 400 : 200, JSON.stringify(item));
+    if (item.denied) {
+      assert.match((await response.json()).message, /承認済みの Active X ID/);
+      assertNoCreatedRows(sqlite);
+    } else assert.equal(sqlite.prepare("SELECT x_user_id FROM event_staff").get().x_user_id, "x_approved");
+  }
+  for (const includeTrimmed of [false, true]) {
+    const { sqlite, request } = createRouteFixture({ selectedX: null, linked: false });
+    addApprovedLink(sqlite, " FoO ", { name: "Space name" });
+    if (includeTrimmed) addApprovedLink(sqlite, "FoO", { name: "Trimmed name" });
+    const response = await request();
+    assert.equal(response.status, includeTrimmed ? 200 : 400);
+    if (includeTrimmed) {
+      const staff = sqlite.prepare("SELECT x_user_id, display_name FROM event_staff").get();
+      assert.equal(staff.x_user_id, "FoO");
+      assert.equal(staff.display_name, "Trimmed name");
+    } else assert.match((await response.json()).message, /紐付いた X 名義/);
+  }
+  // Node22's SQLite driver truncates embedded NUL on text reads. CURRENT's
+  // exact owner SQL must still reject a decoded ID that is not stored exactly.
+  {
+    const { sqlite, d1, request } = createRouteFixture({ selectedX: null, linked: false });
+    addApprovedLink(sqlite, "foo\0tail");
+    const response = await request();
+    assert.equal(response.status, 400);
+    assert.match((await response.json()).message, /紐付いた X 名義/);
+    assertNoCreatedRows(sqlite);
+    assert.equal(d1.stats.batches, 0);
+  }
+  // Keep CURRENT's decoded selection/label while witnessing their actual D1
+  // type and bytes. An unchanged raw NUL-containing field is not a CAS race.
+  {
+    const { sqlite, request } = createRouteFixture({ selectedX: "x_approved\0tail" });
+    addApprovedLink(sqlite, "x_other");
+    sqlite.prepare("UPDATE x_users SET x_name = ? WHERE id = 'x_approved'").run("Approved\0tail");
+    assert.equal((await request()).status, 200);
+    const staff = sqlite.prepare("SELECT x_user_id, display_name, hex(display_name) AS name_hex FROM event_staff").get();
+    assert.equal(staff.x_user_id, "x_approved");
+    assert.equal(staff.display_name, "Approved");
+    assert.equal(staff.name_hex, Buffer.from("Approved").toString("hex").toUpperCase());
+    const audit = sqlite.prepare("SELECT after_json FROM audit_logs WHERE table_name = 'event_staff'").get();
+    assert.equal(JSON.parse(audit.after_json).display_name, "Approved");
+  }
+});
+
+test("MIG-0652 U03: unchanged chosen owner survives an additional approved link after fallback", async () => {
+  const { sqlite, request } = createRouteFixture({ selectedX: null,
+    beforeBatch(sqlite) { addApprovedLink(sqlite, "new_link"); },
+  });
+  assert.equal((await request()).status, 200);
+  assert.equal(sqlite.prepare("SELECT x_user_id FROM event_staff").get().x_user_id, "x_approved");
+});
+
+test("MIG-0652 U03: real parent rejects invalid origin/session/role/BAN/ToS/CostGuard before writes", async () => {
+  const cases = [
+    [{}, { origin: "https://attacker.example" }, 403, "invalid_origin"],
+    [{}, { cookie: null }, 401, "unauthenticated"],
+    [{ expired: true }, {}, 401, "unauthenticated"],
+    [{ role: "user" }, {}, 403, "forbidden"],
+    [{ isBanned: 1 }, {}, 403, "banned"],
+    [{ tosAccepted: 0 }, {}, 403, "tos_required"],
+    [{ mode: "readonly" }, {}, 503, "maintenance_mode"],
+  ];
+  for (const [fixture, options, status, reason] of cases) {
+    const { sqlite, d1, request } = createRouteFixture(fixture);
+    const response = await request(CREATE_BODY, options);
+    assert.equal(response.status, status, reason);
+    assert.equal((await response.json()).reason, reason);
+    assert.equal(response.headers.get("cache-control"), "private, no-store");
+    assertNoCreatedRows(sqlite);
+    assert.equal(d1.stats.batches, 0);
+    if (reason === "invalid_origin") assert.equal(d1.stats.statements, 0);
+  }
+});
+
+test("MIG-0652 U03: invalid transport/schema/template/owner/question inputs never write", async () => {
+  const cases = [
+    [{}, { ...CREATE_BODY, title: "" }, /String must contain/],
+    [{}, { ...CREATE_BODY, id: "bad/id" }, /イベントID/],
+    [{}, { ...CREATE_BODY, max_slots_per_video: "21" }, /20/],
+    [{}, { ...CREATE_BODY, start_time: "2026-11-28T12:00", end_time: "2026-11-27T12:00" }, /start_time must not be later than end_time/],
+    [{}, { ...CREATE_BODY, template_id: "missing" }, /テンプレートが見つかりません/],
+    [{ status: "pending" }, CREATE_BODY, /承認済み/],
+    [{ linked: false }, CREATE_BODY, /承認済み/],
+    [{}, { ...CREATE_BODY, general_custom_questions_present: "1", general_custom_question_key: ["a b", "a_b"],
+      general_custom_question_label: ["one", "two"] }, /識別子が重複/],
+    [{}, { ...CREATE_BODY, general_custom_questions_present: "1", general_custom_question_key: ["choice"],
+      general_custom_question_label: ["Choice"], general_custom_question_type: ["select"] }, /選択肢を1件/],
+  ];
+  for (const [options, body, message] of cases) {
+    const { sqlite, d1, request } = createRouteFixture(options);
+    const response = await request(body);
+    assert.equal(response.status, 400, JSON.stringify(body));
+    assert.match((await response.json()).message, message);
+    assertNoCreatedRows(sqlite);
+    assert.equal(d1.stats.batches, 0);
+  }
+  for (const raw of ["{", "[]", '{"title":{}}', '{"title":["ok",1]}']) {
+    const { sqlite, request } = createRouteFixture();
+    assert.equal((await request(undefined, { raw })).status, 400);
+    assertNoCreatedRows(sqlite);
+  }
+  const { sqlite, request } = createRouteFixture();
+  const raw = JSON.stringify({ title: "x".repeat(65536) });
+  assert.equal((await request(undefined, { raw, headers: { "content-length": "1" } })).status, 413);
+  assertNoCreatedRows(sqlite);
+});
+
+test("MIG-0652 U03: duplicate ID and known rename tombstone are denied without partial effects", async () => {
+  {
+    const { sqlite, d1, request } = createRouteFixture();
+    insert(sqlite, "events", event);
+    const response = await request();
+    assert.equal(response.status, 409);
+    assert.equal((await response.json()).message, "ID「ev_create」は既に存在します。");
+    assert.equal(d1.stats.batches, 0);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+  }
+  {
+    const { sqlite, d1, request, externalCalls } = createRouteFixture();
+    seedRenameTombstone(sqlite);
+    const response = await request();
+    assert.equal(response.status, 503);
+    assert.match((await response.json()).message, /旧URLの公開データ削除中/);
+    assertNoCreatedRows(sqlite);
+    assert.equal(d1.stats.batches, 0);
+    assert.equal(externalCalls(), 0);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM public_visibility_fences").get().n, 1);
+  }
+});
+
+function seedRenameTombstone(sqlite) {
+  insert(sqlite, "public_visibility_fences", { entity_type: "event", entity_id: "ev_create",
+    state: "blocked", reason: "event_id_rename_old_cleanup", fence_token: "rename-token",
+    blocked_at: 100, updated_at: 100,
+  });
+}
+
+test("MIG-0652 U03: owner and tombstone races roll back the entire create batch", async (t) => {
+  const logged = [];
+  t.mock.method(console, "error", (...args) => logged.push(args.join(" ")));
+  const changes = [
+    sqlite => sqlite.prepare("UPDATE x_users SET approval_status = 'rejected'").run(),
+    sqlite => sqlite.prepare("DELETE FROM x_user_account_links").run(),
+    sqlite => sqlite.prepare("UPDATE x_users SET x_name = 'changed'").run(),
+    sqlite => sqlite.prepare('UPDATE "user" SET active_x_user_id = NULL').run(),
+    sqlite => sqlite.prepare('UPDATE "user" SET active_x_user_id = CAST(active_x_user_id AS BLOB)').run(),
+    sqlite => sqlite.prepare("UPDATE x_users SET x_name = CAST(x_name AS BLOB)").run(),
+    seedRenameTombstone,
+  ];
+  for (const beforeBatch of changes) {
+    const { sqlite, d1, request } = createRouteFixture({ beforeBatch });
+    const response = await request();
+    assert.equal(response.status, 500);
+    assert.equal((await response.json()).ok, false);
+    assertNoCreatedRows(sqlite);
+    assert.equal(d1.stats.batches, 1);
+    assert.ok(d1.stats.batchStatements > 0, "race setup succeeded and the SQL assertion ran");
+    if (beforeBatch === seedRenameTombstone) {
+      assert.equal(sqlite.prepare("SELECT fence_token FROM public_visibility_fences").get().fence_token, "rename-token");
+    }
+  }
+  for (const target of ["active", "name"]) {
+    const { sqlite, d1, request } = createRouteFixture({
+      selectedX: target === "active" ? "x_approved\0before" : "x_approved",
+      beforeBatch(sqlite) {
+        if (target === "active") sqlite.prepare('UPDATE "user" SET active_x_user_id = ?').run("x_approved\0after");
+        else sqlite.prepare("UPDATE x_users SET x_name = ?").run("Approved\0after");
+      },
+    });
+    if (target === "name") sqlite.prepare("UPDATE x_users SET x_name = ?").run("Approved\0before");
+    assert.equal((await request()).status, 500, "raw bytes changed despite the same decoded prefix: " + target);
+    assertNoCreatedRows(sqlite);
+    assert.equal(d1.stats.batches, 1);
+    assert.ok(d1.stats.batchStatements > 0);
+  }
+  assert.ok(logged.every(line => line === "[MIG-0652] EVENT_CREATE_FAILED"));
+});
+
+test("MIG-0652 U03: strict audit failure restores existing Queue row and exposes no provider details", async (t) => {
+  const logged = [];
+  t.mock.method(console, "error", (...args) => logged.push(args.join(" ")));
+  const { sqlite, d1, request } = createRouteFixture();
+  insert(sqlite, "static_rebuild_queue", {
+    id: "old_pending", target_type: "event_base", target_id: "ev_create", status: "pending",
+    reason: "old", priority: "low", requested_by_user_id: null, created_at: 100, updated_at: 100,
+  });
+  const old = { ...sqlite.prepare("SELECT * FROM static_rebuild_queue").get() };
+  sqlite.exec("CREATE TRIGGER reject_create_audit BEFORE INSERT ON audit_logs BEGIN SELECT RAISE(ABORT, 'private-provider-secret'); END");
+  const response = await request();
+  assert.equal(response.status, 500);
+  assert.doesNotMatch(await response.text(), /private-provider-secret|INSERT|audit_logs/);
+  assert.equal(d1.stats.batches, 1);
+  assert.deepEqual({ ...sqlite.prepare("SELECT * FROM static_rebuild_queue").get() }, old);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 1);
+  for (const table of ["events", "event_staff", "event_custom_questions", "audit_logs"]) {
+    assert.equal(sqlite.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n, 0);
+  }
+  assert.deepEqual(logged, ["[MIG-0652] EVENT_CREATE_FAILED"]);
+});
+
+test("MIG-0652 U03: preflight provider failure is private, redacted, and performs no batch", async (t) => {
+  t.mock.method(console, "error", () => {});
+  const { sqlite, d1, request } = createRouteFixture({
+    beforeRead(_sqlite, sql) { if (/from "events"/i.test(sql)) throw new Error("private-provider-secret"); },
+  });
+  const response = await request();
+  assert.equal(response.status, 500);
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
+  assert.doesNotMatch(await response.text(), /private-provider-secret|SELECT|events/);
+  assertNoCreatedRows(sqlite);
+  assert.equal(d1.stats.batches, 0);
 });

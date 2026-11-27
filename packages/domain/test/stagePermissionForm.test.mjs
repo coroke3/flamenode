@@ -79,11 +79,12 @@ test("MIG-0652 U01: four-stage cap, trim then UTF-16 truncate, no cross-row dedu
 
 test("MIG-0652 U01: CURRENT EventForm only delegates to the core with its own defaults", async () => {
   const current = await readFile(new URL("../../../src/lib/event/eventForm.ts", import.meta.url), "utf8");
-  const currentDefaults = await readFile(new URL("../../../src/lib/video/formSettings.ts", import.meta.url), "utf8");
-  assert.match(current, /import \{ normalizeOptionalEventId, buildVideoFormSettingsJsonCore \} from "@flamenode\/domain\/event"/);
-  assert.match(current, /return buildVideoFormSettingsJsonCore\(formData, DEFAULT_STAGE_PERMISSION_FIELD\)/);
+  const canonical = await readFile(new URL("../src/event/form.ts", import.meta.url), "utf8");
+  const currentDefaults = await import("../../../src/lib/video/formSettings.ts");
+  assert.match(current, /from "@flamenode\/domain\/event\/form"/);
+  assert.match(canonical, /return buildVideoFormSettingsJsonCore\(formData, DEFAULT_STAGE_PERMISSION_FIELD\)/);
   assert.doesNotMatch(current, /function cleanQuestionId\(/);
   for (const value of Object.values(defaults)) {
-    assert.ok(currentDefaults.includes(value), "CURRENT fallback source must not drift: " + value);
+    assert.ok(Object.values(currentDefaults.DEFAULT_STAGE_PERMISSION_FIELD).includes(value), "CURRENT fallback must not drift: " + value);
   }
 });

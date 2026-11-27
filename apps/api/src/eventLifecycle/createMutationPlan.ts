@@ -1,5 +1,5 @@
 /**
- * MIG-0652 U02 (SA-021) — unmounted Hono event-create atomic D1 write plan.
+ * MIG-0652 U03 (SA-022) — unmounted Hono event-create atomic D1 write plan.
  *
  * The caller MUST first perform CURRENT-equivalent Origin/session/admin write
  * guard, CostGuard, schema/form/template validation, duplicate/tombstone checks,
@@ -10,10 +10,10 @@
  */
 import { sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
-import { events, eventStaff, eventCustomQuestions, users, xUsers, xUserAccountLinks } from "@flamenode/db/schema";
+import { events, eventStaff, eventCustomQuestions, users, xUsers, xUserAccountLinks, publicVisibilityFences } from "@flamenode/db/schema";
 import type { ServerCoreDb } from "@flamenode/server-core/db";
 import type { WriteAuditLogInput } from "@flamenode/server-core/audit/types";
-import { assertCondition, planD1AuditMutationBudget } from "@flamenode/server-core/audit/mutate";
+import { assertCondition, planAtomicAuditMutationBudget, type AtomicAuditMutationInput } from "@flamenode/server-core/audit/mutate";
 import type { buildEventChangeQueueBatch } from "@flamenode/server-core/staticRebuild/hooks";
 import { EVENT_ID_PATTERN, MAX_EVENT_CREATE_QUESTIONS, MAX_EVENT_CREATE_QUESTIONS_PER_INSERT } from "@flamenode/domain/event";
 
@@ -33,7 +33,9 @@ export type EventCreateAtomicWritePlan =
       expectedMutationChanges: number[];
       preMutationAssertions: BatchItem<"sqlite">[];
       audits: WriteAuditLogInput[];
-      budget: ReturnType<typeof planD1AuditMutationBudget>;
+      preloaded?: AtomicAuditMutationInput["preloaded"];
+      callerQueryCount?: number;
+      budget: ReturnType<typeof planAtomicAuditMutationBudget>;
     };
 
 /**
@@ -48,10 +50,18 @@ export function planEventCreateAtomicWrite(input: {
   questionChunks: readonly (readonly QuestionInsert[])[];
   queue: EventQueueBatch;
   actorUserId: string;
+  /** Server-read identity and lossless storage witnesses, never request input. */
+  ownerSnapshot: {
+    identity: { x_user_id: string; display_name: string };
+    persistedActiveX: { type: string; hex: string };
+    displayName: { type: string; hex: string };
+  };
+  preloaded?: AtomicAuditMutationInput["preloaded"];
+  callerQueryCount?: number;
   /** A rename tombstone must go through the separate CAS/R2 precommit flow. */
   hasRenameTombstone: boolean;
 }): EventCreateAtomicWritePlan {
-  const { db, eventRow, ownerRow, questionRows, questionChunks, queue, actorUserId } = input;
+  const { db, eventRow, ownerRow, questionRows, questionChunks, queue, actorUserId, ownerSnapshot } = input;
   const bad = (): EventCreateAtomicWritePlan => ({ ok: false, message: EVENT_CREATE_INVALID_PLAN });
   // CURRENT createEvent always disables the public export API on creation
   // and creates one publicly listed, fixed-role owner without extra grants.
@@ -69,6 +79,8 @@ export function planEventCreateAtomicWrite(input: {
       ownerRow.custom_permission_keys_json !== null ||
       ownerRow.is_public !== 1 ||
       ownerRow.public_role_label !== "主催" || !ownerRow.x_user_id ||
+      ownerRow.x_user_id !== ownerSnapshot.identity.x_user_id ||
+      ownerRow.display_name !== ownerSnapshot.identity.display_name ||
       questionRows.length > MAX_EVENT_CREATE_QUESTIONS ||
       queue.statements.length !== queue.expectedChanges.length) return bad();
 
@@ -85,10 +97,12 @@ export function planEventCreateAtomicWrite(input: {
     keys.add(row.question_key);
   }
 
-  // CURRENT createEvent requires the selected Active X identity to be both
-  // approved and linked to the authenticated caller. Reassert ownership
-  // *inside* the same atomic D1 batch: even a stale/forged future Hono
-  // preflight must never create an event with an unapproved owner or stale display name.
+  // CURRENT resolves a normalized selection or the sole approved linked X.
+  // Keep that request-local identity, but reject a changed persisted selection,
+  // revoked chosen link/approval, stale display name or a newly created rename
+  // tombstone before any writes. Other newly linked X IDs do not revoke the
+  // already resolved owner. typeof + hex(CAST AS BLOB) avoids a driver-decoded
+  // legacy value silently weakening CAS or falsely appearing changed.
   const preMutationAssertions: BatchItem<"sqlite">[] = [
     db.run(assertCondition(sql`EXISTS (
       SELECT 1 FROM ${users}
@@ -97,10 +111,18 @@ export function planEventCreateAtomicWrite(input: {
       INNER JOIN ${xUsers}
         ON ${xUsers.id} = ${xUserAccountLinks.x_user_id}
       WHERE ${users.id} = ${actorUserId}
-        AND ${users.active_x_user_id} = ${ownerRow.x_user_id}
+        AND typeof(${users.active_x_user_id}) = ${ownerSnapshot.persistedActiveX.type}
+        AND hex(CAST(${users.active_x_user_id} AS BLOB)) = ${ownerSnapshot.persistedActiveX.hex}
         AND ${xUserAccountLinks.x_user_id} = ${ownerRow.x_user_id}
         AND ${xUsers.approval_status} = 'approved'
-        AND ${xUsers.x_name} = ${ownerRow.display_name}
+        AND typeof(${xUsers.x_name}) = ${ownerSnapshot.displayName.type}
+        AND hex(CAST(${xUsers.x_name} AS BLOB)) = ${ownerSnapshot.displayName.hex}
+    ) AND NOT EXISTS (
+      SELECT 1 FROM ${publicVisibilityFences}
+      WHERE ${publicVisibilityFences.entity_type} = 'event'
+        AND ${publicVisibilityFences.entity_id} = ${eventRow.id}
+        AND ${publicVisibilityFences.state} = 'blocked'
+        AND ${publicVisibilityFences.reason} = 'event_id_rename_old_cleanup'
     )`)),
   ];
 
@@ -131,15 +153,13 @@ export function planEventCreateAtomicWrite(input: {
       context: "event-create:custom-question", retention_class: "normal", strict: true,
     })),
   ];
-  // Preserve CURRENT's conservative 18-query reserve until an actual Hono
-  // route measures all preflight reads. No Queue wake may occur in Hono.
-  const budget = planD1AuditMutationBudget({
-    mutationStatementCount: mutationStatements.length,
-    mutationAssertionCount: mutationStatements.length,
-    preMutationAssertionCount: preMutationAssertions.length,
-    auditEntryCount: audits.length,
-    distinctActorCount: 1,
-  });
+  // Use the exact same preload validation and query accounting as the commit.
+  // Unmounted plan-only callers retain the legacy conservative reserve.
+  const write = {
+    mutationStatements, expectedMutationChanges, preMutationAssertions, audits,
+    preloaded: input.preloaded, callerQueryCount: input.callerQueryCount,
+  };
+  const budget = planAtomicAuditMutationBudget(write);
   if (!budget.withinLimit) return { ok: false, message: EVENT_CREATE_PLAN_FAILURE };
-  return { ok: true, mutationStatements, expectedMutationChanges, preMutationAssertions, audits, budget };
+  return { ok: true, ...write, budget };
 }
