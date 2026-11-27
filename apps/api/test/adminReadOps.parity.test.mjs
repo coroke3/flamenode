@@ -2325,11 +2325,15 @@ if (runUnderRootTsx(import.meta.url)) {
       count, issues, moreCount: count - issues.length,
       recommendation: "JSON を修正してください。",
     });
+    const deepNestedNonString = "[".repeat(1000) + "0" + "]".repeat(1000);
     const cases = [
       ["null", null, false],
       ["empty", "", false],
       ["empty-array", "[]", false],
       ["trimmed-empty", "\u00a0[]\u00a0", false],
+      ["bom-empty", "\uFEFF[]\uFEFF", false],
+      ["deep-nested-only", deepNestedNonString, true],
+      ["deep-nested-valid-alias", `["videos.title",${deepNestedNonString}]`, false],
       ["spaced-array", " [ ] ", true],
       ["whitespace-only", " \t\n ", true],
       ["malformed", "{not json", true],
