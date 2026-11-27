@@ -79,14 +79,14 @@ export function DeleteEventForm({
       ) : null}
       <label className="fn-label">
         確認のためイベント ID <code>{eventId}</code> を入力
-        <input
-          type="text"
-          className="fn-input"
-          value={confirm}
-          onChange={(event) => setConfirm(event.target.value)}
-          placeholder={eventId}
-        />
       </label>
+      <input
+        type="text"
+        className="fn-input"
+        value={confirm}
+        onChange={(event) => setConfirm(event.target.value)}
+        placeholder={eventId}
+      />
       {error ? (
         <p role="alert" style={{ color: "var(--accent-danger)", fontSize: 12 }}>
           <Icon name="warning" size={12} /> {error}
