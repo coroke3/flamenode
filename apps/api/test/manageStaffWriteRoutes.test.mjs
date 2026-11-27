@@ -360,7 +360,7 @@ function traceStaffCsvD1(db) {
   };
 }
 
-test("MIG-0516: parent SA-032 CSV maximum audit + projection budget, cookie and failure boundaries", async () => {
+test("MIG-0516: parent SA-032 CSV maximum audit + projection budget, cookie and failure boundaries", async (t) => {
   const { manageRoutes } = await import("../src/routes/manage/index.ts");
   const cases = [
     { name: "12 known X", known: 12, pending: 0 },
@@ -405,7 +405,16 @@ test("MIG-0516: parent SA-032 CSV maximum audit + projection budget, cookie and 
         assert.equal(result.headers.get("Cache-Control"), "private, no-store", label);
         const batches = calls.filter((x) => x.kind === "batch");
         const direct = calls.filter((x) => x.kind === "statement");
+        const firstBatch = calls.findIndex((x) => x.kind === "batch");
+        const beforeMutation = firstBatch < 0 ? direct : calls.slice(0, firstBatch);
+        assert.ok(beforeMutation.some((x) => x.kind === "statement" && x.sql.includes('FROM "session"')), label + ": session before batch");
+        assert.ok(beforeMutation.some((x) => x.kind === "statement" && x.sql.includes("terms_reaccept_required")), label + ": write admission before batch");
         const total = direct.length + batches.reduce((n, b) => n + b.statements.length, 0);
+        const standaloneRuns = direct.filter((x) => x.method === "run").length;
+        assert.equal(direct.length, s.stats.reads + standaloneRuns, label + ": standalone trace agrees with adapter");
+        assert.equal(batches.length, s.stats.batches, label + ": batch count agrees with adapter");
+        assert.equal(total, s.stats.reads + standaloneRuns + s.stats.batchStatements, label + ": logical trace agrees with adapter");
+        t.diagnostic(`${label}: status=${result.status}, standalone=${direct.length}, batch=${batches.map((x) => x.statements.length).join("+") || "none"}, total=${total}`);
         assert.ok(total <= 50, label + ": logical D1 statements = " + total);
         assert.ok(direct.some((x) => x.sql.includes('FROM "session"')), label + ": real session query");
         assert.ok(direct.some((x) => x.sql.includes("terms_reaccept_required")), label + ": real write admission");
