@@ -8,7 +8,7 @@ import {
 } from "../../api/adminModeration.js";
 import { useApiResult } from "../useApiResult.js";
 import { ModerationCaseStatusForm } from "./ModerationCaseStatusForm.js";
-import { ModerationFlashNotice } from "./ModerationFlashNotice.js";
+import { MODERATION_FLASH_KEY, ModerationFlashNotice } from "./ModerationFlashNotice.js";
 
 const api = createAdminModerationApi();
 const navigateOnDenial = (destination: string): void => window.location.assign(destination);
@@ -132,31 +132,36 @@ export function AdminModeration({ client = api, navigateOnRevocation = navigateO
 } = {}): React.ReactElement {
   const [params, setParams] = useSearchParams();
   const [refreshKey, setRefreshKey] = React.useState(0);
-  const [writeRedirect, setWriteRedirect] = React.useState<"/entry" | "/dashboard" | null>(null);
-  const revokedRef = React.useRef<"/entry" | "/dashboard" | null>(null);
+  const [accessRedirect, setAccessRedirect] = React.useState<string | null>(null);
+  const revokedRef = React.useRef<string | null>(null);
   const canSubmit = () => revokedRef.current === null;
-  const revokeAccess = (destination: "/entry" | "/dashboard") => {
+  const revokeAccess = (destination: string) => {
     if (revokedRef.current !== null) return;
     // Latch before another form can dispatch or consume a stale receipt.
     revokedRef.current = destination;
-    setWriteRedirect(destination);
+    // A receipt from a revoked authority must not survive in the one-shot store.
+    try { sessionStorage.removeItem(MODERATION_FLASH_KEY); } catch { /* Storage may be unavailable. */ }
+    setAccessRedirect(destination);
   };
   const [successfulReadKey, setSuccessfulReadKey] = React.useState(0);
   const filters = moderationFilters(params);
   const key = params.toString();
   const result = useApiResult(async (signal) => {
+    if (revokedRef.current !== null) return { status: "unavailable" };
     const response = await client.list(filters, signal);
-    if (revokedRef.current === null) {
-      onModerationReadCompleted(signal, response, () => setSuccessfulReadKey((value) => value + 1));
+    if (!signal.aborted && revokedRef.current === null) {
+      // Latch the mapped GET denial before React commits it: another case may
+      // settle in this same turn, while its form is still mounted.
+      if (response.status === "anonymous") revokeAccess("/entry");
+      else if (response.status === "forbidden") revokeAccess(response.redirect || "/dashboard");
+      else onModerationReadCompleted(signal, response, () => setSuccessfulReadKey((value) => value + 1));
     }
     return response;
   }, "admin-moderation:" + key, refreshKey);
   React.useEffect(() => {
-    if (writeRedirect) { navigateOnRevocation(writeRedirect); return; }
-    if (result.status === "anonymous") navigateOnRevocation("/entry");
-    if (result.status === "forbidden") navigateOnRevocation(result.redirect || "/dashboard");
-  }, [result, writeRedirect, navigateOnRevocation]);
-  if (writeRedirect || result.status === "loading" || result.status === "anonymous" || result.status === "forbidden")
+    if (accessRedirect) navigateOnRevocation(accessRedirect);
+  }, [accessRedirect, navigateOnRevocation]);
+  if (accessRedirect || result.status === "loading" || result.status === "anonymous" || result.status === "forbidden")
     return <div role="status" aria-busy="true">読み込み中...</div>;
   if (result.status !== "ok") return <section role="alert">モデレーション情報を取得できませんでした。</section>;
   return <>

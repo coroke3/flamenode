@@ -331,3 +331,129 @@ test("MIG-0731 U03 SEC: mounted candidate hides all private cases before fixed d
     }
   }
 });
+
+
+test("MIG-0731 U03 SEC: same-key GET authority loss fences concurrently pending case receipts", async (t) => {
+  const deferred = () => {
+    let resolve;
+    const promise = new Promise(done => { resolve = done; });
+    return { promise, resolve };
+  };
+  const data = { ...fixture, cases: [
+    ...fixture.cases,
+    { ...fixture.cases[0], id: "case/2", private_note: "SECOND_PRIVATE_NOTE" },
+    { ...fixture.cases[0], id: "case/3", private_note: "THIRD_PRIVATE_NOTE" },
+  ] };
+  const good = message => ({ status: "ok", data: { ok: true, message } });
+  for (const [name, denial, order, destination] of [
+    ["401 then late success in same turn", { status: "anonymous" }, "denial-first", "/entry"],
+    ["403 then late success in same turn", { status: "forbidden" }, "denial-first", "/dashboard"],
+    ["allowed 403 redirect and late success", { status: "forbidden", redirect: "/onboarding" }, "denial-first", "/onboarding"],
+    ["success then 403 in same turn", { status: "forbidden" }, "success-first", "/dashboard"],
+    ["403 commits before late success", { status: "forbidden" }, "separate", "/dashboard"],
+    ["authorized GET and successful receipt", null, "authorized", null],
+  ]) await t.test(name, async () => {
+    const dom = new JSDOM('<!doctype html><div id="root"></div>', { url: "https://flamenode.invalid/admin/moderation" });
+    const names = ["window", "document", "navigator", "HTMLElement", "Node", "FormData", "sessionStorage", "IS_REACT_ACT_ENVIRONMENT"];
+    const previous = Object.fromEntries(names.map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+    for (const key of names) Object.defineProperty(globalThis, key, {
+      configurable: true, writable: true,
+      value: key === "IS_REACT_ACT_ENVIRONMENT" ? true : dom.window[key],
+    });
+    const target = dom.window.document.getElementById("root");
+    const root = createRoot(target);
+    const read = deferred(), second = deferred(), third = deferred();
+    const posts = [], navigations = [];
+    let gets = 0;
+    const client = {
+      async list(_filters, _signal) {
+        gets++;
+        if (gets === 2) return read.promise;
+        return { status: "ok", data };
+      },
+      async resolveCase(id) {
+        posts.push(id);
+        if (id === "case/1") return good("SEED_SUCCESS");
+        if (id === "case/2") return second.promise;
+        return third.promise;
+      },
+    };
+    // Deliberately keep the host's loader and navigation in the real React
+    // lifecycle; inject only mapped API receipts to control settlement order.
+    function Screen() {
+      const navigate = useNavigate();
+      return React.createElement(AdminModeration, {
+        client, navigateOnRevocation: path => {
+          assert.equal(target.querySelector("table") === null, true);
+          assert.doesNotMatch(target.textContent, /SECOND_PRIVATE_NOTE|THIRD_PRIVATE_NOTE|LATE_SUCCESS/);
+          navigations.push(path);
+          navigate(path, { replace: true });
+        },
+      });
+    }
+    const submit = form => form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+    try {
+      await React.act(async () => root.render(React.createElement(MemoryRouter, {
+        initialEntries: ["/admin/moderation"],
+      }, React.createElement(Routes, null,
+        React.createElement(Route, { path: "/admin/moderation", element: React.createElement(Screen) }),
+        ...["/entry", "/dashboard", "/onboarding"].map(path =>
+          React.createElement(Route, { key: path, path, element: React.createElement("p", null, path + " destination") })),
+      ))));
+      assert.equal(gets, 1);
+      const forms = [...target.querySelectorAll('input[name="id"]')].map(input => input.form);
+      assert.equal(forms.length, 3);
+      // Seed success starts a same-key refresh; the other two writes remain
+      // independently pending while the authorized table is still mounted.
+      await React.act(async () => { submit(forms[0]); });
+      assert.equal(gets, 2);
+      assert.match(target.textContent, /SECOND_PRIVATE_NOTE/);
+      assert.doesNotMatch(target.textContent, /SEED_SUCCESS/);
+      assert.match(dom.window.sessionStorage.getItem(MODERATION_FLASH_KEY) ?? "", /SEED_SUCCESS/);
+      await React.act(async () => { submit(forms[1]); submit(forms[2]); submit(forms[1]); });
+      assert.deepEqual(posts, ["case/1", "case/2", "case/3"]);
+      if (order === "authorized") {
+        await React.act(async () => { read.resolve({ status: "ok", data }); });
+        assert.match(target.textContent, /SEED_SUCCESS/);
+        assert.equal(dom.window.sessionStorage.getItem(MODERATION_FLASH_KEY), null);
+        await React.act(async () => { second.resolve(good("CURRENT_SUCCESS")); });
+        assert.equal(gets, 3);
+        assert.match(target.textContent, /CURRENT_SUCCESS/);
+        assert.equal(dom.window.sessionStorage.getItem(MODERATION_FLASH_KEY), null);
+        await React.act(async () => { third.resolve({ status: "ok", data: { ok: false, message: "conflict" } }); });
+        assert.deepEqual(navigations, []);
+        assert.equal(gets, 3);
+        assert.match(target.textContent, /conflict/);
+      } else {
+        // Resolve the promises without an intervening React commit in the
+        // first two schedules. A separate schedule verifies unmount fencing.
+        if (order === "separate") {
+          await React.act(async () => { read.resolve(denial); });
+          await React.act(async () => { second.resolve(good("LATE_SUCCESS")); third.resolve(good("LATE_SUCCESS_2")); });
+        } else {
+          await React.act(async () => {
+            if (order === "success-first") second.resolve(good("LATE_SUCCESS"));
+            read.resolve(denial);
+            if (order === "denial-first") second.resolve(good("LATE_SUCCESS"));
+            third.resolve(good("LATE_SUCCESS_2"));
+          });
+        }
+        assert.deepEqual(navigations, [destination]);
+        assert.equal(target.querySelector("table") === null, true);
+        assert.match(target.textContent, new RegExp(destination + " destination"));
+        assert.doesNotMatch(target.textContent, /SEED_SUCCESS|LATE_SUCCESS|SECOND_PRIVATE_NOTE|THIRD_PRIVATE_NOTE/);
+        assert.equal(dom.window.sessionStorage.getItem(MODERATION_FLASH_KEY), null);
+        assert.equal(gets, 2, "no additional GET once denial is mapped");
+        await React.act(async () => { submit(forms[1]); submit(forms[2]); });
+        assert.deepEqual(posts, ["case/1", "case/2", "case/3"]);
+      }
+    } finally {
+      await React.act(async () => root.unmount());
+      dom.window.close();
+      for (const key of names) {
+        if (previous[key]) Object.defineProperty(globalThis, key, previous[key]);
+        else delete globalThis[key];
+      }
+    }
+  });
+});
