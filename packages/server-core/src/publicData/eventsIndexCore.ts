@@ -77,6 +77,9 @@ function compareGroupSections(
 function normalizeGroupSection(value: unknown): StaticEventGroupSection | null {
   if (!value || typeof value !== "object") return null;
   const row = value as Record<string, unknown>;
+  // Canonical public groups historically omit visibility_status. An explicit
+  // nonpublic marker on a stale or malformed index must win at this boundary.
+  if (row.visibility_status != null && row.visibility_status !== "public") return null;
   const id = normalizeString(row.id);
   const slug = normalizeString(row.slug);
   const name = normalizeString(row.name);

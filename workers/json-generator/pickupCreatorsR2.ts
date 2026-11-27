@@ -24,11 +24,22 @@ type PickupCreatorsEnv = {
   DB: D1Database;
 };
 
+type PickupCreatorsDiagnosticReason =
+  | "object_too_large"
+  | "unsupported_schema_version"
+  | "r2_read_failed";
+
 function logPickupCreatorsR2(
-  event: string,
-  detail: Record<string, unknown>,
+  event: PickupCreatorsLoadFailureReason | "corrupt",
+  detail: { key: string; reason?: PickupCreatorsDiagnosticReason },
 ): void {
-  console.warn(`[pickupCreatorsR2] ${event}`, detail);
+  try {
+    // Diagnostic fields are fixed; never inspect or serialize an R2 Error or
+    // an untrusted artifact schema value. A broken logger is best effort.
+    console.warn(`[pickupCreatorsR2] ${event}`, detail);
+  } catch {
+    // A diagnostic sink cannot disable the D1 fallback.
+  }
 }
 
 export async function loadPickupCreatorsFromR2(
@@ -65,7 +76,7 @@ export async function loadPickupCreatorsFromR2(
     ) {
       logPickupCreatorsR2("schema_mismatch", {
         key: PICKUP_CREATORS_OBJECT_KEY,
-        schema_version: schemaVersion,
+        reason: "unsupported_schema_version",
       });
       return { ok: false, reason: "schema_mismatch" };
     }
@@ -77,11 +88,11 @@ export async function loadPickupCreatorsFromR2(
     }
 
     return { ok: true, creators: artifact.creators };
-  } catch (error) {
+  } catch {
     signal?.throwIfAborted();
     logPickupCreatorsR2("get_error", {
       key: PICKUP_CREATORS_OBJECT_KEY,
-      error: error instanceof Error ? error.message : String(error),
+      reason: "r2_read_failed",
     });
     return { ok: false, reason: "get_error" };
   }
@@ -98,10 +109,14 @@ export async function resolvePickupCreatorsWithFallback(
     return loaded.creators.slice(0, Math.max(0, limit));
   }
 
-  console.warn(`[${context}] pickup_creators_d1_fallback`, {
-    reason: loaded.reason,
-    limit,
-  });
+  try {
+    console.warn(`[${context}] pickup_creators_d1_fallback`, {
+      reason: loaded.reason,
+      limit,
+    });
+  } catch {
+    // Even a broken logger cannot suppress the canonical D1 projection.
+  }
   const now = Math.floor(Date.now() / 1000);
   signal?.throwIfAborted();
   // Pickup cards use registered x_users name/icon only; loading historical

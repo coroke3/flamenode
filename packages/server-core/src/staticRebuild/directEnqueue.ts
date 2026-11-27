@@ -307,11 +307,13 @@ export async function directEnqueueStaticRebuild(
       message: "static rebuild queue changed during direct enqueue retries",
       rebuildState: "failed",
     };
-  } catch (error) {
+  } catch {
+    // Provider exceptions are untrusted: their message/getters may throw or
+    // contain private SQL, tokens or identifiers. Keep the failure DTO stable.
     return {
       ok: false,
       errorCode: "direct_enqueue_failed",
-      message: error instanceof Error ? error.message : String(error),
+      message: "static rebuild enqueue failed",
       rebuildState: "failed",
     };
   }

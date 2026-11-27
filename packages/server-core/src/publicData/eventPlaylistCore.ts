@@ -35,10 +35,16 @@ function normalizeString(value: unknown): string | null {
   return normalized || null;
 }
 
+function isNullableUnixInput(value: unknown): boolean {
+  if (value == null) return true;
+  if (typeof value !== "number" && typeof value !== "string") return false;
+  if (typeof value === "string" && value.trim() === "") return false;
+  return Number.isFinite(Number(value));
+}
+
 function normalizeUnix(value: unknown): number | null {
   if (value == null) return null;
-  const number = Number(value);
-  return Number.isFinite(number) ? number : null;
+  return Number(value);
 }
 
 function normalizeItem(value: unknown): StaticEventPlaylistItem | null {
@@ -47,7 +53,12 @@ function normalizeItem(value: unknown): StaticEventPlaylistItem | null {
   const id = normalizeString(row.id);
   const title = normalizeString(row.title);
   const displayName = normalizeString(row.display_name);
-  if (!id || !title || !displayName) return null;
+  if (
+    !id ||
+    !title ||
+    !displayName ||
+    !isNullableUnixInput(row.scheduled_time)
+  ) return null;
   return {
     id,
     title,
@@ -61,7 +72,11 @@ export function normalizeStaticEventPlaylist(
   payload: StaticEventPlaylistPayload,
   expectedEventId?: string,
 ): StaticEventPlaylist | null {
-  if (Number(payload.schema_version) !== EVENT_PLAYLIST_SCHEMA_VERSION) return null;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  if (
+    payload.schema_version !== EVENT_PLAYLIST_SCHEMA_VERSION ||
+    !isNullableUnixInput(payload.generated_at)
+  ) return null;
   const eventId = normalizeString(payload.event_id);
   if (!eventId || (expectedEventId && eventId !== expectedEventId)) return null;
   if (!Array.isArray(payload.items)) return null;

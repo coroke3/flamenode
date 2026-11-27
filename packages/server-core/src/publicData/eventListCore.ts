@@ -6,6 +6,7 @@ import {
 } from "./normalize.ts";
 import type { StaticEventDetailPayload } from "./eventDetailCore.ts";
 import type { StaticRecentVideoPage } from "./recentVideoCore.ts";
+import { isPublicVideoListable } from "./visibility.ts";
 
 /** event_base の public_videos pool 上限（rebuildEventBase と一致）。 */
 export const EVENT_LIST_POOL_MAX = 500;
@@ -20,6 +21,19 @@ interface EventBaseListVideo {
   scheduled_time: number | null;
   score: number;
   part: string | null;
+}
+
+/**
+ * Older event-base pools omit per-video visibility markers. Preserve those,
+ * but never treat an explicitly private or conflicting row as public.
+ */
+function hasExplicitNonpublicVideoMarker(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const row = value as Record<string, unknown>;
+  return (
+    (row.status != null && !isPublicVideoListable(row.status)) ||
+    (row.visibility_status != null && !isPublicVideoListable(row.visibility_status))
+  );
 }
 
 /**
@@ -43,6 +57,9 @@ export function isCompleteEventBasePool(
   const videos = payload.public_videos;
   if (!Array.isArray(videos)) return false;
   if (videos.length > EVENT_LIST_POOL_MAX) return false;
+  // A stale/malformed pool with a revoked video is not a complete public
+  // artifact: miss it so CURRENT can heal and use its bounded D1 fallback.
+  if (videos.some(hasExplicitNonpublicVideoMarker)) return false;
   const videoTotal = normalizeCount(payload.video_total) ?? videos.length;
   if (videoTotal > EVENT_LIST_POOL_MAX) return false;
   return videoTotal === videos.length;
@@ -100,6 +117,7 @@ export function extractEventListInfo(
 function normalizeEventBaseListVideo(value: unknown): EventBaseListVideo | null {
   if (!value || typeof value !== "object") return null;
   const row = value as Record<string, unknown>;
+  if (hasExplicitNonpublicVideoMarker(row)) return null;
   const id = normalizeString(row.id);
   const title = normalizeString(row.title);
   if (!id || !title) return null;
