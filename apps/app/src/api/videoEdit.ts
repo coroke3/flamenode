@@ -112,6 +112,7 @@ async function readFormOptions(fetchFn: FetchLike, scope: EditReadScope & { read
           eventOptions: [...eventOptions.values()],
           customAnswers: Object.fromEntries(customAnswers),
           customAnswersTruncated: false,
+          attachedOptionsTruncated: false,
           truncated: false,
           nextOffset: null,
         },
