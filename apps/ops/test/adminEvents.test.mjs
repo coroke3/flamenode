@@ -1654,3 +1654,44 @@ test("MIG-0721 U02d: EventEdit exposes danger forms only for admin with both exp
   await mount({ isAdmin: false, withPorts: true });
   await mount({ isAdmin: true, withPorts: true });
 });
+
+
+test("MIG-0721 U02e: EventEdit uses CURRENT ManageEventPageShell identity, navigation, pending and accent props", async () => {
+  const current = {
+    ...editReadFixture("auth-a", "Shell parity event"),
+    pendingCount: 4,
+    activeXUserId: "active-x",
+    manageStaffXUserIds: ["staff-x"],
+    initial: { ...editReadFixture("auth-a", "Shell parity event").initial, accent_color: "#1a2b3c" },
+  };
+  await withEventEdit({
+    ...eventNewPorts,
+    authority: editAuthority("auth-a", "u02e"),
+    fetchFn: async () => json(200, current),
+  }, async ({ container }) => {
+    const shell = container.querySelector(".manage-event-page-shell");
+    assert.ok(shell, "the existing shared ManageEventPageShell must wrap EventEdit");
+    assert.equal(shell.style.getPropertyValue("--manage-event-accent"), "#1a2b3c");
+    assert.equal(shell.querySelector("h1")?.textContent, "Shell parity event");
+    const back = [...shell.querySelectorAll("a")].find(a => a.textContent.includes("イベント概要へ"));
+    assert.equal(back?.getAttribute("href"), "/manage/events/event-1");
+    const activeTab = shell.querySelector('.fn-console-event-tabs a[aria-current="page"]');
+    assert.match(activeTab?.textContent ?? "", /設定/);
+    assert.equal(shell.querySelector(".fn-console-event-tab-count")?.textContent, "4");
+    const notice = shell.querySelector(".manage-active-x-notice");
+    assert.ok(notice, "non-admin Active X mismatch remains a notice");
+    assert.match(notice.textContent, /@active-x/);
+    const slots = shell.querySelector('.manage-slot-quicklink a[href="/manage/events/event-1/slots"]');
+    assert.match(slots?.textContent ?? "", /枠設定を開く/);
+  });
+
+  await withEventEdit({
+    ...eventNewPorts,
+    authority: editAuthority("auth-a", "u02e-admin"),
+    fetchFn: async () => json(200, { ...current, isAdmin: true }),
+  }, async ({ container }) => {
+    assert.ok(container.querySelector(".manage-event-page-shell"));
+    assert.equal(container.querySelector(".manage-active-x-notice"), null,
+      "CURRENT hides the Active X mismatch notice for admins");
+  });
+});

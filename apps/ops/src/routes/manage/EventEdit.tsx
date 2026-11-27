@@ -5,6 +5,8 @@ import { useNavigate, useParams } from "react-router-dom";
 import { readManageEventEdit } from "../../api/eventLifecycle.js";
 import type { OpsFetch } from "../../api/read.js";
 import { EventForm, type EventFormInitial, type EventFormProps } from "../../components/event/EventForm.js";
+import { Icon } from "../../components/shared/Icon.js";
+import { ManageEventPageShell, manageEventAccentStyle } from "../../components/manage/ManageEventPageShell.js";
 import { OpsLink } from "../../components/shared/OpsLink.js";
 import { NotFoundView } from "../NotFoundView.js";
 import { useApiResult } from "../useApiResult.js";
@@ -96,16 +98,28 @@ function EventEditRead({
     max_slot_reservation_groups_per_xid: data.initial.max_slot_reservation_groups_per_xid ?? undefined,
   };
   const hrefId = encodeURIComponent(data.initial.id);
-  return <div>
-    <header className="fn-page-head">
-      <OpsLink href={`/manage/events/${hrefId}`}>イベント概要へ</OpsLink>
-      <h1>{data.initial.title}</h1>
-      <p>イベントの基本設定・公開・投稿フォーム・枠ルールを編集します。</p>
-    </header>
+  return <ManageEventPageShell
+    eventId={data.initial.id}
+    title={data.initial.title}
+    description="イベントの基本設定・公開・投稿フォーム・枠ルールを編集します。"
+    backHref={`/manage/events/${hrefId}`}
+    backLabel="イベント概要へ"
+    isAdmin={data.isAdmin}
+    pendingCount={data.pendingCount}
+    accentStyle={manageEventAccentStyle(data.initial.accent_color)}
+    showActiveXNotice={!data.isAdmin}
+    activeXUserId={data.activeXUserId}
+    manageStaffXUserIds={data.manageStaffXUserIds}
+  >
     <section className="manage-slot-quicklink" aria-label="枠設定へのショートカット">
-      <strong>イベント枠を設定する</strong>
-      <p>募集枠の生成・整理・予約状況の管理は、枠設定画面から行えます。</p>
-      <OpsLink href={`/manage/events/${hrefId}/slots`} className="fn-btn fn-btn-primary">枠設定を開く</OpsLink>
+      <div>
+        <strong>イベント枠を設定する</strong>
+        <p>募集枠の生成・整理・予約状況の管理は、枠設定画面から行えます。</p>
+      </div>
+      <OpsLink href={`/manage/events/${hrefId}/slots`} className="fn-btn fn-btn-primary">
+        枠設定を開く
+        <Icon name="chevron-right" size={14} aria-hidden />
+      </OpsLink>
     </section>
     <section className="manage-section">
       <EventForm mode="edit" variant="manage" initial={initial}
@@ -135,5 +149,5 @@ function EventEditRead({
         </div>
       </section>
     ) : null}
-  </div>;
+  </ManageEventPageShell>;
 }
