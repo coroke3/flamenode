@@ -567,3 +567,54 @@ test("U12 privacy: a manifest-withdrawn video is absent from stale related seman
     clean(r);
   }
 });
+
+test("U12: public video external links use the CURRENT URL boundary in both built aliases", { skip: skipUi }, () => {
+  const music = "https://example.com/m";
+  const channel = "https://www.youtube.com/@creator";
+  const pad = (url, length) => url + "a".repeat(length - url.length);
+  const expand = (url) => url + "界".repeat(500 - url.length);
+  const cases = [
+    ["leading NUL", "\u0000" + music, "\u0000" + channel, null, null],
+    ["trailing C0", music + "\u001f", channel + "\u001f", null, null],
+    ["embedded tab", "https://exa\tmple.com/m", "https://www.you\ttube.com/@creator", null, null],
+    ["embedded newline", "https://exa\nmple.com/m", "https://www.you\ntube.com/@creator", null, null],
+    ["backslash", "https://example.com\\m", "https://www.youtube.com\\@creator", null, null],
+    ["DEL", music + "\u007f", channel + "\u007f", null, null],
+    ["input above 500", pad(music, 501), pad(channel, 501), null, null],
+    ["serialized above 500", expand(music), expand(channel), null, null],
+    ["userinfo", "https://user@example.com/m", "https://user@www.youtube.com/@creator", null, null],
+    ["channel constraints", "http://example.com/m", "http://www.youtube.com/@creator", "http://example.com/m", null],
+    ["channel host", music, "https://www.youtube.com.evil.example/@creator", music, null],
+    ["valid surrounding space", "  " + music + "  ", "  " + channel + "  ", music, channel],
+    ["exactly 500", pad(music, 500), pad(channel, 500), pad(music, 500), pad(channel, 500)],
+    ["escaped path", "https://example.com/a%20b", "https://music.youtube.com/@creator", "https://example.com/a%20b", "https://music.youtube.com/@creator"],
+  ];
+  const inputs = cases.map(([, musicUrl, channelUrl], i) => {
+    const id = "url-case-" + i;
+    const youtubeId = "URLCASE" + String(i).padStart(4, "0");
+    return [id, payload({
+      video: {
+        id, youtube_video_id: youtubeId, primary_event_id: null,
+        music_reference_url: musicUrl, creator_youtube_channel_url: channelUrl,
+      },
+      top: { event_ids: [], public_events: [], related_videos: [], related_reserve: [], related_random_reserve: [] },
+    })];
+  });
+  const r = build(inputs);
+  try {
+    assert.equal(r.error, null, r.error ?? "");
+    for (const [i, [label, , , expectedMusic, expectedChannel]] of cases.entries()) {
+      for (const slug of ["url-case-" + i, "URLCASE" + String(i).padStart(4, "0")]) {
+        const doc = dom(r, slug + "/index.html");
+        const musicAnchor = [...doc.querySelectorAll(".vd-about a")].find((a) => text(a).includes("曲名"));
+        const channelAnchor = doc.querySelector('a[aria-label="YouTube チャンネルを開く"]');
+        assert.equal(musicAnchor?.getAttribute("href") ?? null, expectedMusic, label + " music " + slug);
+        assert.equal(channelAnchor?.getAttribute("href") ?? null, expectedChannel, label + " channel " + slug);
+        assert.match(text(doc.querySelector(".vd-about")), /曲名/, label + " keeps the music credit");
+        assert.match(text(doc.querySelector(".vd-creator")), /作者/, label + " keeps the creator credit");
+      }
+    }
+  } finally {
+    clean(r);
+  }
+});

@@ -14,6 +14,7 @@ import { computeEventStatus, eventStatusLabel, isAcceptingEntries } from "../../
 import { formatChapterTime } from "../../../../src/lib/utils/chapterTime.ts";
 import { formatUnix } from "../../../../src/lib/utils/format.ts";
 import { parseCanonicalXId } from "../../../../src/lib/utils/xid.ts";
+import { normalizeHttpUrl } from "../../../../src/lib/utils/url.ts";
 import { extractYoutubeId, videoPageHref, youtubeThumbUrl } from "../../../../src/lib/youtube/id.ts";
 import { extractYoutubePlaylistId } from "../../../../src/lib/youtube/playlist.ts";
 import { buildRouteMap } from "./routeMap.ts";
@@ -52,15 +53,15 @@ const PUBLIC_YOUTUBE_HOSTS = new Set(["youtube.com", "www.youtube.com", "m.youtu
  * web URLs may be linked; a "YouTube channel" additionally needs a trusted
  * YouTube host over HTTPS. Invalid/legacy values render as plain text instead. */
 function safePublicExternalUrl(value: string | null | undefined, youtubeChannel = false): string | null {
-  if (typeof value !== "string" || !value.trim()) return null;
-  try {
-    const url = new URL(value);
-    if ((url.protocol !== "https:" && url.protocol !== "http:") || url.username || url.password) return null;
-    if (youtubeChannel && (url.protocol !== "https:" || !PUBLIC_YOUTUBE_HOSTS.has(url.hostname.toLowerCase()))) return null;
-    return url.href;
-  } catch {
-    return null;
-  }
+  if (typeof value !== "string") return null;
+  const normalized = normalizeHttpUrl(value, { maxLength: 500 });
+  if (normalized === null) return null;
+  if (!youtubeChannel) return normalized;
+  // The shared normalizer has already validated the absolute HTTP(S) URL.
+  const url = new URL(normalized);
+  return url.protocol === "https:" && PUBLIC_YOUTUBE_HOSTS.has(url.hostname.toLowerCase())
+    ? normalized
+    : null;
 }
 
 
