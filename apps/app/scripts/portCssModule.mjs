@@ -21,45 +21,6 @@ export const MODULES = [
   ["sqicon", "src/components/media/SquareIconEditor.module.css", "apps/app/src/styles/shared-social.css"],
   ["vform", "src/components/forms/VideoForm.module.css", "apps/app/src/styles/video-form.css"],
 ];
-function prefixLocalClasses(selector, prefix) {
-  return selector.replace(/\.(-?[A-Za-z_][\w-]*)/g, (_match, name) => "." + prefix + "-" + name);
-}
-
-function findGlobalEnd(selector, start) {
-  let depth = 1;
-  let quote = null;
-  let escaped = false;
-  let comment = false;
-  for (let i = start; i < selector.length; i++) {
-    const ch = selector[i], next = selector[i + 1];
-    if (comment) {
-      if (ch === "*" && next === "/") { comment = false; i++; }
-      continue;
-    }
-    if (escaped) { escaped = false; continue; }
-    if (ch === "\\") { escaped = true; continue; }
-    if (quote) { if (ch === quote) quote = null; continue; }
-    if (ch === "/" && next === "*") { comment = true; i++; continue; }
-    if (ch === '"' || ch === "'") { quote = ch; continue; }
-    if (ch === "(") depth++;
-    else if (ch === ")" && --depth === 0) return i;
-  }
-  throw new SyntaxError("Unclosed :global(...) in CSS selector");
-}
-
-function transformSelector(selector, prefix) {
-  let out = "";
-  let cursor = 0;
-  while (true) {
-    const start = selector.indexOf(":global(", cursor);
-    if (start < 0) return out + prefixLocalClasses(selector.slice(cursor), prefix);
-    out += prefixLocalClasses(selector.slice(cursor, start), prefix);
-    const innerStart = start + ":global(".length;
-    const end = findGlobalEnd(selector, innerStart);
-    out += selector.slice(innerStart, end);
-    cursor = end + 1;
-  }
-}
 
 export function portCssModule(css, prefix) {
   const parts = css.split(/([{}])/);
@@ -67,7 +28,38 @@ export function portCssModule(css, prefix) {
   for (let i = 0; i < parts.length; i++) {
     const part = parts[i];
     if (parts[i + 1] === "{" && !part.trim().startsWith("@")) {
-      out += transformSelector(part, prefix);
+      // Token and balanced-span loops share this cursor to preserve nested, quoted and commented global delimiters.
+      const tokens = /:global\(|\.(-?[A-Za-z_][\w-]*)/g;
+      let cursor = 0, match;
+      while ((match = tokens.exec(part))) {
+        out += part.slice(cursor, match.index);
+        if (match[1] !== undefined) {
+          out += "." + prefix + "-" + match[1];
+          cursor = tokens.lastIndex;
+          continue;
+        }
+        const start = tokens.lastIndex;
+        let end = start, depth = 1, quote = "", comment = false;
+        for (; end < part.length; end++) {
+          const char = part[end];
+          if (comment) {
+            if (char === "*" && part[end + 1] === "/") { comment = false; end++; }
+            continue;
+          }
+          if (char === "\\") { end++; continue; }
+          if (quote) {
+            if (char === quote) quote = "";
+          } else if (char === "/" && part[end + 1] === "*") {
+            comment = true; end++;
+          } else if (char === '"' || char === "'") quote = char;
+          else if (char === "(") depth++;
+          else if (char === ")" && --depth === 0) break;
+        }
+        if (depth !== 0) throw new SyntaxError("Unclosed :global() CSS selector");
+        out += part.slice(start, end);
+        cursor = tokens.lastIndex = end + 1;
+      }
+      out += part.slice(cursor);
     } else out += part;
   }
   return out;

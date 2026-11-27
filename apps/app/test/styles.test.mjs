@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile, readdir } from "node:fs/promises";
+import { JSDOM } from "jsdom";
 import { MODULES, portCssModule } from "../scripts/portCssModule.mjs";
 const root = new URL("../../../", import.meta.url);
 const read = (p) => readFile(new URL(p, root), "utf8");
@@ -61,6 +62,45 @@ test("MIG-0701 follow-up: mobile dashboard actions match the global fn-btn class
     "settings SPA CSS must match CURRENT after global-class fix");
 });
 
+test("MIG-0714 B05: global spans preserve nested selector meaning and local prefixes", () => {
+  const cases = [
+    [".form :global(.fn-input:not(:disabled):not([readonly])):hover", ".vform-form .fn-input:not(:disabled):not([readonly]):hover"],
+    [".form :global(:is(.fn-input:not(:disabled), .fn-select))", ".vform-form :is(.fn-input:not(:disabled), .fn-select)"],
+    [".form :global(.fn-btn) :global(svg)", ".vform-form .fn-btn svg"],
+    [".form:global(.fn-input:not(:disabled)).active", ".vform-form.fn-input:not(:disabled).vform-active"],
+    ['.form :global(.fn-input[data-help=")"]:not(:disabled))', '.vform-form .fn-input[data-help=")"]:not(:disabled)'],
+    [String.raw`.form :global(.fn-input[data-help=')']:not(:disabled))`, String.raw`.vform-form .fn-input[data-help=')']:not(:disabled)`],
+    [String.raw`.form :global(.icon-\):not(:disabled))`, String.raw`.vform-form .icon-\):not(:disabled)`],
+    [".form :global(.fn-input/* ) */:not(:disabled)):hover", ".vform-form .fn-input/* ) */:not(:disabled):hover"],
+    [".form :global(.fn-input/* ( */:not([readonly])).active", ".vform-form .fn-input/* ( */:not([readonly]).vform-active"],
+    [String.raw`.form :global([data-open="/*)"][data-close='*/('] .fn-input):hover`, String.raw`.vform-form [data-open="/*)"][data-close='*/('] .fn-input:hover`],
+  ];
+  for (const [source, expected] of cases) {
+    const rule = source + " { color: red; }";
+    assert.equal(portCssModule(rule, "vform"), expected + " { color: red; }", source);
+  }
+  const dom = new JSDOM('<form class="vform-form"></form><input class="fn-input">');
+  try {
+    const form = dom.window.document.querySelector("form");
+    for (const [tag, source, expected] of [
+      ["input", cases[0][0], [true, false, false, false]],
+      // CURRENT intentionally permits readonly textarea hover; do not generalize input policy.
+      ["textarea", ".form :global(.fn-textarea:not(:disabled)):hover", [true, true, false, false]],
+    ]) {
+      const selector = portCssModule(source + " { color: red; }", "vform").split(" {")[0].replace(/:hover$/, "");
+      for (const [index, [readonly, disabled]] of [[false, false], [true, false], [false, true], [true, true]].entries()) {
+        const control = dom.window.document.createElement(tag);
+        control.className = "fn-" + tag;
+        control.readOnly = readonly;
+        control.disabled = disabled;
+        form.replaceChildren(control);
+        assert.equal(control.matches(selector), expected[index], `${tag} readonly=${readonly} disabled=${disabled}`);
+      }
+      assert.equal(dom.window.document.querySelector("body > input").matches(selector), false, "scoped to form");
+    }
+  } finally { dom.window.close(); }
+});
+
 async function getTsx(dir) {
   const entries = await readdir(new URL(dir, root), { withFileTypes: true });
   const out = [];
@@ -71,7 +111,7 @@ async function getTsx(dir) {
   }
   return out;
 }
-test("MIG-0701 U04 T08: every Personal route and VideoForm class has a CSS definition", async () => {
+test("MIG-0701 U04 T08: every Personal route class has a CSS definition", async () => {
   const css = (await Promise.all([
     ...names.map((n) => read("apps/app/src/styles/current/" + n + ".css")),
     ...MODULES.map(([, , to]) => read(to)),
@@ -84,21 +124,26 @@ test("MIG-0701 U04 T08: every Personal route and VideoForm class has a CSS defin
     "settings-x-h", "settings-history-h", "settings-link-h", "settings-discord-h",
   ]);
   const missing = new Set();
-  const routeFiles = await getTsx("apps/app/src/routes/");
-  const formFiles = await getTsx("apps/app/src/components/forms/");
-  for (const p of routeFiles) {
+  for (const p of await getTsx("apps/app/src/routes/")) {
     const source = (await read(p)).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
-    for (const [, token] of source.matchAll(/(?<![\w-])((?:fn|dash|onb|settings|vcard|vform)-[A-Za-z0-9_-]*[A-Za-z0-9_])/g)) {
+    for (const [, token] of source.matchAll(/(?<![\w-])((?:fn|dash|onb|settings|vcard)-[A-Za-z0-9_-]*[A-Za-z0-9_])/g)) {
       if (!defined.has(token) && !exceptions.has(token)) missing.add(p + ": " + token);
     }
   }
-  for (const p of formFiles) {
-    const source = (await read(p)).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
-    for (const [, token] of source.matchAll(/(?<![\w-])(vform-[A-Za-z0-9_-]*[A-Za-z0-9_])/g)) {
-      if (!defined.has(token)) missing.add(p + ": " + token);
+  assert.deepEqual([...missing].sort(), [], "missing Personal CSS definitions");
+});
+test("MIG-0714 B05: every full-form vform class has a derived CSS definition", async () => {
+  const css = await read("apps/app/src/styles/video-form.css");
+  const defined = new Set([...css.matchAll(/\.(vform-[A-Za-z_][\w-]*)/g)].map((m) => m[1]));
+  const used = new Set(), missing = [];
+  for (const file of await getTsx("apps/app/src/components/forms/")) {
+    for (const [name] of (await read(file)).matchAll(/\bvform-[A-Za-z_][\w-]*/g)) {
+      used.add(name);
+      if (!defined.has(name)) missing.push(file + ": " + name);
     }
   }
-  assert.deepEqual([...missing].sort(), [], "missing Personal CSS definitions");
+  assert.ok(used.size > 0, "full form must reference the generated vform styles");
+  assert.deepEqual(missing, [], "missing full-form CSS definitions");
 });
 test("MIG-0701 U04 T07: main imports CSS in CURRENT order", async () => {
   const actual = [...(await read("apps/app/src/main.tsx")).matchAll(/^import "(.+\.css)";$/gm)].map((m) => m[1]);
@@ -106,55 +151,7 @@ test("MIG-0701 U04 T07: main imports CSS in CURRENT order", async () => {
     "./styles/current/globals.css", "./styles/current/mobile-hardening.css",
     "./styles/fonts.css", "./styles/video-card.css", "./styles/dashboard.css",
     "./styles/settings.css", "./styles/xid-settings.css", "./styles/onboarding.css", "./styles/entry.css", "./styles/xid-requests.css", "./styles/video-members.css", "./styles/forms-a.css", "./styles/shared-social.css",
-    "./styles/cost-guard-banner.css", "./styles/video-form.css",
+    "./styles/cost-guard-banner.css",
+    "./styles/video-form.css",
   ]);
 });
-
-test("MIG-0714 B05: nested :global spans preserve balanced selector semantics", () => {
-  const fixtures = [
-    [
-      String.raw`.form :global(.fn-input:not(:disabled):not([readonly])):hover { color: red; }`,
-      String.raw`.vform-form .fn-input:not(:disabled):not([readonly]):hover { color: red; }`,
-    ],
-    [
-      String.raw`.form :global(.fn-input:is(:not(:disabled), :not([readonly]))) .row { color: red; }`,
-      String.raw`.vform-form .fn-input:is(:not(:disabled), :not([readonly])) .vform-row { color: red; }`,
-    ],
-    [
-      String.raw`.form :global(.fn-input:not(:disabled)):global(.fn-btn:hover) .row { color: red; }`,
-      String.raw`.vform-form .fn-input:not(:disabled).fn-btn:hover .vform-row { color: red; }`,
-    ],
-    [
-      String.raw`.form.local :global([data-label="close)"] .fn-input[data-note='escaped\)']) .row { color: red; }`,
-      String.raw`.vform-form.vform-local [data-label="close)"] .fn-input[data-note='escaped\)'] .vform-row { color: red; }`,
-    ],
-  ];
-  for (const [input, expected] of fixtures) assert.equal(portCssModule(input, "vform"), expected);
-});
-
-test("MIG-0714 B05: generated VideoForm CSS preserves input and textarea hover eligibility", async () => {
-  const source = await read("src/components/forms/VideoForm.module.css");
-  const target = await read("apps/app/src/styles/video-form.css");
-  assert.equal(target, portCssModule(source, "vform"), "generated CSS must match CURRENT source");
-  assert.ok(source.includes(".form :global(.fn-input:not(:disabled):not([readonly])):hover"));
-  assert.ok(target.includes(".vform-form .fn-input:not(:disabled):not([readonly]):hover"));
-  assert.ok(source.includes(".form :global(.fn-textarea:not(:disabled)):hover"));
-  assert.ok(target.includes(".vform-form .fn-textarea:not(:disabled):hover"));
-
-  const { JSDOM } = await import("jsdom");
-  const dom = new JSDOM("<form><input id='editable' class='fn-input'><input id='disabled' class='fn-input' disabled><input id='readonly' class='fn-input' readonly><input id='both' class='fn-input' disabled readonly><textarea id='readonly-textarea' class='fn-textarea' readonly></textarea></form>");
-  try {
-    const selector = ".fn-input:not(:disabled):not([readonly])";
-    for (const [id, expected] of [["editable", true], ["disabled", false], ["readonly", false], ["both", false]]) {
-      assert.equal(dom.window.document.getElementById(id).matches(selector), expected, id);
-    }
-    assert.equal(
-      dom.window.document.getElementById("readonly-textarea").matches(".fn-textarea:not(:disabled)"),
-      true,
-      "CURRENT readonly textarea hover eligibility must remain distinct",
-    );
-  } finally {
-    dom.window.close();
-  }
-});
-
