@@ -1,6 +1,7 @@
 import * as React from "react";
 import { parseCanonicalXId } from "@flamenode/domain/xid";
 import { upsertVideoCollaborator, applyVideoCollaboratorPermissionsBatch, type VideoCollaboratorWriteResult } from "../api/videoCollaborators.js";
+import { buildVideoEditPermissionGrantedNotification, type NotificationUrlEnv } from "../lib/videoPermissionNotification.js";
 
 const styles = { addPanel: "vcollab-addPanel", badge: "vcollab-badge", badgeAccent: "vcollab-badgeAccent", badgeOk: "vcollab-badgeOk", badgeWarn: "vcollab-badgeWarn", badges: "vcollab-badges", calloutWarn: "vcollab-calloutWarn", candidateBtn: "vcollab-candidateBtn", candidateList: "vcollab-candidateList", dialog: "vcollab-dialog", dialogBackdrop: "vcollab-dialogBackdrop", dialogBody: "vcollab-dialogBody", dialogFooter: "vcollab-dialogFooter", dialogMessage: "vcollab-dialogMessage", dialogNote: "vcollab-dialogNote", dialogTitle: "vcollab-dialogTitle", feedbackErr: "vcollab-feedbackErr", feedbackOk: "vcollab-feedbackOk", fieldRow: "vcollab-fieldRow", intro: "vcollab-intro", previewBox: "vcollab-previewBox", root: "vcollab-root", row: "vcollab-row", rowActions: "vcollab-rowActions", rowHead: "vcollab-rowHead", rowIdentity: "vcollab-rowIdentity", rowList: "vcollab-rowList", rowStatus: "vcollab-rowStatus", rowSub: "vcollab-rowSub", section: "vcollab-section", sectionHint: "vcollab-sectionHint", sectionTitle: "vcollab-sectionTitle" } as const;
 
@@ -11,19 +12,6 @@ function unwrapWriteResult(r: VideoCollaboratorWriteResult): VideoCollabResult {
   if (r.status === "anonymous") return { ok: false, message: "ログインが必要です。" };
   if (r.status === "invalid") return { ok: false, message: r.message };
   return r.data;
-}
-
-// Mirrors the CURRENT notification copy; no notification is sent from this preview.
-function permissionNotificationPreview(id: string, name: string): string {
-  const title = name.replace(/@/g, "@" + String.fromCharCode(0x200b)).replace(/</g, "\\<").replace(/>/g, "\\>");
-  const target = "/dashboard/edit/" + encodeURIComponent(id);
-  const link = typeof window === "undefined" ? target : new URL(target, window.location.origin).href;
-  return [
-    "【FlameNode】作品の編集権限が付与されました",
-    "作品「" + title + "」を共同編集できるようになりました。\nタイトル・紹介文・メンバー情報など、許可された範囲を編集できます。",
-    "■ 次に行うこと",
-    "編集画面を開き、担当範囲の修正を行ってください。\n編集画面を開く\n" + link,
-  ].join("\n\n");
 }
 
 /**
@@ -64,6 +52,10 @@ interface Props {
    * The host must still omit this manager on denial or truncated receipts.
    */
   authorityKey: string;
+  /** Trusted public config from the host, never the request/browser origin.
+   * Require an explicit runtime mode before allowing grants.
+   */
+  notificationUrlEnv: NotificationUrlEnv & { NODE_ENV: "production" | "development" | "test" };
   /** Inject route-level refetch; never optimistically change owner privileges. */
   onRefresh: () => void;
 }
@@ -234,12 +226,26 @@ export function VideoCollabPermsManager(props: Props): React.ReactElement {
   if (!props.authorityKey?.trim()) {
     return <p role="alert" className={styles.feedbackErr}>権限情報を確認できません。ページを再読み込みしてください。</p>;
   }
-  // A committed identity change retires all dialog/form/feedback state before
-  // another resource or authority can display or submit it.
+  // Reject missing/invalid config for grants without removing the ability to
+  // revoke an existing permission. This is a preview-integrity gate, not authz.
+  let preview: ReturnType<typeof buildVideoEditPermissionGrantedNotification> | null = null;
+  const env = props.notificationUrlEnv;
+  if (env && ["production", "development", "test"].includes(env.NODE_ENV)) {
+    try {
+      preview = buildVideoEditPermissionGrantedNotification({
+        videoId: props.videoId, videoTitle: props.videoTitle,
+      }, env);
+    } catch {
+      // Do not display a guessed link or expose the bad config in the UI.
+    }
+  }
+  // A committed identity or preview URL change retires existing confirmations.
+  // Equivalent normalized origins and ordinary title refetches keep the key.
   return (
     <VideoCollabPermsManagerForOwner
-      key={JSON.stringify([props.videoId, props.editPrivilegeMode ?? "normal", props.authorityKey])}
+      key={JSON.stringify([props.videoId, props.editPrivilegeMode ?? "normal", props.authorityKey, preview?.url ?? null])}
       {...props}
+      notificationPreview={preview?.content ?? null}
     />
   );
 }
@@ -251,7 +257,8 @@ function VideoCollabPermsManagerForOwner({
   publicMembers = [],
   editPrivilegeMode = "normal",
   onRefresh,
-}: Props): React.ReactElement {
+  notificationPreview,
+}: Props & { notificationPreview: string | null }): React.ReactElement {
   const activeRef = React.useRef(false);
   const refreshRef = React.useRef(onRefresh);
   React.useLayoutEffect(() => {
@@ -331,7 +338,7 @@ function VideoCollabPermsManagerForOwner({
   };
 
   const submitUpsert = (draft: VideoCollabSubject | NewSubjectDraft, options: { notify: boolean }) => {
-    if (!activeRef.current) return;
+    if (!activeRef.current || notificationPreview === null) return;
     const xUserId = resolvedSubjectXId(draft);
     if (!xUserId) {
       setError("X ID は英数字とアンダースコア20文字以内で入力してください。");
@@ -373,10 +380,12 @@ function VideoCollabPermsManagerForOwner({
       setError("X ID は英数字とアンダースコア20文字以内で入力してください。");
       return;
     }
+    if (notificationPreview === null) {
+      setError("通知内容を確認できません。ページを再読み込みしてください。");
+      return;
+    }
     setGrantDialog({ subject, displayName });
   };
-
-  const notificationPreview = (_displayName: string) => permissionNotificationPreview(videoId, videoTitle);
 
   const renderEditorRow = (s: VideoCollabSubject) => {
     const linked = hasAccountLink(s);
@@ -526,9 +535,7 @@ function VideoCollabPermsManagerForOwner({
             : ""
         }
         note="未連携の X ID にも権限は保存できます。その場合はアカウント連携の承認後に編集可能になります。提出主体・YouTube ID・公開状態などの重要項目は、管理者またはイベント権限が必要です。"
-        preview={
-          grantDialog ? notificationPreview(grantDialog.displayName) : undefined
-        }
+        preview={grantDialog ? notificationPreview ?? undefined : undefined}
         actions={[
           {
             label: "付与して通知する",

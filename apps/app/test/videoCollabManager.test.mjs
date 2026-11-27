@@ -23,6 +23,7 @@ async function mount(overrides = {}) {
     }],
     editPrivilegeMode: "event",
     authorityKey: "owner-A:1",
+    notificationUrlEnv: { NEXT_PUBLIC_SITE_URL: "https://canonical.example", NODE_ENV: "production" },
     onRefresh: () => { refreshed++; },
     ...overrides,
   };
@@ -77,6 +78,8 @@ test("MIG-0715 U03 grant confirmation preserves notification choice and exact se
     assert.match(m.container.textContent, /作品の編集権限が付与されました/);
     // A mention is neutralized in the CURRENT Discord notification preview.
     assert.ok(m.container.textContent.includes("投稿@\u200beveryone"));
+    assert.match(m.container.querySelector(".vcollab-previewBox").textContent, /https:\/\/canonical\.example\/dashboard\/edit\/vid%201$/);
+    assert.doesNotMatch(m.container.querySelector(".vcollab-previewBox").textContent, /flamenode\.test/);
     assert.equal(sent.length, 0, "opening the confirmation never writes");
     await press(button(m.container, "付与のみ"));
     assert.equal(sent.length, 1);
@@ -254,4 +257,99 @@ test("MIG-0715 U03: missing or blank host authority key cannot expose mutation c
       assert.equal(m.refreshed, 0);
     } finally { await m.unmount(); }
   }
+});
+
+test("MIG-0715 U03 preview uses normalized configured origin and preserves notify choice", async () => {
+  const priorFetch = globalThis.fetch;
+  const sent = [];
+  globalThis.fetch = async (url, init) => {
+    sent.push({ url, init });
+    return new Response(JSON.stringify({ ok: true }), { status: 200 });
+  };
+  const m = await mount();
+  try {
+    await press(button(m.container, "公開メンバー @second"));
+    const preview = () => m.container.querySelector(".vcollab-previewBox")?.textContent;
+    assert.ok(preview()?.endsWith("https://canonical.example/dashboard/edit/vid%201"));
+    await m.rerender({ notificationUrlEnv: { NEXT_PUBLIC_SITE_URL: " https://CANONICAL.example:443/ ", NODE_ENV: "production" }, videoTitle: "新しい題名" });
+    assert.ok(m.container.querySelector('[role="alertdialog"]'));
+    assert.ok(preview()?.includes("作品「新しい題名」"));
+    assert.ok(preview()?.endsWith("https://canonical.example/dashboard/edit/vid%201"));
+    assert.equal(sent.length, 0);
+    await press(button(m.container, "付与して通知する"));
+    assert.equal(sent.length, 1);
+    assert.deepEqual(JSON.parse(sent[0].init.body), {
+      display_name: "公開メンバー", can_edit: true, notify: true,
+      edit_privilege_mode: "event",
+    });
+    assert.equal(m.refreshed, 1);
+  } finally { await m.unmount(); globalThis.fetch = priorFetch; }
+});
+
+test("MIG-0715 U03 absent or invalid preview configuration blocks grant but not revoke", async () => {
+  const priorFetch = globalThis.fetch;
+  const sent = [];
+  globalThis.fetch = async (url, init) => {
+    sent.push({ url, init });
+    return new Response(JSON.stringify({ ok: true }), { status: 200 });
+  };
+  try {
+    for (const notificationUrlEnv of [
+      undefined,
+      { NEXT_PUBLIC_SITE_URL: "https://canonical.example" },
+      { NEXT_PUBLIC_SITE_URL: "https://canonical.example", NODE_ENV: "unknown" },
+      { NODE_ENV: "production" },
+      { NEXT_PUBLIC_SITE_URL: "https://canonical.example/path", NODE_ENV: "production" },
+      { NEXT_PUBLIC_SITE_URL: "https://user:pass@canonical.example", NODE_ENV: "production" },
+      { NEXT_PUBLIC_SITE_URL: "http://localhost:3000", NODE_ENV: "production" },
+    ]) {
+      const before = sent.length;
+      const m = await mount({ notificationUrlEnv });
+      try {
+        await press(button(m.container, "公開メンバー @second"));
+        assert.equal(m.container.querySelector('[role="alertdialog"]'), null);
+        assert.equal(m.container.querySelector(".vcollab-previewBox"), null);
+        assert.match(m.container.textContent, /通知内容を確認できません/);
+        assert.doesNotMatch(m.container.textContent, /user:pass|flamenode\.test|localhost:3000/);
+        assert.equal(sent.length, before);
+        await press(button(m.container, "変更"));
+        await press(button(m.container, "解除する"));
+        assert.equal(sent.length, before + 1);
+        assert.equal(sent.at(-1).url, "/api/videos/vid%201/collaborators/batch");
+        assert.equal(JSON.parse(sent.at(-1).init.body).notify, false);
+        assert.equal(m.refreshed, 1);
+      } finally { await m.unmount(); }
+    }
+  } finally { globalThis.fetch = priorFetch; }
+});
+
+test("MIG-0715 U03 preview authority rotation retires stale grant confirmation", async () => {
+  const priorFetch = globalThis.fetch;
+  const sent = [];
+  globalThis.fetch = async (url, init) => {
+    sent.push({ url, init });
+    return new Response(JSON.stringify({ ok: true }), { status: 200 });
+  };
+  const m = await mount();
+  try {
+    await press(button(m.container, "公開メンバー @second"));
+    const retired = button(m.container, "付与して通知する");
+    await m.rerender({ notificationUrlEnv: { NEXT_PUBLIC_SITE_URL: "https://other.example", NODE_ENV: "production" } });
+    assert.equal(m.container.querySelector('[role="alertdialog"]'), null);
+    await press(retired);
+    assert.equal(sent.length, 0);
+    await press(button(m.container, "公開メンバー @second"));
+    assert.ok(m.container.querySelector(".vcollab-previewBox").textContent.endsWith("https://other.example/dashboard/edit/vid%201"));
+    const retiredAgain = button(m.container, "付与のみ");
+    await m.rerender({ notificationUrlEnv: undefined });
+    assert.equal(m.container.querySelector('[role="alertdialog"]'), null);
+    await m.rerender({ notificationUrlEnv: { NEXT_PUBLIC_SITE_URL: "https://canonical.example", NODE_ENV: "production" } });
+    await press(retiredAgain);
+    assert.equal(sent.length, 0);
+    await press(button(m.container, "公開メンバー @second"));
+    await press(button(m.container, "付与のみ"));
+    assert.equal(sent.length, 1);
+    assert.equal(JSON.parse(sent[0].init.body).notify, false);
+    assert.equal(m.refreshed, 1);
+  } finally { await m.unmount(); globalThis.fetch = priorFetch; }
 });
