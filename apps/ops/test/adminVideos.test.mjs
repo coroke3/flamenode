@@ -237,3 +237,87 @@ test("FIX-507: oversized event DTO fails closed before a second call", async () 
   assert.deepEqual(response, { status: "unavailable" });
   assert.equal(calls, 1);
 });
+
+
+test("FIX-507: current event-option paging metadata avoids a redundant exact-100 GET", async () => {
+  const search = "?q=%E4%BD%9C%E8%80%85&status=review&event=event-1&page=3";
+  for (const count of [0, 99, 100, 101, 200, 201]) {
+    const events = Array.from({ length: count }, (_, i) => ({
+      id: "event-" + i, title: "Event " + i,
+    }));
+    const requests = [];
+    const controller = new AbortController();
+    const result = await loadAdminVideos(async (path, init) => {
+      requests.push(path);
+      assert.equal(init.signal, controller.signal);
+      const second = new URL(path, "https://flamenode.invalid").searchParams.get("offset") === "100";
+      return json({
+        ...fixture,
+        events: second ? events.slice(100, 200) : events.slice(0, 100),
+        eventOptionsPaging: { offset: second ? 100 : 0, hasMore: !second && count > 100 },
+      });
+    }, search, controller.signal);
+    assert.equal(result.status, "ok", "count=" + count);
+    assert.deepEqual(result.data.events, events.slice(0, 200));
+    assert.deepEqual(result.data.videos, fixture.videos);
+    assert.deepEqual(result.data.paging, fixture.paging);
+    assert.equal(requests.length, count > 100 ? 2 : 1, "count=" + count);
+    assert.equal(requests[0], "/api/admin-read/videos" + search);
+    if (count > 100) assert.equal(requests[1], requests[0] + "&offset=100");
+  }
+});
+
+test("FIX-507: invalid first-page metadata or duplicate options fail closed without a second GET", async () => {
+  const search = "?q=%E4%BD%9C%E8%80%85&status=review&event=event-1&page=3";
+  const full = Array.from({ length: 100 }, (_, i) => ({ id: "event-" + i, title: "Event " + i }));
+  for (const patch of [
+    { eventOptionsPaging: { offset: 100, hasMore: false } },
+    { eventOptionsPaging: { offset: 0, hasMore: true } }, // fewer than 100 options
+    { eventOptionsPaging: { offset: 0, hasMore: true }, events: full, degraded: true },
+    { eventOptionsPaging: { offset: 0, hasMore: false }, events: [fixture.events[0], fixture.events[0]] },
+    { events: [fixture.events[0], fixture.events[0]] }, // old receipt shape
+  ]) {
+    let calls = 0;
+    const result = await loadAdminVideos(async () => {
+      calls++;
+      return json({ ...fixture, ...patch });
+    }, search);
+    assert.deepEqual(result, { status: "unavailable" });
+    assert.equal(calls, 1);
+  }
+});
+
+test("FIX-507: reject a missing or wrong echoed second event-option page", async () => {
+  const search = "?q=%E4%BD%9C%E8%80%85&status=review&event=event-1&page=3";
+  const first = {
+    ...fixture,
+    events: Array.from({ length: 100 }, (_, i) => ({ id: "e-" + i, title: "Event " + i })),
+    eventOptionsPaging: { offset: 0, hasMore: true },
+  };
+  const second = { ...fixture, events: [{ id: "e-100", title: "Event 100" }] };
+  for (const eventOptionsPaging of [
+    undefined, { offset: 0, hasMore: false }, { offset: 100, hasMore: true },
+  ]) {
+    let calls = 0;
+    const result = await loadAdminVideos(async () =>
+      json(++calls === 1 ? first : { ...second, eventOptionsPaging }), search);
+    assert.deepEqual(result, { status: "unavailable" });
+    assert.equal(calls, 2);
+  }
+  // The first receipt promised at least one more option: an empty second
+  // receipt cannot establish the promised complete selector.
+  let emptyCalls = 0;
+  assert.deepEqual(await loadAdminVideos(async () => json(++emptyCalls === 1
+    ? first
+    : { ...second, events: [], eventOptionsPaging: { offset: 100, hasMore: false } }),
+  search), { status: "unavailable" });
+  assert.equal(emptyCalls, 2);
+  // A legacy first-page receipt may still be followed by a valid offset echo.
+  let calls = 0;
+  const result = await loadAdminVideos(async () => json(++calls === 1
+    ? { ...first, eventOptionsPaging: undefined }
+    : { ...second, eventOptionsPaging: { offset: 100, hasMore: false } }), search);
+  assert.equal(result.status, "ok");
+  assert.equal(result.data.events.length, 101);
+  assert.equal(calls, 2);
+});

@@ -89,15 +89,19 @@ export async function loadAdminVideos(
     value.videos.length <= ADMIN_VIDEO_PAGE_SIZE &&
     value.videos.length <= value.paging.total &&
     new Set(value.videos.map(video => video.id)).size === value.videos.length;
-  if (!validScope(data) || data.events.length > 100) {
+  const firstPaging = data.eventOptionsPaging;
+  if (!validScope(data) || data.events.length > 100 ||
+      new Set(data.events.map(event => event.id)).size !== data.events.length ||
+      (firstPaging && (firstPaging.offset !== 0 ||
+        (firstPaging.hasMore && (data.degraded || data.events.length !== 100))))) {
     return { status: "unavailable" };
   }
 
-  // FIX-507 (PR #509) adds an offset that applies ONLY to event options.
-  // The CURRENT selector supports 200 options; at most two bounded API calls.
-  // An older API silently ignores offset and repeats page one: detect that
-  // contract mismatch and fail closed instead of showing a partial selector.
-  if (!data.degraded && data.events.length === 100) {
+  // FIX-507 (PR #509): offset applies only to event options. The current
+  // server echoes offset and whether another supported page exists. Keep the
+  // bounded count fallback for legacy receipts without paging metadata.
+  // At most two calls; exactly 100 options with hasMore=false need only one.
+  if (!data.degraded && (firstPaging?.hasMore ?? (data.events.length === 100))) {
     const next = await getJson<unknown>(
       fetchFn,
       `/api/admin-read/videos${href.slice("/admin/videos".length) || "?"}${href.includes("?") ? "&" : ""}offset=100`,
@@ -105,7 +109,11 @@ export async function loadAdminVideos(
     );
     if (next.status !== "ok") return next;
     const second = AdminVideosResponseSchema.safeParse(next.data);
-    if (!second.success || !validScope(second.data) || second.data.degraded ||
+    if (!second.success) return { status: "unavailable" };
+    const secondPaging = second.data.eventOptionsPaging;
+    if (!validScope(second.data) || second.data.degraded ||
+        (firstPaging !== undefined && (secondPaging === undefined || second.data.events.length === 0)) ||
+        (secondPaging && (secondPaging.offset !== 100 || secondPaging.hasMore)) ||
         second.data.events.length > 100 ||
         JSON.stringify(second.data.videos) !== JSON.stringify(data.videos) ||
         JSON.stringify(second.data.paging) !== JSON.stringify(data.paging) ||
