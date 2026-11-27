@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { drizzle } from "drizzle-orm/d1";
-import { getTableColumns } from "drizzle-orm";
-import { planXIdAccountLinkInsert, planXIdAliasApproval, planXIdCanonicalApproval, planXIdInitialActiveSelection, planXIdLinkRejection } from "../src/xid/linkRequestReview.ts";
+import { and, eq, getTableColumns } from "drizzle-orm";
+import { planXIdAccountLinkInsert, planXIdAliasApproval, planXIdCanonicalApproval, planXIdInitialActiveSelection, planXIdLinkRejection, planXIdSiblingCancellation } from "../src/xid/linkRequestReview.ts";
 import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
 import { assertChanges } from "../src/audit/mutate.ts";
-import { users, xUserAccountLinks, xUsers } from "@flamenode/db/schema";
+import { users, xIdentityRequests, xUserAccountLinks, xUsers } from "@flamenode/db/schema";
 import { expectedRowCondition } from "../src/audit/expectedRowCondition.ts";
 
 // No D1 methods should run during planning; only the generated UPDATE is
@@ -480,6 +480,166 @@ test("SA-090 account link inserts a distinct pair and rolls back on duplicate or
         sqlite.exec("ROLLBACK");
         assert.deepEqual(read(), before, label);
         assert.equal(sqlite.prepare("SELECT n FROM marker").get().n, 0, label);
+      }
+    } finally { sqlite.close(); }
+  }
+});
+
+const siblingReason = "同一X IDの重複pending申請を取り消す";
+const siblingCancellation = (sibling, actorXUserId) =>
+  planXIdSiblingCancellation({
+    sibling, actorUserId: "reviewer", actorXUserId, reason: siblingReason, now: 20,
+  });
+
+test("SA-090 sibling cancellation preserves CURRENT decision fields and exact audit snapshot", () => {
+  for (const request_type of ["new_link", "existing_link"]) {
+    for (const actorXUserId of [null, "reviewer-x"]) {
+      const sibling = { ...request, id: "sibling", request_type, slot_bind_status: "complete",
+        slot_bind_updated_at: null, decision_reason: "legacy reason" };
+      const before = { ...sibling };
+      const plan = siblingCancellation(sibling, actorXUserId);
+      const update = {
+        status: "cancelled", updated_at: 20, decision_reason: siblingReason,
+        decided_by_auth_user_id: "reviewer", decided_at: 20,
+      };
+      assert.deepEqual(plan.update, update);
+      assert.deepEqual(plan.audit, {
+        table_name: "x_identity_requests", target_id: sibling.id, operation: "UPDATE",
+        before, after: { ...before, ...update }, actor_user_id: "reviewer",
+        actor_x_user_id: actorXUserId, reason: siblingReason,
+        context: "x-identity-request", retention_class: "long_audit",
+      });
+      assert.deepEqual(sibling, before);
+      assert.notStrictEqual(plan.audit.before, sibling);
+    }
+  }
+});
+
+test("SA-090 sibling cancellation keeps the host pending CAS and rolls back on a late sibling conflict", () => {
+  const siblings = ["sibling-a", "sibling-b"].map(id => ({ ...request, id }));
+  // The host retains the literal ID/pending predicate and expected-one
+  // assertion. Compile its exact update shape using the shared decision fields.
+  const queries = siblings.map(sibling => db.update(xIdentityRequests)
+    .set(siblingCancellation(sibling, null).update)
+    .where(and(eq(xIdentityRequests.id, sibling.id), eq(xIdentityRequests.status, "pending")))
+    .toSQL());
+  const check = new SQLiteSyncDialect().sqlToQuery(assertChanges(1));
+  for (const [label, race] of [
+    ["both pending", null],
+    ["second approved", "UPDATE x_identity_requests SET status='approved' WHERE id='sibling-b'"],
+    ["second rejected", "UPDATE x_identity_requests SET status='rejected' WHERE id='sibling-b'"],
+    ["second cancelled", "UPDATE x_identity_requests SET status='cancelled' WHERE id='sibling-b'"],
+    ["second deleted", "DELETE FROM x_identity_requests WHERE id='sibling-b'"],
+  ]) {
+    const sqlite = new DatabaseSync(":memory:");
+    try {
+      sqlite.exec(`CREATE TABLE x_identity_requests (
+        id TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at INTEGER NOT NULL,
+        decision_reason TEXT, decided_by_auth_user_id TEXT, decided_at INTEGER
+      );
+      INSERT INTO x_identity_requests VALUES
+        ('sibling-a','pending',10,NULL,NULL,NULL),
+        ('sibling-b','pending',10,NULL,NULL,NULL),
+        ('request','pending',11,NULL,NULL,NULL);
+      CREATE TABLE marker (n INTEGER NOT NULL);
+      INSERT INTO marker VALUES (0);`);
+      if (race) sqlite.exec(race);
+      const read = () => sqlite.prepare("SELECT * FROM x_identity_requests ORDER BY id").all();
+      const before = read();
+      sqlite.exec("BEGIN; UPDATE marker SET n=1;");
+      const changes = queries.map((q, i) => {
+        const count = Number(sqlite.prepare(q.sql).run(...q.params).changes);
+        if (i === 0) assert.doesNotThrow(() => sqlite.prepare(check.sql).get(...check.params));
+        return count;
+      });
+      assert.deepEqual(changes, [1, race ? 0 : 1], label);
+      if (race) {
+        assert.throws(() => sqlite.prepare(check.sql).get(...check.params), label);
+        sqlite.exec("ROLLBACK");
+        assert.deepEqual(read(), before, label);
+        assert.equal(sqlite.prepare("SELECT n FROM marker").get().n, 0, label);
+      } else {
+        assert.doesNotThrow(() => sqlite.prepare(check.sql).get(...check.params), label);
+        sqlite.exec("COMMIT");
+        assert.equal(sqlite.prepare("SELECT count(*) AS n FROM x_identity_requests WHERE status='cancelled'").get().n, 2);
+        assert.equal(sqlite.prepare("SELECT n FROM marker").get().n, 1);
+        for (const q of queries) {
+          assert.equal(Number(sqlite.prepare(q.sql).run(...q.params).changes), 0, "replay must not change a terminal row");
+        }
+      }
+      assert.equal(sqlite.prepare("SELECT status FROM x_identity_requests WHERE id='request'").get().status, "pending");
+    } finally { sqlite.close(); }
+  }
+});
+
+test("SA-090 sibling cancellation rolls back when the final request pending CAS fails", () => {
+  const siblings = ["sibling-a", "sibling-b"].map(id => ({ ...request, id }));
+  const siblingQueries = siblings.map(sibling => db.update(xIdentityRequests)
+    .set(siblingCancellation(sibling, null).update)
+    .where(and(eq(xIdentityRequests.id, sibling.id), eq(xIdentityRequests.status, "pending")))
+    .toSQL());
+  // Compile the still host-owned final request CAS exactly as CURRENT.
+  const finalQuery = db.update(xIdentityRequests).set({
+    status: "approved",
+    slot_bind_status: "pending",
+    slot_bind_updated_at: 20,
+    updated_at: 20,
+    decision_reason: "X ID申請を承認",
+    decided_by_auth_user_id: "reviewer",
+    decided_at: 20,
+  }).where(and(eq(xIdentityRequests.id, request.id), eq(xIdentityRequests.status, "pending"))).toSQL();
+  const check = new SQLiteSyncDialect().sqlToQuery(assertChanges(1));
+  for (const race of [null, "approved", "rejected", "cancelled", "done", "deleted"]) {
+    const sqlite = new DatabaseSync(":memory:");
+    try {
+      sqlite.exec(`CREATE TABLE x_identity_requests (
+        id TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at INTEGER NOT NULL,
+        decision_reason TEXT, decided_by_auth_user_id TEXT, decided_at INTEGER,
+        slot_bind_status TEXT NOT NULL DEFAULT 'complete',
+        slot_bind_updated_at INTEGER, slot_bind_attempt_count INTEGER NOT NULL DEFAULT 0
+      );
+      INSERT INTO x_identity_requests(id,status,updated_at,slot_bind_attempt_count) VALUES
+        ('sibling-a','pending',10,2), ('sibling-b','pending',10,3),
+        ('req-1','pending',11,1), ('unrelated','pending',12,0);
+      CREATE TABLE marker (n INTEGER NOT NULL);
+      INSERT INTO marker VALUES (0);`);
+      if (race === "deleted") {
+        sqlite.prepare("DELETE FROM x_identity_requests WHERE id=?").run(request.id);
+      } else if (race !== null) {
+        sqlite.prepare("UPDATE x_identity_requests SET status=? WHERE id=?").run(race, request.id);
+      }
+      const read = () => sqlite.prepare("SELECT * FROM x_identity_requests ORDER BY id").all();
+      const before = read();
+      const run = q => Number(sqlite.prepare(q.sql).run(...q.params).changes);
+      const assertOne = () => sqlite.prepare(check.sql).get(...check.params);
+      sqlite.exec("BEGIN; UPDATE marker SET n=1;");
+      for (const q of siblingQueries) {
+        assert.equal(run(q), 1);
+        assert.doesNotThrow(assertOne);
+      }
+      assert.equal(run(finalQuery), race === null ? 1 : 0, String(race));
+      if (race !== null) {
+        assert.throws(assertOne);
+        sqlite.exec("ROLLBACK");
+        assert.deepEqual(read(), before, String(race));
+        assert.equal(sqlite.prepare("SELECT n FROM marker").get().n, 0);
+      } else {
+        assert.doesNotThrow(assertOne);
+        sqlite.exec("COMMIT");
+        const after = read();
+        for (const prior of before) {
+          const row = after.find(r => r.id === prior.id);
+          if (prior.id === request.id) {
+            assert.deepEqual({ ...row }, { ...prior, status: "approved", updated_at: 20,
+              decision_reason: "X ID申請を承認", decided_by_auth_user_id: "reviewer",
+              decided_at: 20, slot_bind_status: "pending", slot_bind_updated_at: 20 });
+          } else if (prior.id.startsWith("sibling-")) {
+            assert.deepEqual({ ...row }, { ...prior, ...siblingCancellation(prior, null).update });
+          } else {
+            assert.deepEqual(row, prior);
+          }
+        }
+        assert.equal(sqlite.prepare("SELECT n FROM marker").get().n, 1);
       }
     } finally { sqlite.close(); }
   }

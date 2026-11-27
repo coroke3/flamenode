@@ -276,3 +276,42 @@ export function planXIdAccountLinkInsert(
     },
   };
 }
+
+/**
+ * SA-090 duplicate pending request cancellation: share the exact decision
+ * fields and strict audit snapshot. The host retains its sibling selection,
+ * pending-status CAS, expected-one assertion and atomic batch ordering.
+ */
+export function planXIdSiblingCancellation(input: {
+  sibling: typeof xIdentityRequests.$inferSelect;
+  actorUserId: string;
+  actorXUserId: string | null;
+  reason: "同一X IDの重複pending申請を取り消す";
+  now: number;
+}) {
+  const { sibling, actorUserId, actorXUserId, reason, now } = input;
+  const update = {
+    status: "cancelled" as const,
+    updated_at: now,
+    ...buildXIdentityDecisionFields({
+      decidedByAuthUserId: actorUserId,
+      decisionReason: reason,
+      decidedAt: now,
+    }),
+  };
+  return {
+    update,
+    audit: {
+      table_name: "x_identity_requests",
+      target_id: sibling.id,
+      operation: "UPDATE",
+      before: { ...sibling },
+      after: { ...sibling, ...update },
+      actor_user_id: actorUserId,
+      actor_x_user_id: actorXUserId,
+      reason,
+      context: "x-identity-request",
+      retention_class: "long_audit",
+    } satisfies AtomicAuditMutationInput["audits"][number],
+  };
+}

@@ -14,7 +14,7 @@ import {
   or,
   sql,
 } from "drizzle-orm";
-import { planXIdAccountLinkInsert, planXIdAliasApproval, planXIdCanonicalApproval, planXIdInitialActiveSelection, planXIdLinkRejection } from "@flamenode/server-core/xid/linkRequestReview";
+import { planXIdAccountLinkInsert, planXIdAliasApproval, planXIdCanonicalApproval, planXIdInitialActiveSelection, planXIdLinkRejection, planXIdSiblingCancellation } from "@flamenode/server-core/xid/linkRequestReview";
 import { canManageXIdLinkRequests } from "@/lib/auth/ownership";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import type { DB } from "@/lib/db/client";
@@ -922,28 +922,17 @@ async function approveXIdLinkRequestOnce(
         )!,
       );
     for (const sibling of siblingPendings) {
-      const afterSibling = {
-        ...sibling,
-        status: "cancelled" as const,
-        updated_at: now,
-        ...buildXIdentityDecisionFields({
-          decidedByAuthUserId: operatorAuthUserId,
-          decisionReason: "同一X IDの重複pending申請を取り消す",
-          decidedAt: now,
-        }),
-      };
+      const cancellation = planXIdSiblingCancellation({
+        sibling,
+        actorUserId: operatorAuthUserId,
+        actorXUserId: operatorActorXUserId,
+        reason: "同一X IDの重複pending申請を取り消す",
+        now,
+      });
       statements.push(
         db
           .update(xIdentityRequests)
-          .set({
-            status: "cancelled",
-            updated_at: now,
-            ...buildXIdentityDecisionFields({
-              decidedByAuthUserId: operatorAuthUserId,
-              decisionReason: "同一X IDの重複pending申請を取り消す",
-              decidedAt: now,
-            }),
-          })
+          .set(cancellation.update)
           .where(
             and(
               eq(xIdentityRequests.id, sibling.id),
@@ -952,18 +941,7 @@ async function approveXIdLinkRequestOnce(
           ),
       );
       expected.push(1);
-      audits.push({
-        table_name: "x_identity_requests",
-        target_id: sibling.id,
-        operation: "UPDATE",
-        before: { ...sibling },
-        after: afterSibling,
-        actor_user_id: operatorAuthUserId,
-        actor_x_user_id: operatorActorXUserId,
-        reason: "同一X IDの重複pending申請を取り消す",
-        context: "x-identity-request",
-        retention_class: "long_audit",
-      });
+      audits.push(cancellation.audit);
     }
   }
 
