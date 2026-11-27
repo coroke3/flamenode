@@ -32,6 +32,7 @@ import { areSlotsInSamePart } from "@/lib/utils/slotGroupingCore";
 import type { SlotViewerRelation } from "@/lib/slots/slotIdentityCore";
 import { redirectForGuardReason as redirectForGuard } from "@/lib/client/guardRedirect";
 import { normalizeXId } from "@/lib/utils/xid";
+import { readPersistedSlotDisplayName, persistSlotDisplayName } from "@/lib/slots/slotDisplayNameStorage";
 import { computeFloatingMenuPosition } from "@/lib/ui/floatingMenuPosition";
 import { buildConsecutiveSlotGuidance } from "@/lib/slots/slotGuidance";
 import {
@@ -112,7 +113,6 @@ type ActionMenuState = {
 };
 
 const SLOT_PREVIEW_EVENT = "flamenode:slot-preview";
-const LEGACY_SLOT_DISPLAY_NAME_KEY = "fn:lastSlotDisplayName";
 const COMMUNICATION_ERROR_MESSAGE =
   "通信エラーが発生しました。状態を再取得してもう一度お試しください。";
 
@@ -130,26 +130,12 @@ async function runSlotAction<T>(
   }
 }
 
-function slotDisplayNameStorageKey(viewerXId: string | null): string {
-  const normalized = normalizeXId(viewerXId ?? "");
-  return normalized
-    ? `${LEGACY_SLOT_DISPLAY_NAME_KEY}:${normalized}`
-    : `${LEGACY_SLOT_DISPLAY_NAME_KEY}:unassigned`;
-}
-
 function readSavedSlotDisplayName(viewerXId: string | null): string {
   if (typeof window === "undefined") return "";
-  try {
-    const normalizedViewerXId = normalizeXId(viewerXId ?? "");
-    const scopedKey = slotDisplayNameStorageKey(viewerXId);
-    const scoped = window.localStorage.getItem(scopedKey);
-    if (scoped) return scoped;
-    if (normalizedViewerXId) return "";
-    const legacy = window.localStorage.getItem(LEGACY_SLOT_DISPLAY_NAME_KEY);
-    return legacy ?? "";
-  } catch {
-    return "";
-  }
+  return readPersistedSlotDisplayName(
+    normalizeXId(viewerXId ?? ""),
+    (key) => window.localStorage.getItem(key),
+  );
 }
 
 function formatBreakDetail(end: number | null, start: number | null): string | null {
@@ -455,12 +441,14 @@ export function SlotGrid({
     if (operatorOverrideRequired) fd.set("operator_override", "1");
     const dn = displayName.trim();
     if (dn) {
-      try {
-        window.localStorage.setItem(slotDisplayNameStorageKey(viewerXId), dn);
-        setSavedName(dn);
-      } catch {
-        // localStorage 利用不可な環境では何もしない
-      }
+      // Keep the current-dialog preference in memory even for Discord-only viewers.
+      // Never persist an unassigned viewer or import ambiguous legacy names.
+      setSavedName(dn);
+      persistSlotDisplayName(
+        normalizeXId(viewerXId ?? ""),
+        dn,
+        (key, value) => window.localStorage.setItem(key, value),
+      );
     }
     startTransition(async () => {
       const result = await runSlotAction(() => reserveSlot(fd), () => {
