@@ -1858,6 +1858,10 @@ if (runUnderRootTsx(import.meta.url)) {
         ["escaped controls", "private-diagnostic-" + "\u0001".repeat(11_000), "seed", false],
         ["aggregate across checks", "private-diagnostic-" + "あ".repeat(11_000), "あ".repeat(11_000), false],
         ["valid multibyte", "あ".repeat(10_000), "seed", true],
+        ["surrogate pair across chunk boundary", "a".repeat(4095 - (config.path.endsWith("/security") ? "user:".length : 0)) + "🚀" + "a".repeat(8192), "seed", true],
+        ["lone surrogate escapes", "\uD800".repeat(5000) + "\uDC00", "seed", true],
+        ["escaped exact byte boundary", "\u0001".repeat(Math.floor(exact.length / 6)) + "a".repeat(exact.length % 6), "seed", true],
+        ["escaped one byte over", "\u0001".repeat(Math.floor(exact.length / 6)) + "a".repeat(exact.length % 6 + 1), "seed", false],
       ]) {
         const receipt = await request(first, second);
         const context = config.path + " " + label;
@@ -1874,7 +1878,7 @@ if (runUnderRootTsx(import.meta.url)) {
               : r.id === config.second ? { ...r, samples: [config.secondSample(second)] } : r),
           };
           assert.deepEqual(receipt.body, expected, context);
-          if (label === "exact limit") assert.equal(size(receipt), limit, context);
+          if (label === "exact limit" || label === "escaped exact byte boundary") assert.equal(size(receipt), limit, context);
         } else {
           assert.deepEqual(receipt.body, { error: "unavailable" }, context);
           assert.doesNotMatch(receipt.text, /private-diagnostic-|seed-ref/);

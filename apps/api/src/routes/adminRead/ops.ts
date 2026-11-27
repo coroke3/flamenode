@@ -58,9 +58,9 @@ function utf8Size(value: unknown): number {
   return utf8Encoder.encode(JSON.stringify(value)).length;
 }
 
-/** Diagnostic samples may contain large persisted identifiers. Reject grossly
- * oversized input before serializing, then check the complete escaped JSON
- * UTF-8 envelope. Do not truncate identifiers or misstate diagnostic counts. */
+/** Diagnostic samples may contain large persisted identifiers. Check the
+ * exact escaped UTF-8 envelope without first serializing a potentially
+ * oversized response. Never truncate identifiers or misstate counts. */
 function diagnosticResponseFits(body: { results: readonly { samples: readonly string[] }[] }): boolean {
   let textUnits = 0;
   for (const result of body.results) {
@@ -69,7 +69,34 @@ function diagnosticResponseFits(body: { results: readonly { samples: readonly st
       if (textUnits > MAX_OPS_HTTP_BYTES) return false;
     }
   }
-  return utf8Size(body) <= MAX_OPS_HTTP_BYTES;
+  // IDs, labels, status and notes in these health/security DTOs are fixed
+  // server metadata. Preserve all envelope fields and sample separators.
+  let remaining = MAX_OPS_HTTP_BYTES - utf8Size({
+    ...body,
+    results: body.results.map((result) => ({ ...result, samples: result.samples.map(() => "") })),
+  });
+  if (remaining < textUnits) return false;
+  // Each UTF-16 unit occupies at most six escaped JSON bytes.
+  if (textUnits * 6 <= remaining) return true;
+  for (const result of body.results) {
+    for (const sample of result.samples) {
+      for (let offset = 0; offset < sample.length;) {
+        let end = Math.min(offset + 4096, sample.length);
+        // Keep a UTF-16 surrogate pair together; lone surrogates must still
+        // receive JSON.stringify's well-formed six-byte escaped encoding.
+        if (end < sample.length) {
+          const high = sample.charCodeAt(end - 1), low = sample.charCodeAt(end);
+          if (high >= 0xd800 && high <= 0xdbff && low >= 0xdc00 && low <= 0xdfff) end--;
+        }
+        // Quotes already counted by the empty-string envelope. Each temporary
+        // JSON string is at most 4096 code units (24 KiB escaped, plus quotes).
+        remaining -= utf8Size(sample.slice(offset, end)) - 2;
+        if (remaining < 0) return false;
+        offset = end;
+      }
+    }
+  }
+  return true;
 }
 
 const TERMINAL_FAILURE_STATUSES = ["failed", "dead_letter"];
