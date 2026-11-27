@@ -4,6 +4,7 @@ import type { AppEnv } from "../../env.ts";
 import { parseJsonColumn, resolveActiveXUserId } from "../personal/context.ts";
 import { loadManageSnapshot, manageGate } from "./access.ts";
 import { jsonObject, type ManageLinkedX } from "./events.ts";
+import { LEGACY_NOTIFICATION_EVENT_ID_SQL } from "./notificationLegacySchema.ts";
 import {
   categorizeNotificationType,
   notificationRowsPiece,
@@ -46,6 +47,7 @@ interface Sections {
   notif_counts: string | null;
   notifications: string | null;
   linked: string | null;
+  legacy_notification_schema?: number | null;
 }
 
 export const manageOverviewRoutes = new Hono<AppEnv>().get("/", async (c) => {
@@ -60,7 +62,7 @@ export const manageOverviewRoutes = new Hono<AppEnv>().get("/", async (c) => {
   if (denied) return denied;
   if (!snapshot.isAdmin && !snapshot.manageableEventIds.includes(eventId)) return c.json({ error: "Not Found" }, 404);
 
-  const read = (withNotifications: boolean): Promise<Sections | null> => {
+  const read = (withNotifications: boolean, verifyLegacySchema = false): Promise<Sections | null> => {
     const params: unknown[] = [];
     const piece = (sql: string, ...binds: unknown[]): string => {
       params.push(...binds);
@@ -129,25 +131,49 @@ export const manageOverviewRoutes = new Hono<AppEnv>().get("/", async (c) => {
         MAX_LINKED_X,
       ),
     ];
+    // Only a failed notification-inclusive read needs to prove that the old
+    // schema truly lacks event_id; no extra statement on the healthy path.
+    if (verifyLegacySchema) {
+      columns.push(`${LEGACY_NOTIFICATION_EVENT_ID_SQL} AS legacy_notification_schema`);
+    }
     return db.prepare(`SELECT ${columns.join(", ")}`).bind(...params).first<Sections>();
   };
 
-  let sections: Sections | null;
+  let sections: Sections | null = null;
   let notificationSchemaMissing = false;
+  let firstReadFailed = false;
+  let notificationJsonInvalid = false;
   try {
     sections = await read(true);
-    // oversize / malformed notification JSON degrades like a failed notification read (CURRENT try/catch)
-    parseJsonColumn(sections?.notif_counts, []);
-    parseJsonColumn(sections?.notifications, []);
   } catch {
+    firstReadFailed = true;
+  }
+  if (!firstReadFailed) {
+    // CURRENT degrades only malformed/oversized notification JSON, not errors
+    // from the other fused D1 sections or an untrusted provider exception.
     try {
-      console.warn("[manage] notification_outbox.event_id unavailable");
+      parseJsonColumn(sections?.notif_counts, []);
+      parseJsonColumn(sections?.notifications, []);
     } catch {
-      // Diagnostic sinks are best-effort; preserve the legacy-schema fallback.
+      notificationJsonInvalid = true;
+    }
+  }
+  if (firstReadFailed || notificationJsonInvalid) {
+    const fallback = await read(false, firstReadFailed);
+    if (firstReadFailed && fallback?.legacy_notification_schema !== 1) {
+      throw new Error("manage_notification_schema_not_legacy");
+    }
+    try {
+      console.warn(notificationJsonInvalid
+        ? "[manage] notification_json_invalid"
+        : "[manage] notification_outbox.event_id unavailable");
+    } catch {
+      // Logging is best effort; preserve established notification-only fallback.
     }
     notificationSchemaMissing = true;
-    sections = await read(false);
+    sections = fallback;
   }
+
   if (!sections?.event) return c.json({ error: "Not Found" }, 404);
 
   const slotCounts: Record<string, number> = {};
