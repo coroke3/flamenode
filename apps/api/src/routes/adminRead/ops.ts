@@ -14,7 +14,7 @@ import type {
 } from "@flamenode/contracts";
 import { derivePlaylistSyncHealth } from "./playlistHealth.ts";
 import { INTEGRITY_CHECK_IDS, runIntegrityCheckById } from "@flamenode/server-core/admin/integrityChecks";
-import { HEALTH_CHECK_IDS, runHealthCheckById } from "@flamenode/server-core/admin/healthChecks";
+import { HEALTH_CHECK_IDS, runAuthLikeCountDriftCandidate, runHealthCheckById } from "@flamenode/server-core/admin/healthChecks";
 import { dbMiddleware } from "../../middleware/db.ts";
 import { loadWorkerMonitoring } from "./workerMonitoring.ts";
 import {
@@ -383,7 +383,11 @@ adminOpsRoutes.get("/health/checks/:checkId", dbMiddleware, async (c) => {
   if (!id || !HEALTH_CHECK_IDS.some((checkId) => checkId === id)) {
     return c.json({ error: "not_found" }, 404);
   }
-  const result = await runHealthCheckById(c.get("db"), id);
+  // Lead-scoped U06 candidate: only the Hono route uses Auth interaction authority.
+  // The shared Next compatibility bridge remains on the legacy CURRENT receipt pending independent review.
+  const result = id === "like_count_drift"
+    ? await runAuthLikeCountDriftCandidate(c.get("db"))
+    : await runHealthCheckById(c.get("db"), id);
   const body: AdminHealthResponse = { status: "all", results: result ? [result] : [], error: null };
   if (!diagnosticResponseFits(body)) {
     return c.json({ error: "unavailable" }, 503);

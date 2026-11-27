@@ -1346,7 +1346,7 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.ok(byId.x_id_merge_pending_stale.count >= 2 && byId.open_moderation_cases_overdue.count >= 1);
     assert.equal((await get("/ops/health?status=info")).body.status, "info");
 
-    const { HEALTH_CHECK_IDS, runHealthChecks } = await import("@flamenode/server-core/admin/healthChecks");
+    const { HEALTH_CHECK_IDS, runHealthChecks, runAuthLikeCountDriftCandidate } = await import("@flamenode/server-core/admin/healthChecks");
     const deep = await call("/api/admin-read/ops/health?deep=1", ADMIN);
     assert.equal(deep.status, 200);
     assert.deepEqual(deep.body, { status: "all", results: [], error: null, checkIds: [...HEALTH_CHECK_IDS] });
@@ -1398,10 +1398,16 @@ if (runUnderRootTsx(import.meta.url)) {
     ).get(retentionCutoff).n;
     assert.ok(expectedRetention >= 12, "fixture exercises COUNT beyond LIMIT 10");
     const fullResults = await runHealthChecks(refDb);
+    const authLikeCandidate = await runAuthLikeCountDriftCandidate(refDb);
     for (const id of HEALTH_CHECK_IDS) {
       const result = await call("/api/admin-read/ops/health/checks/" + encodeURIComponent(id), ADMIN);
       assert.equal(result.status, 200, id + " " + result.text.slice(0, 200));
-      assert.deepEqual(canon(result.body), canon({ status: "all", results: fullResults.filter((row) => row.id === id), error: null }), id);
+      // The Hono like-count route intentionally carries the Lead-scoped Auth-authority candidate;
+      // the shared Next helper remains the explicit legacy reference until independent review.
+      const expectedResults = id === "like_count_drift"
+        ? [authLikeCandidate]
+        : fullResults.filter((row) => row.id === id);
+      assert.deepEqual(canon(result.body), canon({ status: "all", results: expectedResults, error: null }), id);
       if (id === "audit_logs_retention_candidates") {
         assert.equal(result.body.results[0]?.count, expectedRetention,
           "COUNT(*) OVER () covers all eligible rows even with sample LIMIT 5");
@@ -1452,138 +1458,218 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.doesNotMatch(failed.text, /secret-internal/);
   });
 
-  test("MIG-0626 U06: characterize CURRENT like_count_drift authority, thresholds and transferred rows before SQL decision", async () => {
-    // This is a characterization, NOT approval of CURRENT's legacy authority,
-    // skipped zero-count videos or unbounded D1 result materialization.
+  test("MIG-0626 U06: preserve the legacy X receipt separately and verify the Auth-authority Hono candidate", async () => {
+    const { runHealthCheckById } = await import("@flamenode/server-core/admin/healthChecks");
     const endpoint = "/api/admin-read/ops/health/checks/like_count_drift";
-    const prefix = "mig0626-like-characterization-";
-    const authIds = ["u_alice", "u_bob", "u_carol", "u_dave", "u_erin", "u_frank"];
-    const label = "like_count 実数差分 (閾値 max(±5, ±5%))";
-    const note = "保存されているいいね数と video_interactions の実数が大きくズレている作品があります。";
-    const cases = [
-      ["zero", 0, 5, 5, 0, "ok", null],
-      ["abs-below", 4, 0, 0, 0, "ok", null],
-      ["abs-equal", 5, 0, 0, 0, "warn", "stored:5 actual:0 diff:5 threshold:5 [abs(5)]"],
-      ["abs-above", 6, 0, 0, 0, "warn", "stored:6 actual:0 diff:6 threshold:5 [abs(5)]"],
-      ["ratio-below", 105, 110, 0, 0, "ok", null],
-      ["ratio-equal", 104, 110, 0, 0, "warn", "stored:104 actual:110 diff:6 threshold:6 [ratio(6)]"],
-      ["ratio-above", 103, 110, 0, 0, "warn", "stored:103 actual:110 diff:7 threshold:6 [ratio(6)]"],
-      ["ratio-tie", 95, 100, 0, 0, "warn", "stored:95 actual:100 diff:5 threshold:5 [ratio(5)]"],
-      ["auth-healthy-legacy-empty", 6, 0, 6, 0, "warn", "stored:6 actual:0 diff:6 threshold:5 [abs(5)]"],
-      ["legacy-masks-auth-drift", 5, 5, 0, 0, "ok", null],
-      ["bookmarks-not-likes", 5, 0, 0, 8, "warn", "stored:5 actual:0 diff:5 threshold:5 [abs(5)]"],
-    ];
+    const prefix = "mig0626-like-auth-";
+    const authIds = Array.from({ length: 120 }, (_, i) => prefix + "auth-" + i);
     const xId = (i) => prefix + "x-" + i;
+    const label = "like_count 実数差分 (閾値 max(±5, ±5%))";
+    const authNote = "保存されているいいね数と Auth User 単位の video_interactions_auth 実数が大きくズレている作品があります。";
+    const cases = [
+      ["zero", 0, 5, 5, 0],
+      ["abs-below", 4, 0, 0, 0],
+      ["abs-equal", 5, 0, 0, 0],
+      ["abs-above", 6, 0, 0, 0],
+      ["ratio-below", 105, 110, 110, 0],
+      ["ratio-equal", 104, 110, 110, 0],
+      ["ratio-above", 103, 110, 110, 0],
+      ["ratio-tie", 95, 100, 100, 0],
+      ["auth-healthy-legacy-empty", 6, 0, 6, 0],
+      ["legacy-masks-auth-drift", 5, 5, 0, 0],
+      ["bookmarks-not-likes", 5, 0, 0, 8],
+    ];
     const video = (id, stored) => ins("videos", {
       id, title: id, creator_display_name: "fixture", submitted_by_user_id: "u_carol",
       visibility_status: "private", app_like_count: stored, created_at: T0,
     });
-    const interaction = (id, i, type) => ins("video_interactions", {
+    const legacyInteraction = (id, i, type) => ins("video_interactions", {
       x_user_id: xId(i), video_id: id, interaction_type: type, created_at: T0,
+    });
+    const authInteraction = (id, i, type) => ins("video_interactions_auth", {
+      auth_user_id: authIds[i], video_id: id, interaction_type: type, created_at: T0,
     });
     const measure = async (token = ADMIN) => {
       const d1 = createD1(sqlite);
       const prepare = d1.prepare;
       const projections = [];
-      d1.prepare = (sql) => {
-        const table = /\bfrom\s+"?video_interactions"?(?:\s|$)/i.test(sql)
-          ? "legacy" : /\bfrom\s+"?videos"?(?:\s|$)/i.test(sql)
-            ? "videos" : null;
+      const candidateSql = [];
+      d1.prepare = (statement) => {
+        if (!/WITH\s+observed\s+AS\s+MATERIALIZED/i.test(statement)) return prepare(statement);
+        candidateSql.push(statement);
         const wrap = (stmt) => {
-          if (!table) return stmt;
+          let recorded = false;
+          const record = (rows) => {
+            if (recorded) return;
+            recorded = true;
+            const data = Array.isArray(rows) ? rows : [];
+            projections.push({ rows: data.length, bytes: Buffer.byteLength(JSON.stringify(data)) });
+          };
           return {
             ...stmt,
             bind: (...args) => wrap(stmt.bind(...args)),
             async raw(options) {
               const rows = await stmt.raw(options);
-              const data = options?.columnNames ? rows.slice(1) : rows;
-              projections.push({ table, rows: data.length, bytes: Buffer.byteLength(JSON.stringify(data)) });
+              record(options?.columnNames ? rows.slice(1) : rows);
               return rows;
             },
             async all() {
               const result = await stmt.all();
-              projections.push({ table, rows: result.results.length, bytes: Buffer.byteLength(JSON.stringify(result.results)) });
+              record(result.results ?? result);
               return result;
             },
           };
         };
-        return wrap(prepare(sql));
+        return wrap(prepare(statement));
       };
-      return { ...(await call(endpoint, token, { d1 })), projections };
+      return {
+        ...(await call(endpoint, token, { d1 })),
+        projections,
+        sql: candidateSql[0],
+      };
     };
     const expected = (status, count, samples) => ({
-      status: "all", results: [{
+      status: "all",
+      results: [{
         id: "like_count_drift", label, status, count, samples,
-        ...(count > 0 ? { note } : {}),
-      }], error: null,
+        ...(count > 0 ? { note: authNote } : {}),
+      }],
+      error: null,
     });
-    const assertReadOnly = (receipt, statements) => {
+    const assertReadOnly = (receipt, statements, projectedRows) => {
       assert.equal(receipt.status, 200);
       assert.equal(receipt.headers.get("cache-control"), "private, no-store");
       assert.equal(receipt.stats.statements, statements);
       assert.equal(receipt.stats.writes, 0);
       assert.ok(Buffer.byteLength(receipt.text) <= 64 * 1024);
+      assert.equal(receipt.projections.length, 1);
+      assert.equal(receipt.projections[0].rows, projectedRows);
+      assert.ok(receipt.projections[0].bytes < 8 * 1024);
+      assert.match(receipt.sql, /video_interactions_auth/);
+      assert.doesNotMatch(receipt.sql, /FROM\s+"?video_interactions"?(?:\s|$)/i);
+      assert.match(receipt.sql, /ORDER BY id/i);
+      assert.match(receipt.sql, /LIMIT 5/i);
     };
-    // Isolate fixture from the shared parity database; always restore it.
-    sqlite.exec("SAVEPOINT mig0626_like_characterization");
+
+    sqlite.exec("SAVEPOINT mig0626_like_auth_candidate");
     try {
       sqlite.exec("UPDATE videos SET app_like_count = 0");
+      sqlite.exec("DELETE FROM video_interactions_auth");
+      sqlite.exec("DELETE FROM video_interactions");
       for (let i = 0; i < 110; i++) {
         ins("x_users", { id: xId(i), x_name: xId(i), approval_status: "approved" });
       }
+      for (let i = 0; i < authIds.length; i++) {
+        ins("user", {
+          id: authIds[i], name: authIds[i], email: authIds[i] + "@example.test",
+          role: "user", created_at: T0,
+        });
+      }
+
       const empty = await measure();
-      assertReadOnly(empty, 2);
+      assertReadOnly(empty, 2, 1);
       assert.deepEqual(empty.body, expected("ok", 0, []));
-      assert.deepEqual(empty.projections.map(({ table, rows }) => [table, rows]), [["videos", 0]]);
-      const update = sqlite.prepare("UPDATE videos SET app_like_count = ? WHERE id = ?");
-      for (const [suffix, stored, legacyLikes, authLikes, bookmarks, status, sample] of cases) {
+
+      for (const [suffix, stored, legacyLikes, authLikes, authBookmarks] of cases) {
         const id = prefix + suffix;
         video(id, stored);
-        for (let i = 0; i < legacyLikes; i++) interaction(id, i, "like");
-        for (let i = 0; i < bookmarks; i++) interaction(id, i, "bookmark");
-        for (let i = 0; i < authLikes; i++) {
-          ins("video_interactions_auth", {
-            auth_user_id: authIds[i], video_id: id, interaction_type: "like", created_at: T0,
-          });
-        }
-        const receipt = await measure();
-        assertReadOnly(receipt, stored === 0 ? 2 : 3);
-        assert.deepEqual(receipt.body, expected(status, sample ? 1 : 0, sample ? ["video:" + id + " " + sample] : []), suffix);
-        assert.deepEqual(receipt.projections.map(({ table }) => table), stored === 0 ? ["videos"] : ["videos", "legacy"], suffix);
-        assert.equal(receipt.projections[0].rows, stored === 0 ? 0 : 1, suffix);
-        update.run(0, id);
+        for (let i = 0; i < legacyLikes; i++) legacyInteraction(id, i, "like");
+        for (let i = 0; i < authLikes; i++) authInteraction(id, i, "like");
+        for (let i = 0; i < authBookmarks; i++) authInteraction(id, i, "bookmark");
       }
-      // All qualifying issues count even though only five examples are shown.
-      // >100 healthy rows deliberately characterize the remaining D1 transfer
-      // blocker without calling it a compliant S2 query.
+
+      // The shared CURRENT helper remains a pinned X-authority reference:
+      // it excludes stored=0, trusts legacy X rows, and ignores Auth rows.
+      const legacy = await runHealthCheckById(refDb, "like_count_drift");
+      assert.equal(legacy?.count, 7);
+      assert.equal(legacy?.samples.length, 5);
+      const legacyVideoRows = sqlite.prepare(
+        "SELECT id, app_like_count AS stored FROM videos WHERE app_like_count >= 1",
+      ).all();
+      const legacyInteractionRows = sqlite.prepare(
+        "SELECT video_id, COUNT(*) AS cnt FROM video_interactions WHERE interaction_type = 'like' GROUP BY video_id",
+      ).all();
+      const legacyMap = new Map(legacyInteractionRows.map((row) => [row.video_id, Number(row.cnt)]));
+      const legacyDriftIds = new Set();
+      for (const row of legacyVideoRows) {
+        const actual = legacyMap.get(row.id) ?? 0;
+        const ratioThreshold = Math.ceil(actual / 20);
+        const threshold = Math.max(5, ratioThreshold);
+        if (Math.abs(Number(row.stored) - actual) >= threshold) legacyDriftIds.add(row.id);
+      }
+      assert.ok(!legacyVideoRows.some((row) => row.id === prefix + "zero"), "legacy excludes stored zero");
+      assert.ok(legacyDriftIds.has(prefix + "auth-healthy-legacy-empty"), "legacy reports a healthy Auth count as drift");
+      assert.ok(!legacyDriftIds.has(prefix + "legacy-masks-auth-drift"), "legacy rows can mask an Auth-authority drift");
+      assert.ok(legacyDriftIds.has(prefix + "bookmarks-not-likes"), "legacy bookmark rows do not count as likes");
+
+      const first = await measure();
+      assertReadOnly(first, 2, 5);
+      assert.deepEqual(first.body, expected("warn", 8, [
+        "video:" + prefix + "abs-above stored:6 actual:0 diff:6 threshold:5 [abs(5)]",
+        "video:" + prefix + "abs-equal stored:5 actual:0 diff:5 threshold:5 [abs(5)]",
+        "video:" + prefix + "bookmarks-not-likes stored:5 actual:0 diff:5 threshold:5 [abs(5)]",
+        "video:" + prefix + "legacy-masks-auth-drift stored:5 actual:0 diff:5 threshold:5 [abs(5)]",
+        "video:" + prefix + "ratio-above stored:103 actual:110 diff:7 threshold:6 [ratio(6)]",
+      ]));
+
+      // More than 100 healthy rows plus seven drifts: count all, transfer five.
       for (let i = 0; i < 120; i++) {
-        const id = prefix + "healthy-" + i;
+        const id = prefix + "zz-healthy-" + String(i).padStart(3, "0");
         video(id, 1);
-        interaction(id, 0, "like");
+        legacyInteraction(id, 0, "like");
+        authInteraction(id, 0, "like");
       }
-      const driftIds = Array.from({ length: 7 }, (_, i) => prefix + "aggregate-" + i);
-      for (const id of driftIds) video(id, 6);
-      const aggregate = await measure();
-      assertReadOnly(aggregate, 3);
-      const result = aggregate.body.results[0];
-      assert.equal(result.status, "warn");
-      assert.equal(result.count, 7);
-      assert.equal(result.samples.length, 5);
-      assert.equal(new Set(result.samples).size, 5);
-      // No ORDER BY in CURRENT, so do not invent a stable order contract.
-      const allowed = new Set(driftIds.map((id) => "video:" + id + " stored:6 actual:0 diff:6 threshold:5 [abs(5)]"));
-      assert.ok(result.samples.every((sample) => allowed.has(sample)));
-      assert.deepEqual(aggregate.projections.map(({ table }) => table), ["videos", "legacy"]);
-      assert.equal(aggregate.projections[0].rows, 127);
-      assert.ok(aggregate.projections[1].rows >= 120);
-      assert.ok(aggregate.projections.every(({ rows, bytes }) => rows > 100 && bytes > 0));
+      for (let i = 0; i < 7; i++) video(prefix + "zz-aggregate-" + i, 6);
+      const oldTransferRows = sqlite.prepare(
+        "SELECT id, app_like_count AS stored FROM videos WHERE app_like_count >= 1",
+      ).all();
+      const oldTransferInteractions = sqlite.prepare(
+        "SELECT video_id, COUNT(*) AS cnt FROM video_interactions WHERE interaction_type = 'like' GROUP BY video_id",
+      ).all();
+      assert.ok(oldTransferRows.length > 100);
+      assert.ok(oldTransferInteractions.length > 100);
+      assert.ok(Buffer.byteLength(JSON.stringify(oldTransferRows)) > 0);
+      assert.ok(Buffer.byteLength(JSON.stringify(oldTransferInteractions)) > 0);
+
+      const many = await measure();
+      assertReadOnly(many, 2, 5);
+      assert.deepEqual(many.body, expected("warn", 15, [
+        "video:" + prefix + "abs-above stored:6 actual:0 diff:6 threshold:5 [abs(5)]",
+        "video:" + prefix + "abs-equal stored:5 actual:0 diff:5 threshold:5 [abs(5)]",
+        "video:" + prefix + "bookmarks-not-likes stored:5 actual:0 diff:5 threshold:5 [abs(5)]",
+        "video:" + prefix + "legacy-masks-auth-drift stored:5 actual:0 diff:5 threshold:5 [abs(5)]",
+        "video:" + prefix + "ratio-above stored:103 actual:110 diff:7 threshold:6 [ratio(6)]",
+      ]));
+
+      const invalidId = prefix + "zz-invalid-counter";
+      video(invalidId, "Infinity");
+      const invalid = await measure();
+      assert.equal(invalid.status, 503);
+      assert.deepEqual(invalid.body, { error: "unavailable" });
+      assert.equal(invalid.headers.get("cache-control"), "private, no-store");
+      assert.equal(invalid.stats.statements, 2);
+      assert.equal(invalid.stats.writes, 0);
+      assert.doesNotMatch(invalid.text, /Infinity|invalid-counter/);
+      sqlite.prepare("DELETE FROM videos WHERE id = ?").run(invalidId);
+
+      const oversizedId = "!" + "x".repeat(256);
+      video(oversizedId, 6);
+      const oversized = await measure();
+      assert.equal(oversized.status, 503);
+      assert.deepEqual(oversized.body, { error: "unavailable" });
+      assert.equal(oversized.headers.get("cache-control"), "private, no-store");
+      assert.equal(oversized.stats.statements, 2);
+      assert.equal(oversized.stats.writes, 0);
+      assert.doesNotMatch(oversized.text, /xxxxxxxxxxxxxxxxxxxx/);
+      sqlite.prepare("DELETE FROM videos WHERE id = ?").run(oversizedId);
+
       const denied = await measure("tok-alice");
       assert.equal(denied.status, 403);
       assert.equal(denied.stats.statements, 1);
       assert.equal(denied.stats.writes, 0);
       assert.deepEqual(denied.projections, []);
     } finally {
-      sqlite.exec("ROLLBACK TO mig0626_like_characterization; RELEASE mig0626_like_characterization");
+      sqlite.exec("ROLLBACK TO mig0626_like_auth_candidate; RELEASE mig0626_like_auth_candidate");
     }
   });
 

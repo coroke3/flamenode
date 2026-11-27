@@ -1,6 +1,6 @@
 import { and, desc, eq, gte, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import type { ServerCoreDb as AnyDb } from "../db.ts";
-import { events as eventsTable, auditLogs as auditLogsTable, notificationOutbox as notificationOutboxTable, slots as slotsTable, systemSettings, videoEvents as videoEventsTable, videoInteractions as videoInteractionsTable, videoModerationCases as videoModerationCasesTable, videoYoutubeMetadata as videoYoutubeMetadataTable, videos as videosTable, xIdentityRequests as xIdentityRequestsTable } from "@flamenode/db/schema";
+import { events as eventsTable, auditLogs as auditLogsTable, notificationOutbox as notificationOutboxTable, slots as slotsTable, systemSettings, videoEvents as videoEventsTable, videoInteractions as videoInteractionsTable, videoInteractionsAuth as videoInteractionsAuthTable, videoModerationCases as videoModerationCasesTable, videoYoutubeMetadata as videoYoutubeMetadataTable, videos as videosTable, xIdentityRequests as xIdentityRequestsTable } from "@flamenode/db/schema";
 
 export type HealthCheckResult = {
   id: string;
@@ -359,6 +359,189 @@ async function checkLikeCountDrift(db: AnyDb): Promise<HealthCheckResult> {
       driftCount > 0
         ? "保存されているいいね数と video_interactions の実数が大きくズレている作品があります。"
         : undefined,
+  };
+}
+
+
+const LIKE_COUNT_DIAGNOSTIC_MAX_SAMPLE_ID_BYTES = 256;
+const MAX_SAFE_DIAGNOSTIC_INTEGER = 9007199254740991;
+
+function readDiagnosticRowField(row: unknown, index: number, name: string): unknown {
+  if (Array.isArray(row)) return row[index];
+  if (row && typeof row === "object") return (row as Record<string, unknown>)[name];
+  throw new Error("invalid diagnostic row");
+}
+
+function diagnosticNonNegativeSafeInteger(value: unknown): number {
+  const decimal = typeof value === "number"
+    ? Number.isSafeInteger(value) ? String(value) : ""
+    : typeof value === "string" ? value : "";
+  if (!/^(0|[1-9][0-9]*)$/.test(decimal)) {
+    throw new Error("unrepresentable diagnostic integer");
+  }
+  const parsed = Number(decimal);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw new Error("unrepresentable diagnostic integer");
+  }
+  return parsed;
+}
+
+/**
+ * Lead-scoped U06 candidate for the Hono per-check route only.
+ * CURRENT Next compatibility helpers continue to use checkLikeCountDrift()
+ * until the changed Auth-authority receipt receives independent review.
+ */
+export async function runAuthLikeCountDriftCandidate(db: AnyDb): Promise<HealthCheckResult> {
+  const rows = await db.all(sql\`
+    WITH observed AS MATERIALIZED (
+      SELECT
+        v.id AS id,
+        v.app_like_count AS stored,
+        (
+          SELECT COUNT(*)
+          FROM \${videoInteractionsAuthTable} AS i
+          WHERE i.video_id = v.id
+            AND i.interaction_type = 'like'
+        ) AS actual,
+        typeof(v.app_like_count) AS stored_type
+      FROM \${videosTable} AS v
+    ),
+    validated AS MATERIALIZED (
+      SELECT
+        id,
+        stored,
+        actual,
+        CASE
+          WHEN stored_type = 'integer'
+            AND stored >= 0
+            AND stored <= \${MAX_SAFE_DIAGNOSTIC_INTEGER}
+            AND typeof(actual) = 'integer'
+            AND actual >= 0
+            AND actual <= \${MAX_SAFE_DIAGNOSTIC_INTEGER}
+          THEN 1
+          ELSE 0
+        END AS valid
+      FROM observed
+    ),
+    classified AS MATERIALIZED (
+      SELECT
+        id,
+        stored,
+        actual,
+        valid,
+        CASE WHEN valid = 1 THEN abs(stored - actual) END AS diff,
+        CASE
+          WHEN valid = 1 THEN max(
+            \${LIKE_COUNT_DRIFT_ABS},
+            actual / 20 + CASE WHEN actual % 20 = 0 THEN 0 ELSE 1 END
+          )
+        END AS threshold,
+        CASE
+          WHEN valid = 1 THEN actual / 20 + CASE WHEN actual % 20 = 0 THEN 0 ELSE 1 END
+        END AS ratio_threshold
+      FROM validated
+    ),
+    summary AS (
+      SELECT
+        CAST(COALESCE(SUM(CASE WHEN valid = 0 THEN 1 ELSE 0 END), 0) AS TEXT) AS invalid_count,
+        CAST(COALESCE(SUM(CASE WHEN valid = 1 AND diff >= threshold THEN 1 ELSE 0 END), 0) AS TEXT) AS drift_count
+      FROM classified
+    ),
+    samples AS (
+      SELECT
+        CASE
+          WHEN length(CAST(id AS BLOB)) <= \${LIKE_COUNT_DIAGNOSTIC_MAX_SAMPLE_ID_BYTES}
+          THEN id
+          ELSE NULL
+        END AS id,
+        length(CAST(id AS BLOB)) AS id_bytes,
+        CAST(stored AS TEXT) AS stored,
+        CAST(actual AS TEXT) AS actual,
+        CAST(diff AS TEXT) AS diff,
+        CAST(threshold AS TEXT) AS threshold,
+        CAST(ratio_threshold AS TEXT) AS ratio_threshold,
+        CASE WHEN ratio_threshold >= \${LIKE_COUNT_DRIFT_ABS} THEN 1 ELSE 0 END AS ratio_triggered
+      FROM classified
+      WHERE valid = 1 AND diff >= threshold
+      ORDER BY id
+      LIMIT 5
+    )
+    SELECT
+      summary.invalid_count,
+      summary.drift_count,
+      samples.id,
+      samples.id_bytes,
+      samples.stored,
+      samples.actual,
+      samples.diff,
+      samples.threshold,
+      samples.ratio_threshold,
+      samples.ratio_triggered
+    FROM summary
+    LEFT JOIN samples ON 1 = 1
+    ORDER BY samples.id
+    LIMIT 5
+  \`) as unknown[];
+
+  if (rows.length === 0) throw new Error("missing diagnostic summary");
+  const first = rows[0];
+  const invalidCount = diagnosticNonNegativeSafeInteger(readDiagnosticRowField(first, 0, "invalid_count"));
+  if (invalidCount !== 0) throw new Error("invalid like-count diagnostic input");
+  const driftCount = diagnosticNonNegativeSafeInteger(readDiagnosticRowField(first, 1, "drift_count"));
+  const samples: string[] = [];
+
+  for (const row of rows) {
+    const idValue = readDiagnosticRowField(row, 2, "id");
+    const idBytesValue = readDiagnosticRowField(row, 3, "id_bytes");
+    if (idValue === null || idValue === undefined) {
+      if (idBytesValue !== null && idBytesValue !== undefined) {
+        throw new Error("invalid diagnostic sample identifier");
+      }
+      continue;
+    }
+    if (typeof idValue !== "string") throw new Error("invalid diagnostic sample identifier");
+    const idBytes = diagnosticNonNegativeSafeInteger(idBytesValue);
+    if (idBytes > LIKE_COUNT_DIAGNOSTIC_MAX_SAMPLE_ID_BYTES) {
+      throw new Error("diagnostic sample identifier exceeds byte bound");
+    }
+
+    const stored = diagnosticNonNegativeSafeInteger(readDiagnosticRowField(row, 4, "stored"));
+    const actual = diagnosticNonNegativeSafeInteger(readDiagnosticRowField(row, 5, "actual"));
+    const diff = diagnosticNonNegativeSafeInteger(readDiagnosticRowField(row, 6, "diff"));
+    const threshold = diagnosticNonNegativeSafeInteger(readDiagnosticRowField(row, 7, "threshold"));
+    const ratioThreshold = diagnosticNonNegativeSafeInteger(readDiagnosticRowField(row, 8, "ratio_threshold"));
+    const ratioTriggered = diagnosticNonNegativeSafeInteger(readDiagnosticRowField(row, 9, "ratio_triggered"));
+    if (
+      diff !== Math.abs(stored - actual) ||
+      threshold !== Math.max(LIKE_COUNT_DRIFT_ABS, ratioThreshold) ||
+      diff < threshold ||
+      ratioTriggered > 1 ||
+      (ratioTriggered === 1) !== (ratioThreshold >= LIKE_COUNT_DRIFT_ABS)
+    ) {
+      throw new Error("invalid like-count diagnostic receipt");
+    }
+    samples.push(
+      "video:" + idValue +
+      " stored:" + stored +
+      " actual:" + actual +
+      " diff:" + diff +
+      " threshold:" + threshold +
+      " [" + (ratioTriggered === 1 ? "ratio(" + ratioThreshold + ")" : "abs(" + LIKE_COUNT_DRIFT_ABS + ")") + "]",
+    );
+  }
+
+  if (samples.length > 5 || driftCount < samples.length || (driftCount === 0 && samples.length !== 0)) {
+    throw new Error("invalid like-count diagnostic sample count");
+  }
+  return {
+    id: "like_count_drift",
+    label: "like_count 実数差分 (閾値 max(±5, ±5%))",
+    status: driftCount === 0 ? "ok" : "warn",
+    count: driftCount,
+    samples,
+    note: driftCount > 0
+      ? "保存されているいいね数と Auth User 単位の video_interactions_auth 実数が大きくズレている作品があります。"
+      : undefined,
   };
 }
 
