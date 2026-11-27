@@ -201,3 +201,77 @@ test("MIG-0645 U02j: real mutateWithAudit batch rolls back X-user marker injecti
     sqlite.close();
   }
 });
+
+
+test("MIG-0645 U02k: committed D1 audit marker replays after R2 CAS failure without another batch", async () => {
+  const { drizzle } = await import("drizzle-orm/d1");
+  const { sql } = await import("drizzle-orm");
+  const { mutateWithAudit } = await import("@flamenode/server-core/audit/mutate");
+  const { createAdminD1, seedBase } = await import("./helpers/sqliteD1.mjs");
+  const { db: d1, sqlite, stats } = createAdminD1();
+  try {
+    seedBase(sqlite);
+    const db = drizzle(d1);
+    const target = "step:test:x_users:0";
+    let d1Calls = 0;
+    let releases = 0;
+    let r2Attempts = 0;
+    let r2Progress = { stage: "x_users", index: 0 };
+    const applyStep = async () => {
+      d1Calls++;
+      // Stand-in for the CURRENT recoveredStepMarker identity and payload
+      // validation: it must read the *durable* D1 audit, never JS memory.
+      const receipt = sqlite.prepare(
+        "SELECT after_json FROM audit_logs WHERE table_name = 'legacy_import_steps' AND target_id = ?",
+      ).get(target);
+      if (receipt) {
+        const marker = JSON.parse(receipt.after_json);
+        assert.deepEqual(marker, { next_stage: "softwares", next_index: 0 });
+        return { progress: { stage: marker.next_stage, index: marker.next_index }, complete: false };
+      }
+      await mutateWithAudit(db, {
+        mutationStatements: [
+          db.run(sql.raw("INSERT INTO x_users (id, x_name, approval_status) VALUES ('legacy_x_3', 'Legacy X 3', 'imported')")),
+          db.run(sql.raw("INSERT INTO static_rebuild_queue (id, target_type, target_id, reason, priority, status) VALUES ('rebuild-x-3', 'users_index', 'global', 'legacy_import_x_users', 'low', 'pending')")),
+        ],
+        expectedMutationChanges: [1, 1],
+        audits: [
+          { table_name: "x_users_import_batch", target_id: "legacy:legacy_x_3", operation: "CREATE",
+            before: null, after: { ids: ["legacy_x_3"] }, actor_user_id: "admin-1",
+            context: "legacy_import", retention_class: "long_audit", restore_strategy: "none" },
+          { table_name: "legacy_import_steps", target_id: target, operation: "SYSTEM",
+            before: null, after: { next_stage: "softwares", next_index: 0 }, actor_user_id: "admin-1",
+            context: "legacy_import:step", retention_class: "long_audit", restore_strategy: "none" },
+        ],
+      });
+      return { progress: { stage: "softwares", index: 0 }, complete: false };
+    };
+    const attempt = () => commitLegacyImportOneStep({
+      applyStep,
+      advanceClaim: async (progress) => {
+        r2Attempts++;
+        if (r2Attempts === 1) throw new Error("injected R2 CAS conflict");
+        r2Progress = progress;
+        return 1700001000;
+      },
+      releaseClaim: async () => { releases++; },
+    });
+    const first = await attempt();
+    assert.equal(first.kind, "committed_progress_pending");
+    assert.equal(first.step.progress.stage, "softwares");
+    assert.deepEqual(r2Progress, { stage: "x_users", index: 0 }, "first CAS leaves R2 behind");
+    assert.equal(releases, 1);
+    assert.equal(stats.batches, 1, "D1 was already committed once");
+    const second = await attempt();
+    assert.equal(second.kind, "advanced");
+    assert.equal(second.step.progress.stage, "softwares");
+    assert.deepEqual(r2Progress, { stage: "softwares", index: 0 });
+    assert.equal(stats.batches, 1, "audit-marker replay must not reapply D1");
+    assert.equal(d1Calls, 2, "D1 adapter is called again for the same progress");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM x_users").get().n, 1);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 1);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 2);
+  } finally {
+    sqlite.close();
+  }
+});
