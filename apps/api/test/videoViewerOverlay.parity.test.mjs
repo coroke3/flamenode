@@ -544,8 +544,8 @@ if (runUnderRootTsx(import.meta.url)) {
 
   test("SEC #715: oversized event_staff fields never enter the first D1 video JSON row", async () => {
     for (const [field, badValue] of [
-      ["permission_preset", "\\u0000" + "p".repeat(180_000)],
-      ["custom_permission_keys_json", "\\u0000" + "k".repeat(180_000)],
+      ["permission_preset", "\u0000" + "p".repeat(180_000)],
+      ["custom_permission_keys_json", "\u0000" + "k".repeat(180_000)],
     ]) {
       const { env, sqlite, d1 } = setupTestEnv();
       const row = {
@@ -568,8 +568,8 @@ if (runUnderRootTsx(import.meta.url)) {
         const stmt = originalPrepare(sql);
         if (!sql.includes("AS video_json") || !sql.includes("AS user_json")) return stmt;
         assert.match(sql, /WITH staff_entries AS MATERIALIZED/);
-        assert.match(sql, /length\\(CAST\\(q\\."custom_permission_keys_json" AS BLOB\\)\\)/);
-        assert.match(sql, /length\\(CAST\\(q\\."permission_preset" AS BLOB\\)\\)/);
+        assert.match(sql, /length\(CAST\(q\\."custom_permission_keys_json" AS BLOB\)\)/);
+        assert.match(sql, /length\(CAST\(q\\."permission_preset" AS BLOB\)\)/);
         const originalBind = stmt.bind.bind(stmt);
         stmt.bind = (...params) => {
           const bound = originalBind(...params);
