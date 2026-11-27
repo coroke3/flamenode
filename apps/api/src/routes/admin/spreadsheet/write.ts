@@ -683,35 +683,47 @@ export function validateSpreadsheetMemberFkReleaseLookupReceipt(
   plan: { fkLookup: SpreadsheetForeignKeyLookup; releaseIds: readonly string[] },
   result: { success: boolean; results: unknown[] },
 ): { eventIdsByVideo: Map<string, string[]> } {
-  if (!plan || !plan.fkLookup || !Array.isArray(plan.releaseIds) ||
-      !result || result.success !== true || !Array.isArray(result.results) ||
-      result.results.length > plan.fkLookup.values.length + 1 + SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT + 1) {
-    throw new Error("invalid_snapshot");
-  }
   const fkRows: Array<{ value: string | number | null }> = [];
   const releaseRows: unknown[] = [];
-  for (const row of result.results) {
-    if (!row || typeof row !== "object" || Array.isArray(row) ||
-        !Object.hasOwn(row, "kind") || typeof (row as { kind?: unknown }).kind !== "string") {
+  // Provider receipt access (including accessors/proxy traps) is not a
+  // domain decision. Never let it forge a preview, FK or constraint error.
+  try {
+    if (!plan || !plan.fkLookup || !Array.isArray(plan.releaseIds) ||
+        !result || result.success !== true) {
       throw new Error("invalid_snapshot");
     }
-    const kind = (row as { kind: string }).kind;
-    if (kind === "fk") {
-      if (!Object.hasOwn(row, "value") || !Object.hasOwn(row, "videoId") ||
-          !Object.hasOwn(row, "eventId") || !Object.hasOwn(row, "primaryEventId") ||
-          (row as { videoId: unknown }).videoId !== null ||
-          (row as { eventId: unknown }).eventId !== null ||
-          (row as { primaryEventId: unknown }).primaryEventId !== null) {
+    const rows = result.results;
+    if (!Array.isArray(rows) ||
+        rows.length > plan.fkLookup.values.length + 1 + SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT + 1) {
+      throw new Error("invalid_snapshot");
+    }
+    for (const row of rows) {
+      if (!row || typeof row !== "object" || Array.isArray(row) || !Object.hasOwn(row, "kind")) {
         throw new Error("invalid_snapshot");
       }
-      fkRows.push({ value: (row as { value: string | number | null }).value });
-    } else if (kind === "release") {
-      releaseRows.push(row);
-    } else {
-      throw new Error("invalid_snapshot");
+      const kind = (row as { kind?: unknown }).kind;
+      if (kind === "fk") {
+        if (!Object.hasOwn(row, "value") || !Object.hasOwn(row, "videoId") ||
+            !Object.hasOwn(row, "eventId") || !Object.hasOwn(row, "primaryEventId") ||
+            (row as { videoId: unknown }).videoId !== null ||
+            (row as { eventId: unknown }).eventId !== null ||
+            (row as { primaryEventId: unknown }).primaryEventId !== null) {
+          throw new Error("invalid_snapshot");
+        }
+        fkRows.push({ value: (row as { value: string | number | null }).value });
+      } else if (kind === "release") {
+        releaseRows.push(row);
+      } else {
+        throw new Error("invalid_snapshot");
+      }
     }
+  } catch {
+    throw new Error("invalid_snapshot");
   }
+
   // Preserve old two-query ordering: FK violations precede release overflow.
+  // fkRows now contains only locally constructed rows; genuine FK errors
+  // must remain distinguishable from malformed provider data.
   assertSpreadsheetForeignKeyLookup(plan.fkLookup, fkRows);
   if (releaseRows.length > SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT) {
     throw new Error(SPREADSHEET_STATIC_REBUILD_SPLIT_REQUIRED);
@@ -720,36 +732,46 @@ export function validateSpreadsheetMemberFkReleaseLookupReceipt(
   const seenReleaseTuples = new Set<string>();
   const eventIdsByVideo = new Map<string, Set<string>>();
   const linkedEventIds = new Set<string>();
-  for (const candidate of releaseRows) {
-    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
-      throw new Error("invalid_snapshot");
-    }
-    const row = candidate as Record<string, unknown>;
-    if (!Object.hasOwn(row, "value") || !Object.hasOwn(row, "videoId") ||
-        !Object.hasOwn(row, "eventId") || !Object.hasOwn(row, "primaryEventId") ||
-        row.value !== null || typeof row.videoId !== "string" || !requested.has(row.videoId) ||
-        (row.eventId !== null && typeof row.eventId !== "string") ||
-        (row.primaryEventId !== null && typeof row.primaryEventId !== "string")) {
-      throw new Error("invalid_snapshot");
-    }
-    // Do not let a malformed provider receipt collapse into the event Sets.
-    // Distinct rows may share primaryEventId, but an identical source tuple is invalid.
-    const releaseTuple = JSON.stringify([row.videoId, row.eventId, row.primaryEventId]);
-    if (seenReleaseTuples.has(releaseTuple)) throw new Error("invalid_snapshot");
-    seenReleaseTuples.add(releaseTuple);
-    const eventIds = eventIdsByVideo.get(row.videoId) ?? new Set<string>();
-    for (const linkedId of [row.eventId, row.primaryEventId]) {
-      const normalized = (linkedId as string | null)?.trim();
-      if (normalized) {
-        eventIds.add(normalized);
-        linkedEventIds.add(normalized);
+  let overflow = false;
+  try {
+    for (const candidate of releaseRows) {
+      if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+        throw new Error("invalid_snapshot");
       }
+      const row = candidate as Record<string, unknown>;
+      if (!Object.hasOwn(row, "value") || !Object.hasOwn(row, "videoId") ||
+          !Object.hasOwn(row, "eventId") || !Object.hasOwn(row, "primaryEventId")) {
+        throw new Error("invalid_snapshot");
+      }
+      const { value, videoId, eventId, primaryEventId } = row;
+      if (value !== null || typeof videoId !== "string" || !requested.has(videoId) ||
+          (eventId !== null && typeof eventId !== "string") ||
+          (primaryEventId !== null && typeof primaryEventId !== "string")) {
+        throw new Error("invalid_snapshot");
+      }
+      // Do not let a malformed provider receipt collapse into the event Sets.
+      // Distinct rows may share primaryEventId, but an identical source tuple is invalid.
+      const releaseTuple = JSON.stringify([videoId, eventId, primaryEventId]);
+      if (seenReleaseTuples.has(releaseTuple)) throw new Error("invalid_snapshot");
+      seenReleaseTuples.add(releaseTuple);
+      const eventIds = eventIdsByVideo.get(videoId) ?? new Set<string>();
+      for (const linkedId of [eventId, primaryEventId]) {
+        const normalized = (linkedId as string | null)?.trim();
+        if (normalized) {
+          eventIds.add(normalized);
+          linkedEventIds.add(normalized);
+        }
+      }
+      if (linkedEventIds.size > SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT) {
+        overflow = true;
+        break;
+      }
+      eventIdsByVideo.set(videoId, eventIds);
     }
-    if (linkedEventIds.size > SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT) {
-      throw new Error(SPREADSHEET_STATIC_REBUILD_SPLIT_REQUIRED);
-    }
-    eventIdsByVideo.set(row.videoId, eventIds);
+  } catch {
+    throw new Error("invalid_snapshot");
   }
+  if (overflow) throw new Error(SPREADSHEET_STATIC_REBUILD_SPLIT_REQUIRED);
   return { eventIdsByVideo: new Map([...eventIdsByVideo].map(([id, ids]) => [id, [...ids]])) };
 }
 

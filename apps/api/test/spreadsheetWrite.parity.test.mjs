@@ -906,18 +906,24 @@ if (runUnderRootTsx(import.meta.url)) {
     const originalPrepare = honoD1.prepare;
     const originalError = console.error;
     const validRow = { videoId: "av-pending-1", eventId: "a-open", primaryEventId: "a-ended" };
+    const fkRow = { kind: "fk", value: "av-pending-1", videoId: null, eventId: null, primaryEventId: null };
+    // PATCH uses the standalone release SELECT, whereas a canonical signed
+    // import uses tagged FK + release rows. Preserve a valid FK receipt in
+    // the combined cases so the release-field faults reach their own checks.
+    const releaseRow = (combined, row = validRow) => combined ? { kind: "release", value: null, ...row } : row;
+    const receiptWithRows = (combined, rows) => ({ success: true, results: combined ? [fkRow, ...rows] : rows });
     const invalid = [
       () => ({ success: true }),
-      () => ({ success: false, results: [validRow] }),
+      combined => ({ ...receiptWithRows(combined, [releaseRow(combined)]), success: false }),
       () => ({ success: true, results: null }),
       () => ({ success: true, results: "not-an-array" }),
-      () => ({ success: true, results: [{ videoId: "av-pending-1", eventId: "a-open" }] }),
-      () => ({ success: true, results: [{ ...validRow, videoId: "unrequested" }] }),
-      () => ({ success: true, results: [{ ...validRow, eventId: 42 }] }),
-      () => ({ success: true, results: [Object.create(validRow)] }),
-      () => ({ success: true, results: [Object.defineProperty({ ...validRow }, "eventId", {
+      combined => receiptWithRows(combined, [releaseRow(combined, { videoId: "av-pending-1", eventId: "a-open" })]),
+      combined => receiptWithRows(combined, [releaseRow(combined, { ...validRow, videoId: "unrequested" })]),
+      combined => receiptWithRows(combined, [releaseRow(combined, { ...validRow, eventId: 42 })]),
+      combined => receiptWithRows(combined, [Object.assign(Object.create(releaseRow(combined)), combined ? { kind: "release" } : {})]),
+      combined => receiptWithRows(combined, [Object.defineProperty(releaseRow(combined, { ...validRow }), "eventId", {
         get() { throw new Error("preview_required"); },
-      })] }),
+      })]),
       () => Object.defineProperty({ success: true }, "results", {
         get() { throw new Error("row_not_found"); },
       }),
@@ -931,24 +937,29 @@ if (runUnderRootTsx(import.meta.url)) {
     try {
       console.error = (...args) => logs.push(args);
       for (const [method, path, body] of [["PATCH", "/data", patch], ["POST", "/import", apply]]) {
+        const combined = method === "POST";
+        const expectedBinds = combined ? ["av-pending-1", "av-pending-1"] : ["av-pending-1"];
         for (const fault of faults) {
           resetAllCaches();
           const prior = injected;
           honoD1.prepare = sql => {
-            if ((method === "POST" ? !sql.includes("WITH fk AS (") : sql.includes("WITH fk AS (")) || !sql.includes('LEFT JOIN "video_events" ve ON ve."video_id" = v."id"')) return originalPrepare(sql);
+            const releaseLookup = sql.includes('LEFT JOIN "video_events" ve ON ve."video_id" = v."id"');
+            const combinedLookup = sql.startsWith("WITH fk AS (");
+            const standaloneLookup = sql.startsWith('SELECT v."id" AS videoId,');
+            if (!releaseLookup || !(combined ? combinedLookup : standaloneLookup)) return originalPrepare(sql);
             if (fault.stage === "prepare") { injected++; throw fault.error; }
             const stmt = originalPrepare(sql);
             return {
               ...stmt,
               bind(...params) {
-                assert.deepEqual(params, method === "POST" ? ["av-pending-1", "av-pending-1"] : ["av-pending-1"]);
+                assert.deepEqual(params, expectedBinds);
                 if (fault.stage === "bind") { injected++; throw fault.error; }
                 return {
                   ...stmt.bind(...params),
                   async all() {
                     injected++;
                     if (fault.error) throw fault.error;
-                    return fault.receipt();
+                    return fault.receipt(combined);
                   },
                 };
               },
