@@ -117,6 +117,8 @@ export function AdminSpreadsheetEditableGrid({
   const canFind = canUseFind();
   const visibleAnchor = boundCellToPage(anchorCell);
   const visibleFocus = boundCellToPage(focusedCell);
+  const focusedColumn = identityChanged ? undefined : columns[visibleFocus.col];
+  const stats = computeSelectionStats();
 
   // CURRENT keeps widths and an active drag by column name across mounted page/table changes.
   React.useEffect(() => {
@@ -379,6 +381,37 @@ export function AdminSpreadsheetEditableGrid({
     };
   }
 
+  function computeSelectionStats() {
+    if (identityChanged) return { cells: 0, filled: 0, numericSum: null, preview: "" };
+    const r0 = Math.min(visibleAnchor.row, visibleFocus.row);
+    const r1 = Math.max(visibleAnchor.row, visibleFocus.row);
+    const c0 = Math.min(visibleAnchor.col, visibleFocus.col);
+    const c1 = Math.max(visibleAnchor.col, visibleFocus.col);
+    let cells = 0;
+    let filled = 0;
+    let numericSum = 0;
+    let numericCount = 0;
+    const previews: string[] = [];
+    for (let r = r0; r <= r1; r++) {
+      const row = rows[r];
+      if (!row) continue;
+      for (let c = c0; c <= c1; c++) {
+        const column = columns[c];
+        if (!column) continue;
+        cells += 1;
+        const value = cellValue(row[column.name]);
+        if (value !== "") filled += 1;
+        if (value !== "" && previews.length < 3) previews.push(value);
+        const number = Number(value);
+        if (value !== "" && !Number.isNaN(number) && Number.isFinite(number)) {
+          numericSum += number;
+          numericCount += 1;
+        }
+      }
+    }
+    return { cells, filled, numericSum: numericCount > 0 ? numericSum : null, preview: previews.join(" · ") };
+  }
+
   function findNext(): void {
     if (!canUseFind()) return;
     const from = boundCellToPage(focusedCell);
@@ -507,11 +540,36 @@ export function AdminSpreadsheetEditableGrid({
           --sheet-focus: #1a73e8;
           --sheet-focus-soft: color-mix(in srgb, #1a73e8 10%, #ffffff);
         }
+        [data-spreadsheet-grid-status] {
+          --sheet-header-bg: #f8f9fa;
+          --sheet-border: #dadce0;
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 12px;
+          padding: 4px 10px;
+          font-size: 11px;
+          color: var(--text-muted);
+          border-top: 1px solid var(--sheet-border);
+          background: var(--sheet-header-bg);
+        }
+        [data-spreadsheet-grid-status-preview] {
+          flex: 1;
+          min-width: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          text-align: right;
+        }
         :root[data-theme="dark"] [data-spreadsheet-grid-viewport] {
           --sheet-bg: var(--bg-base, #1a1a1a);
           --sheet-header-bg: var(--bg-elevated, #252525);
           --sheet-focus: var(--accent-primary, #8ab4f8);
           --sheet-focus-soft: color-mix(in srgb, var(--accent-primary, #8ab4f8) 14%, var(--bg-base, #1a1a1a));
+        }
+        :root[data-theme="dark"] [data-spreadsheet-grid-status] {
+          --sheet-header-bg: var(--bg-elevated, #252525);
+          --sheet-border: var(--border-subtle, #3c4043);
         }
         @media (prefers-color-scheme: dark) {
           :root:not([data-theme="light"]):not([data-theme="dark"]) [data-spreadsheet-grid-viewport] {
@@ -519,6 +577,10 @@ export function AdminSpreadsheetEditableGrid({
             --sheet-header-bg: var(--bg-elevated, #252525);
             --sheet-focus: var(--accent-primary, #8ab4f8);
             --sheet-focus-soft: color-mix(in srgb, var(--accent-primary, #8ab4f8) 14%, var(--bg-base, #1a1a1a));
+          }
+          :root:not([data-theme="light"]):not([data-theme="dark"]) [data-spreadsheet-grid-status] {
+            --sheet-header-bg: var(--bg-elevated, #252525);
+            --sheet-border: var(--border-subtle, #3c4043);
           }
         }
       `}</style>
@@ -741,6 +803,12 @@ export function AdminSpreadsheetEditableGrid({
             ))}
           </tbody>
         </table>
+      </div>
+      <div data-spreadsheet-grid-status="">
+        <span>{stats.cells > 1 ? `${stats.cells} セル · 入力 ${stats.filled}` : focusedColumn
+          ? `${focusedColumn.type}${focusedColumn.notNull ? " · 必須" : ""}${focusedColumn.pk > 0 ? " · PK" : ""}` : ""}</span>
+        {stats.numericSum != null ? <span>合計 {stats.numericSum.toLocaleString()}</span> : null}
+        {stats.preview ? <span data-spreadsheet-grid-status-preview="" title={stats.preview}>{stats.preview}</span> : null}
       </div>
     </section>
   );

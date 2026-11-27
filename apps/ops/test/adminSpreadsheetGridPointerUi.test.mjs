@@ -716,3 +716,321 @@ test("MIG-0737 U01 theme: two Grids retain scoped palettes through a sibling unm
     else document.documentElement.setAttribute("data-theme", previous);
   }
 });
+
+function assertStatus(ui, expected) {
+  const bars = ui.host.querySelectorAll("[data-spreadsheet-grid-status]");
+  assert.equal(bars.length, 1, "one selection status bar is mounted");
+  const bar = bars[0];
+  assert.ok(bar.previousElementSibling === ui.host.querySelector("[data-spreadsheet-grid-viewport]"),
+    "status immediately follows the viewport");
+  assert.equal(bar.getAttribute("role"), null);
+  assert.equal(bar.getAttribute("aria-live"), null);
+  const spans = [...bar.children];
+  assert.ok(spans.length > 0 && spans.every(node => node.tagName === "SPAN"), "ordinary status spans");
+  const texts = [expected.summary];
+  if (expected.sum != null) texts.push("合計 " + expected.sum.toLocaleString());
+  if (expected.preview) texts.push(expected.preview);
+  assert.deepEqual(spans.map(node => node.textContent), texts);
+  assert.equal(spans[0].getAttribute("role"), null);
+  if (expected.preview) assert.equal(spans.at(-1).getAttribute("title"), expected.preview);
+  assert.ok(bar.querySelector("b") === null, "preview content stays text, including HTML-shaped values");
+  return bar;
+}
+
+const statusColumns = [
+  { name: "id", type: "TEXT", editable: false, pk: 1, notNull: true },
+  { name: "value", type: "NUMERIC", editable: true, pk: 0, notNull: false },
+  { name: "other", type: "TEXT", editable: false, pk: 0, notNull: false, generated: true },
+];
+// These fixed inputs/outputs also characterize CURRENT computeSelectionStats and its rendered StatusBar.
+const statusCases = [
+  { name: "single required primary-key metadata", rows: [{ id: "a", value: "first", other: "" }],
+    anchor: "0:0", focus: "0:0", expected: { summary: "TEXT · 必須 · PK", preview: "a" } },
+  { name: "reverse mixed rectangle with whitespace and duplicate previews", rows: [
+    { id: null, value: "", other: " " }, { id: 0, value: "0", other: false },
+    { id: "0x10", value: "1e2", other: "junk" }, { id: "Infinity", value: "NaN", other: { n: 2 } },
+  ], anchor: "3:2", focus: "0:0", expected: { summary: "12 セル · 入力 10", sum: 116, preview: "  · 0 · 0" } },
+  { name: "display-formatted JSON and escaped preview before later numeric cells", rows: [
+    { id: { a: 1 }, value: [2], other: "<b> hi </b>" },
+    { id: " fourth ", value: "-2.5", other: "1e3" },
+  ], anchor: "0:0", focus: "1:2",
+  expected: { summary: "6 セル · 入力 6", sum: 997.5, preview: '{"a":1} · [2] · <b> hi </b>' } },
+  { name: "zero numeric total remains visible", columns: statusColumns.slice(0, 2),
+    rows: [{ id: "-2", value: "2" }], anchor: "0:0", focus: "0:1",
+    expected: { summary: "2 セル · 入力 2", sum: 0, preview: "-2 · 2" } },
+  { name: "finite operands preserve accumulated overflow", columns: [statusColumns[1]],
+    rows: [{ value: "1e308" }, { value: "1e308" }], anchor: "0:0", focus: "1:0",
+    expected: { summary: "2 セル · 入力 2", sum: Infinity, preview: "1e308 · 1e308" } },
+  { name: "null and missing cells still count", columns: statusColumns.slice(0, 2),
+    rows: [{ id: null }], anchor: "0:0", focus: "0:1", expected: { summary: "2 セル · 入力 0" } },
+  { name: "zero rows retains focused column metadata", rows: [], anchor: "0:0", focus: "0:0",
+    expected: { summary: "TEXT · 必須 · PK" } },
+  { name: "zero columns keeps an empty status span", columns: [], rows: [{}], anchor: "0:0", focus: "0:0",
+    expected: { summary: "" } },
+  { name: "single generated readonly boolean is not a number", columns: [statusColumns[2]],
+    rows: [{ other: false }], anchor: "0:0", focus: "0:0", expected: { summary: "TEXT", preview: "false" } },
+];
+
+for (const scenario of statusCases) {
+  test(`MIG-0737 U01 status: ${scenario.name}`, async () => {
+    const columns = scenario.columns ?? statusColumns;
+    const ui = await mount({ data: { ...data, columns, rows: scenario.rows } });
+    try {
+      if (scenario.rows.length && columns.length) {
+        await select(ui, scenario.anchor);
+        if (scenario.focus !== scenario.anchor) await select(ui, scenario.focus, { shiftKey: true });
+      }
+      assertStatus(ui, scenario.expected);
+      assertNoEffects(ui);
+    } finally { await ui.cleanup(); }
+  });
+}
+
+test("MIG-0737 U01 status: headers and keyboard ranges report the current-page cells", async () => {
+  const ui = await mount();
+  const row = { summary: "3 セル · 入力 3", preview: "b · Beta · two" };
+  const column = { summary: "3 セル · 入力 3", preview: "Alpha · Beta · Gamma" };
+  const page = { summary: "9 セル · 入力 8", preview: "a · Alpha · one" };
+  try {
+    for (const [selector, expected] of [
+      ['[data-grid-row-header="1"]', row], ['[data-grid-column-header="1"]', column],
+      ["[data-grid-all-header]", page],
+    ]) {
+      await down(ui.host.querySelector(selector));
+      await up();
+      assertStatus(ui, expected);
+    }
+    for (const [pressed, options, expected] of [
+      ["a", { ctrlKey: true }, page], [" ", { shiftKey: true }, row],
+      [" ", { ctrlKey: true }, column],
+      ["ArrowDown", { shiftKey: true }, { summary: "2 セル · 入力 2", preview: "Beta · Gamma" }],
+    ]) {
+      await select(ui, "1:1");
+      await key(document.activeElement, pressed, options);
+      assertStatus(ui, expected);
+    }
+    assertNoEffects(ui);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 status: current rows, reordered columns and bounded dimensions replace stale summaries", async () => {
+  const ui = await mount();
+  const updated = { ...data, rows: [{ ...data.rows[0], title: "1200", note: "34.5" }, ...data.rows.slice(1)] };
+  const reordered = { ...updated, columns: [data.columns[2], data.columns[1], data.columns[0]] };
+  const shrunk = { ...reordered, rows: updated.rows.slice(0, 1), columns: reordered.columns.slice(0, 2) };
+  try {
+    await select(ui, "2:2");
+    await select(ui, "0:1", { shiftKey: true });
+    assertStatus(ui, { summary: "6 セル · 入力 5", preview: "Alpha · one · Beta" });
+    const active = document.activeElement;
+    await ui.render({ data: updated });
+    assertStatus(ui, { summary: "6 セル · 入力 5", sum: 1234.5, preview: "1200 · 34.5 · Beta" });
+    assert.ok(document.activeElement === active, "row refresh preserves the focused TD");
+    await ui.render({ data: reordered });
+    assertStatus(ui, { summary: "6 セル · 入力 6", sum: 1200, preview: "1200 · a · Beta" });
+    await ui.render({ data: shrunk });
+    assertStatus(ui, { summary: "TEXT", sum: 1200, preview: "1200" });
+    assert.deepEqual(selected(ui), ["0:1"]);
+    await ui.render({ data: { ...shrunk, rows: [] } });
+    assertStatus(ui, { summary: "TEXT" });
+    await ui.render({ data: { ...shrunk, columns: [] } });
+    assertStatus(ui, { summary: "" });
+    await ui.render({ data });
+    assertStatus(ui, { summary: "TEXT · 必須 · PK", preview: "a" });
+    assertNoEffects(ui);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 status: table, page, transport and opt-in reset the old selection summary", async () => {
+  for (const change of ["table", "page", "transport", "opt-in"]) {
+    const ui = await mount();
+    try {
+      await select(ui, "2:1");
+      assertStatus(ui, { summary: "TEXT", preview: "Gamma" });
+      const next = change === "table" ? { data: { ...data, def: { ...data.def, table: "events" } } }
+        : change === "page" ? { data: { ...data, page: 3 } }
+        : change === "opt-in" ? { allowMutations: true }
+        : { fetchFn: async (...args) => { ui.calls.push(args); throw Error("status must not fetch"); } };
+      await ui.render(next);
+      assertStatus(ui, { summary: "TEXT · 必須 · PK", preview: "a" });
+      assert.deepEqual(selected(ui), ["0:0"]);
+      assert.ok(document.activeElement === cell(ui, "0:0"), "existing context reset owns focus");
+      assertNoEffects(ui);
+    } finally { await ui.cleanup(); }
+  }
+});
+
+test("MIG-0737 U01 status: unsaved and invalidated drafts never replace displayed row statistics", async () => {
+  const original = { ...data, rows: [{ ...data.rows[0], title: "12" }, ...data.rows.slice(1)] };
+  const ui = await mount({ data: original, allowMutations: true });
+  try {
+    const input = await editTitle(ui);
+    await setInput(input, "999");
+    assertStatus(ui, { summary: "TEXT", sum: 12, preview: "12" });
+    await ui.render({ data: { ...original, rows: [{ ...original.rows[0], note: "unrelated" }, ...data.rows.slice(1)] } });
+    assertStatus(ui, { summary: "TEXT", sum: 12, preview: "12" });
+    assert.ok(cell(ui, "0:1").querySelector("input") === input, "same live draft input retained");
+    assert.ok(document.activeElement === input, "statistics never take draft focus");
+    assert.equal(input.value, "999");
+    await ui.render({ data: { ...original, rows: [{ ...original.rows[0], title: "34" }, ...data.rows.slice(1)] } });
+    assertStatus(ui, { summary: "TEXT", sum: 34, preview: "34" });
+    assert.match(ui.host.textContent, /編集中の行または列の状態が変更/);
+    assert.ok(cell(ui, "0:1").querySelector("input") === null, "conflicted draft stays hidden");
+    await down(cell(ui, "2:2"));
+    await up();
+    assert.deepEqual(selected(ui), ["0:1"]);
+    await ui.render({ data: original });
+    assertStatus(ui, { summary: "TEXT", sum: 12, preview: "12" });
+    assert.equal(button(ui, "1行 title を編集").disabled, true);
+    await React.act(async () => button(ui, "編集を破棄").click());
+    assertStatus(ui, { summary: "TEXT", sum: 12, preview: "12" });
+    assertNoEffects(ui);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 status: Find keeps its query and active input while matched selection updates", async () => {
+  const ui = await mount();
+  try {
+    await select(ui, "0:0");
+    await select(ui, "1:1", { shiftKey: true });
+    assertStatus(ui, { summary: "4 セル · 入力 4", preview: "a · Alpha · b" });
+    await key(document.activeElement, "f", { ctrlKey: true });
+    const search = ui.host.querySelector('input[type="search"]');
+    assert.ok(search);
+    await setInput(search, "Gamma");
+    assertStatus(ui, { summary: "4 セル · 入力 4", preview: "a · Alpha · b" });
+    await key(search, "Enter");
+    assertStatus(ui, { summary: "TEXT", preview: "Gamma" });
+    await ui.render({ data: { ...data, rows: [...data.rows.slice(0, 2), { ...data.rows[2], title: "Gamma updated" }] } });
+    assertStatus(ui, { summary: "TEXT", preview: "Gamma updated" });
+    assert.ok(ui.host.querySelector('input[type="search"]') === search, "same Find input retained");
+    assert.ok(document.activeElement === search, "status changes preserve Find focus");
+    assert.equal(search.value, "Gamma");
+    assert.equal(cell(ui, "2:1").dataset.findMatch, "true");
+    await key(search, "Escape");
+    assertStatus(ui, { summary: "TEXT", preview: "Gamma updated" });
+    assert.ok(document.activeElement === cell(ui, "2:1"), "existing Find close restores grid focus");
+    assertNoEffects(ui);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 status: pending save, refresh and history retain receipts without statistics effects", async () => {
+  // Keep the save/refresh/replay lifetime together to detect an extra request, abort or receipt replacement at any stage.
+  const requests = [];
+  let releaseRefresh;
+  let refreshes = 0;
+  const ui = await mount({ allowMutations: true,
+    fetchFn: (_, init) => new Promise(resolve => requests.push({ init, resolve })),
+    onRefresh: () => { refreshes++; if (refreshes === 1) return new Promise(resolve => { releaseRefresh = resolve; }); },
+  });
+  const success = () => new Response(JSON.stringify({ ok: true }), { headers: { "content-type": "application/json" } });
+  try {
+    assertStatus(ui, { summary: "TEXT · 必須 · PK", preview: "a" });
+    await editTitle(ui);
+    await React.act(async () => button(ui, "セルを保存").click());
+    assertStatus(ui, { summary: "TEXT", preview: "Alpha" });
+    await select(ui, "1:1");
+    assertStatus(ui, { summary: "TEXT", preview: "Beta" });
+    assert.equal(requests.length, 1);
+    await React.act(async () => requests[0].resolve(success()));
+    assert.equal(refreshes, 1);
+    const receipt = ui.host.querySelector('[role="status"]');
+    assert.ok(receipt);
+    assert.match(receipt.textContent, /保存しました/);
+    await select(ui, "0:0");
+    await select(ui, "2:2", { shiftKey: true });
+    assertStatus(ui, { summary: "9 セル · 入力 8", preview: "a · Alpha · one" });
+    assert.ok(ui.host.querySelector('[role="status"]') === receipt, "refresh keeps its mutation receipt");
+    await React.act(async () => releaseRefresh());
+    await key(document.activeElement, "z", { ctrlKey: true });
+    await select(ui, "0:1");
+    assertStatus(ui, { summary: "TEXT", preview: "Alpha" });
+    assert.equal((await key(document.activeElement, "a", { ctrlKey: true })).defaultPrevented, false);
+    assert.deepEqual(selected(ui), ["0:1"]);
+    assert.deepEqual(requests.map(request => JSON.parse(request.init.body).value), ["Unsaved", "Alpha"]);
+    assert.ok(requests.every(request => !request.init.signal.aborted), "statistics never abort mutations");
+    await React.act(async () => requests[1].resolve(success()));
+    assert.equal(refreshes, 2);
+    assert.equal(requests.length, 2);
+    assertStatus(ui, { summary: "TEXT", preview: "Alpha" });
+    assert.match(ui.host.querySelector('[role="status"]').textContent, /保存しました/);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 status: explicit theme declarations stay scoped to the footer and preserve focus", async () => {
+  const previous = document.documentElement.getAttribute("data-theme");
+  const ui = await mount();
+  const outside = document.createElement("div");
+  document.body.append(outside);
+  try {
+    await select(ui, "1:1");
+    const bar = assertStatus(ui, { summary: "TEXT", preview: "Beta" });
+    const viewport = ui.host.querySelector("[data-spreadsheet-grid-viewport]");
+    for (const [theme, background, border] of [
+      ["light", "#f8f9fa", "#dadce0"],
+      ["dark", "var(--bg-elevated, #252525)", "var(--border-subtle, #3c4043)"],
+      ["light", "#f8f9fa", "#dadce0"],
+    ]) {
+      await React.act(async () => document.documentElement.setAttribute("data-theme", theme));
+      const computed = window.getComputedStyle(bar);
+      assert.equal(computed.getPropertyValue("--sheet-header-bg").trim(), background);
+      assert.equal(computed.getPropertyValue("--sheet-border").trim(), border);
+      for (const property of ["--sheet-header-bg", "--sheet-border"]) {
+        assert.equal(window.getComputedStyle(outside).getPropertyValue(property), "", "no external status variable");
+      }
+      for (const [property, value] of Object.entries(sheetPalettes[theme])) {
+        assert.equal(window.getComputedStyle(viewport).getPropertyValue(property).trim(), value, "unchanged viewport " + property);
+      }
+      assert.ok(ui.host.querySelector("[data-spreadsheet-grid-status]") === bar, "theme keeps the same footer");
+      assert.ok(document.activeElement === cell(ui, "1:1"), "theme keeps grid focus");
+      assertStatus(ui, { summary: "TEXT", preview: "Beta" });
+      assertNoEffects(ui);
+    }
+  } finally {
+    outside.remove();
+    await ui.cleanup();
+    if (previous === null) document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.setAttribute("data-theme", previous);
+  }
+});
+
+test("MIG-0737 U01 status: fallback and preview declarations preserve full text without a native-layout claim", async () => {
+  // CSSOM and selector applicability are deterministic; native layout, resolved colors and contrast remain NOT_RUN.
+  const previous = document.documentElement.getAttribute("data-theme");
+  const preview = "<b> long text </b> ".repeat(30);
+  const ui = await mount({ data: { ...data, rows: [{ ...data.rows[0], title: preview }] } });
+  try {
+    await select(ui, "0:1");
+    const bar = assertStatus(ui, { summary: "TEXT", preview });
+    const rules = [...ui.host.querySelector("style").sheet.cssRules];
+    const base = rules.find(rule => rule.selectorText === "[data-spreadsheet-grid-status]");
+    const previewRule = rules.find(rule => rule.selectorText === "[data-spreadsheet-grid-status-preview]");
+    const fallback = rules.filter(rule => rule.conditionText === "(prefers-color-scheme: dark)")
+      .flatMap(rule => [...rule.cssRules]).find(rule => rule.selectorText?.includes("[data-spreadsheet-grid-status]"));
+    assert.ok(base && previewRule && fallback, "scoped footer, preview and OS fallback rules");
+    assert.equal(fallback.selectorText, ':root:not([data-theme="light"]):not([data-theme="dark"]) [data-spreadsheet-grid-status]');
+    for (const [property, value] of Object.entries({ display: "flex", "flex-wrap": "wrap", "align-items": "center",
+      gap: "12px", padding: "4px 10px", "font-size": "11px", color: "var(--text-muted)",
+      "border-top": "1px solid var(--sheet-border)", background: "var(--sheet-header-bg)" })) {
+      assert.equal(base.style.getPropertyValue(property).trim(), value, property);
+    }
+    for (const [property, value] of Object.entries({ flex: "1", "min-width": "0", overflow: "hidden",
+      "text-overflow": "ellipsis", "white-space": "nowrap", "text-align": "right" })) {
+      assert.equal(previewRule.style.getPropertyValue(property).trim(), value, property);
+    }
+    assert.ok(bar.lastElementChild.matches(previewRule.selectorText), "full preview uses its scoped ellipsis rule");
+    assert.equal(fallback.style.getPropertyValue("--sheet-header-bg").trim(), "var(--bg-elevated, #252525)");
+    assert.equal(fallback.style.getPropertyValue("--sheet-border").trim(), "var(--border-subtle, #3c4043)");
+    for (const [theme, matches] of [[null, true], ["system", true], ["sepia", true], ["light", false], ["dark", false]]) {
+      if (theme === null) document.documentElement.removeAttribute("data-theme");
+      else document.documentElement.setAttribute("data-theme", theme);
+      assert.equal(bar.matches(fallback.selectorText), matches, "status fallback applicability for " + theme);
+      assert.equal(ui.host.querySelector("[data-spreadsheet-grid-viewport]").matches(fallback.selectorText), false);
+    }
+    assertNoEffects(ui);
+  } finally {
+    await ui.cleanup();
+    if (previous === null) document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.setAttribute("data-theme", previous);
+  }
+});
