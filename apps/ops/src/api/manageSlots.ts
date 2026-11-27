@@ -83,6 +83,20 @@ export async function listSlots(
     }
     for (const slot of data.slots) {
       if (seen.has(slot.id)) return { status: "unavailable" };
+      // Both CURRENT and Hono order by start_time and sort_order ASC (NULL
+      // first in SQLite). Detect reversals within or across pages without
+      // re-sorting, which could hide an inconsistent offset snapshot. Equal
+      // numeric keys remain valid; do not emulate SQLite text collation here.
+      const previous = rows[rows.length - 1];
+      if (previous) {
+        const previousStart = previous.start_time ?? Number.NEGATIVE_INFINITY;
+        const nextStart = slot.start_time ?? Number.NEGATIVE_INFINITY;
+        if (previousStart > nextStart || (previousStart === nextStart &&
+            (previous.sort_order ?? Number.NEGATIVE_INFINITY) >
+            (slot.sort_order ?? Number.NEGATIVE_INFINITY))) {
+          return { status: "unavailable" };
+        }
+      }
       // A stable total can hide status drift between pages. Every delivered
       // status bucket must be a subset of the first snapshot's counts, even
       // for a capped all-status list. Keep unknown legacy status keys when

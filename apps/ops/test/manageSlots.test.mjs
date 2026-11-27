@@ -335,3 +335,38 @@ test("MIG-0722 U01: each delivered status stays within the first snapshot's coun
     }
   }
 });
+
+
+test("MIG-0722 U01: reject reversed numeric slot ordering inside and across pages", async () => {
+  const ascending = n => Array.from({ length: n }, (_, i) => slot(i));
+  const scenarios = [
+    { label: "descending start time inside page", rows: [slot(1), slot(0)], expected: "unavailable", calls: 1 },
+    { label: "descending sort order for equal start", rows: [slot(0, { start_time: 10, sort_order: 2 }), slot(1, { start_time: 10, sort_order: 1 })], expected: "unavailable", calls: 1 },
+    { label: "NULL start after numeric", rows: [slot(0), slot(1, { start_time: null })], expected: "unavailable", calls: 1 },
+    { label: "NULL sort after numeric within equal start", rows: [slot(0, { start_time: 10 }), slot(1, { start_time: 10, sort_order: null })], expected: "unavailable", calls: 1 },
+    { label: "cross-page time reversal with unique IDs and stable counts", rows: [...ascending(100), slot(100, { start_time: 1700000098 })], expected: "unavailable", calls: 2 },
+    { label: "cross-page sort reversal at equal time", rows: [...ascending(100), slot(100, { start_time: 1700000099, sort_order: 98 })], expected: "unavailable", calls: 2 },
+    { label: "fifth-page reversal within cap", rows: [...ascending(400), slot(400, { start_time: 1700000398 }), ...ascending(500).slice(401)], total: 501, expected: "unavailable", calls: 5 },
+    { label: "NULL first, negative, zero and positive numeric values", rows: [slot(0, { start_time: null, sort_order: null }), slot(1, { start_time: null, sort_order: -2 }), slot(2, { start_time: -1, sort_order: 7 }), slot(3, { start_time: 0, sort_order: null }), slot(4, { start_time: 0, sort_order: 0 })], expected: "ok", calls: 1 },
+    { label: "same numeric keys across pages are valid", rows: [...ascending(100), slot(100, { start_time: 1700000099, sort_order: 99 })], expected: "ok", calls: 2 },
+    { label: "new start permits lower sort order", rows: [slot(0, { sort_order: 99 }), slot(1, { sort_order: 0 })], expected: "ok", calls: 1 },
+    { label: "capped ascending receipt", rows: ascending(500), total: 501, expected: "ok", calls: 5 },
+  ];
+  for (const scenario of scenarios) {
+    const total = scenario.total ?? scenario.rows.length;
+    const { fetchFn, requests } = makePagedFetch(total, {
+      respond: ({ offset }) => json(200, page(offset, scenario.rows.slice(offset, offset + 100), {
+        total, counts: { available: total },
+      })),
+    });
+    const result = await listSlots("ev1", "all", fetchFn);
+    assert.equal(result.status, scenario.expected, scenario.label);
+    assert.equal(requests.length, scenario.calls, scenario.label);
+    if (scenario.expected === "ok") {
+      assert.deepEqual(result.data.slots, scenario.rows, scenario.label);
+      assert.equal(result.data.atLimit, scenario.rows.length === 500, scenario.label);
+    } else {
+      assert.deepEqual(result, { status: "unavailable" }, scenario.label);
+    }
+  }
+});
