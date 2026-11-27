@@ -27,6 +27,7 @@ import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { isMainThread, parentPort, threadId, Worker, workerData } from "node:worker_threads";
 
 // ---------------------------------------------------------------- pure logic
 export const BUDGETS_MS = Object.freeze({ S2: 7, S3: 8, S4: 2 });
@@ -129,6 +130,7 @@ export function aggregate(samples, { runtimeClass, resolutionMs, noiseMs = 0 }) 
       coldStarts: kind === "cold" ? rows.map((r) => ({
         generation: r.coldGeneration ?? null, processId: r.coldProcessId ?? null,
         requestOrdinal: r.requestOrdinal ?? null, verified: r.isFirstIsolateRequest === true,
+        recorder: r.coldRecorder ?? null,
       })) : undefined,
       maxBytes: rows.reduce((m, r) => Math.max(m, r.bytes ?? 0), 0),
       maxD1Statements: rows.reduce((m, r) => Math.max(m, r.d1 ?? 0), 0),
@@ -340,6 +342,11 @@ const rh013Ip = () => { rh013IpSeq += 1; return { "cf-connecting-ip": `10.13.${(
 function rh013Seed() {
   if (rh013Seeded) return [];
   rh013Seeded = true;
+  return rh013Fixture();
+}
+
+/** Complete fixture for a new database, independent of the parent seed flag. */
+function rh013Fixture() {
   return [
     { sql: `INSERT OR REPLACE INTO events (id, title, event_type, visibility_status, start_time, end_time, created_at, updated_at, max_slots_per_video, public_api_enabled) VALUES (?, 'bench export event', 'event', 'public', 1000, 2000, 10, 20, 1, 1)`, params: [RH013_EVENT_ID] },
     {
@@ -480,6 +487,12 @@ export function buildScenarios(ctx, { includePending = false, includeEventPlayli
       // cache would otherwise turn warm samples into cheap hits). Seeding is idempotent and
       // done once per target through a single recursive-CTE statement per table.
       id: "RH-013", title: "GET /api/event-endpoints/:id (500 videos x 100 members)", runtimeClass: "S2",
+      // Warm requests reuse their database and the seed-once generator below.
+      // Each cold recorder has a fresh DB and needs all three unchanged seeds.
+      prepareKind: {
+        normal: { coldSetup: rh013Fixture() },
+        limit: { coldSetup: rh013Fixture() },
+      },
       // Warm-path measurements are separate from the scheduled full-rebuild control.
       warmModes: {
         "scheduled-warm": { path: `/api/event-endpoints/${RH013_EVENT_ID}?format=v5&update=scheduled&refresh=15`, expectCache: "HIT", verifyBodyReuse: true },
@@ -1550,6 +1563,79 @@ async function withInprocRequest(action) {
   } finally { activeInprocRequest = null; }
 }
 
+/**
+ * A new SQLite handle in the parent would still share imported application
+ * caches. One short-lived Node worker gives each cold recording a fresh module
+ * graph and the same explicit seed/setup/R2 fixture, before workerd starts.
+ * Serialize the request once so multipart boundaries and body bytes also match
+ * the measured request. None of this setup is included in request profiling.
+ */
+async function recordFreshColdRequest(plan, spec, fixture) {
+  const request = new Request(`http://bench.local${spec.path}`, {
+    method: spec.method, headers: spec.headers, body: spec.body,
+  });
+  const coldRequest = {
+    ...spec, headers: [...request.headers],
+    body: request.body == null ? undefined : new Uint8Array(await request.arrayBuffer()),
+  };
+  const worker = new Worker(new URL(import.meta.url), {
+    workerData: { kind: "flamenode-cold-recorder", plan, spec: coldRequest, fixture },
+  });
+  const expectedThreadId = worker.threadId;
+  let exited = false, timeout;
+  try {
+    return await new Promise((resolve, reject) => {
+      let received;
+      timeout = setTimeout(() => reject(new Error("bench cold recorder timed out")), 30_000);
+      worker.on("message", (message) => { received = message; });
+      worker.once("error", reject);
+      worker.once("exit", (code) => {
+        exited = true;
+        if (code !== 0 || !received?.ok) {
+          reject(new Error(`bench cold recorder failed: ${received?.error ?? `exit ${code}`}`));
+          return;
+        }
+        const record = received.record;
+        if (record?.coldRecorder?.threadId !== expectedThreadId || record.coldRecorder.requestOrdinal !== 1) {
+          reject(new Error("bench cold recorder first-request proof missing"));
+          return;
+        }
+        resolve({ ...record, coldRequest });
+      });
+    });
+  } finally {
+    clearTimeout(timeout);
+    // Do not leave a recorder alive while the next worker is measured, even
+    // after a thrown setup/dispatch, a timeout or an abnormal worker exit.
+    if (!exited) await worker.terminate();
+  }
+}
+
+async function runColdRecorderWorker() {
+  let target;
+  try {
+    target = await createInprocTarget(workerData.plan);
+    const { fixture, spec } = workerData;
+    if (fixture?.r2 !== undefined) await target.setR2(fixture.r2);
+    for (const [key, body] of Object.entries(fixture?.r2Objects ?? {})) await target.setR2(body, key);
+    // A scenario may omit its already-applied warm seed from later specs.
+    // coldSetup is its complete replacement for the new recorder database.
+    const setup = fixture?.coldSetup ?? spec.setup;
+    if (setup) await target.exec(setup);
+    const record = await target.recordForReplay(spec);
+    if (target.requestOrdinal !== 1) throw new Error("bench cold recorder was already used");
+    record.coldRecorder = { threadId, requestOrdinal: target.requestOrdinal };
+    await target.close();
+    target = null;
+    parentPort.postMessage({ ok: true, record });
+  } catch (error) {
+    parentPort.postMessage({ ok: false, error: error?.message ?? "unknown recorder error" });
+  } finally {
+    if (target) await target.close();
+    parentPort.close();
+  }
+}
+
 // ------------------------------------------------------------ target: inproc
 export async function createInprocTarget(plan) {
   const { DatabaseSync } = await import("node:sqlite");
@@ -1561,6 +1647,7 @@ export async function createInprocTarget(plan) {
   fs.rmSync(mig.workspace, { recursive: true, force: true });
 
   let stmts = 0;
+  let requestOrdinal = 0;
   let d1RowsReturned = 0;
   let d1PerQueryRows = [];
   const countD1 = (mode, value) => {
@@ -1631,10 +1718,20 @@ export async function createInprocTarget(plan) {
     },
   };
   const r2Objects = new Map();
-  const r2Metadata = (body) => ({ size: Buffer.byteLength(body), etag: BENCH_ETAG });
+  // Store detached bytes, like R2. Base64 is a transcript transport format,
+  // never the object's text or its byte length after a PUT.
+  const r2Bytes = (value) => {
+    if (typeof value === "string") return Buffer.from(value);
+    if (value instanceof ArrayBuffer) return Buffer.from(new Uint8Array(value));
+    if (ArrayBuffer.isView(value)) {
+      return Buffer.from(new Uint8Array(value.buffer, value.byteOffset, value.byteLength));
+    }
+    throw new Error("bench unsupported R2 body");
+  };
+  const r2Metadata = (body) => ({ size: body.byteLength, etag: BENCH_ETAG });
   const bucket = {
     put: async (key, value, ...args) => trace("r2.put", [key, value, args], () => {
-      r2Objects.set(key, Buffer.from(value).toString("base64"));
+      r2Objects.set(key, r2Bytes(value));
       return { etag: BENCH_ETAG };
     }),
     delete: async (key, ...args) => trace("r2.delete", [key, args], () => {
@@ -1650,13 +1747,20 @@ export async function createInprocTarget(plan) {
         const body = r2Objects.get(key);
         if (body == null) return null;
         const metadata = r2Metadata(body);
-        return { size: metadata.size, text: body, etag: metadata.etag };
+        const text = body.toString("utf8");
+        // Keep the existing JSON/text transcript shape. Invalid UTF-8 needs
+        // lossless bytes as well, because text() intentionally decodes it.
+        const binary = body.equals(Buffer.from(text)) ? {} : { bodyBase64: body.toString("base64") };
+        return { size: metadata.size, text, etag: metadata.etag, ...binary };
       });
       return value && {
         size: value.size,
         etag: value.etag,
         json: async () => JSON.parse(value.text),
         text: async () => value.text,
+        arrayBuffer: async () => Uint8Array.from(Buffer.from(
+          value.bodyBase64 ?? value.text, value.bodyBase64 == null ? "utf8" : "base64",
+        )).buffer,
         body: null,
       };
     },
@@ -1673,6 +1777,7 @@ export async function createInprocTarget(plan) {
   await exec(SEED(plan.adminToken));
 
   const fetchOnce = async (spec) => {
+    requestOrdinal += 1;
     const url = `http://bench.local${spec.path}`;
     stmts = 0;
     d1RowsReturned = 0;
@@ -1710,13 +1815,14 @@ export async function createInprocTarget(plan) {
 
   return {
     name: "inproc",
+    get requestOrdinal() { return requestOrdinal; },
     resolutionMs: 0.001,
     digits: 3,
     cpuSource: "performance.now() wall delta around app.fetch (Node/V8, node:sqlite as D1 plus result normalization/counting; WALL-TIME PROXY, not workerd CPU)",
     supportsCold: false,
     setR2: async (body, key = STATS_KEY) => {
       assertInprocIdle();
-      if (body == null) r2Objects.delete(key); else r2Objects.set(key, body);
+      if (body == null) r2Objects.delete(key); else r2Objects.set(key, r2Bytes(body));
     },
     exec,
     record: async () => null,
@@ -1734,6 +1840,7 @@ export async function createInprocTarget(plan) {
         recInvalid = false;
       }
     }),
+    recordFirstRequest: (spec, fixture) => withInprocRequest(() => recordFreshColdRequest(plan, spec, fixture)),
     close: async () => { assertInprocIdle(); sqlite.close(); },
   };
 }
@@ -1856,6 +1963,9 @@ function replayEnv(env, script) {
           etag: value.etag,
           json: async () => JSON.parse(value.text),
           text: async () => value.text,
+          arrayBuffer: async () => value.bodyBase64 == null
+            ? new TextEncoder().encode(value.text).buffer
+            : Uint8Array.from(atob(value.bodyBase64), (char) => char.charCodeAt(0)).buffer,
           body: null,
         };
       },
@@ -2359,18 +2469,27 @@ export async function runCold(target, scenarios, opts) {
   for (let round = 0; round < opts.coldSamples; round += 1) {
     for (const sc of live) {
       const pk = sc.prepareKind?.normal;
-      if (pk?.r2 !== undefined) await target.setR2(pk.r2);
-      for (const [key, body] of Object.entries(pk?.r2Objects ?? {})) await target.setR2(body, key);
       const spec = sc.kinds.normal(round, tag(`c${sc.id.replace(/[^A-Za-z0-9]/g, "")}`, round));
-      if (spec.setup) await target.exec(spec.setup);
+      // Cache API storage can survive the measured process restart. Clear it
+      // through the old worker before recording/starting its fresh replacement.
       if (spec.clearCache) await target.clearCache?.();
-      const rec = await target.record(spec);
+      let rec;
+      if (target.recordFirstRequest) {
+        rec = await target.recordFirstRequest(spec, pk);
+      } else {
+        if (pk?.r2 !== undefined) await target.setR2(pk.r2);
+        for (const [key, body] of Object.entries(pk?.r2Objects ?? {})) await target.setR2(body, key);
+        if (spec.setup) await target.exec(spec.setup);
+        rec = await target.record(spec);
+      }
+      const measuredSpec = rec?.coldRequest ?? spec;
       const r = target.runFirstRequest
-        ? await target.runFirstRequest(spec, rec)
-        : (await target.reload(), await target.run(spec, rec));
+        ? await target.runFirstRequest(measuredSpec, rec)
+        : (await target.reload(), await target.run(measuredSpec, rec));
       coldSamples.get(sc.id).push({ kind: "cold",
         isFirstIsolateRequest: Boolean(target.runFirstRequest) && r.isFirstIsolateRequest === true,
         coldGeneration: r.coldGeneration ?? null, coldProcessId: r.coldProcessId ?? null,
+        coldRecorder: rec?.coldRecorder ?? null,
         requestOrdinal: r.requestOrdinal ?? null,
         cpuMs: r.cpuMs, status: r.status, bytes: r.bytes, d1: r.d1, d1RowsReturned: r.d1RowsReturned, d1PerQueryRows: r.d1PerQueryRows,
         unexpected: !spec.expect.includes(r.status) || r.replayStatusMismatch === true || r.replayRowsMismatch === true || r.responseBodyMismatch === true || (spec.expectPlaylist != null && r.responseBodyMismatch !== false) });
@@ -2393,6 +2512,7 @@ export function createReplayTarget(inproc, wr) {
     exec: inproc.exec,
     setR2: inproc.setR2,
     record: (spec) => inproc.recordForReplay(spec),
+    recordFirstRequest: inproc.recordFirstRequest,
     close: async () => { await wr.close(); await inproc.close(); },
   };
 }
@@ -2469,6 +2589,8 @@ export async function main(argv) {
   }
 }
 
-if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
+if (!isMainThread && workerData?.kind === "flamenode-cold-recorder") {
+  await runColdRecorderWorker();
+} else if (isMainThread && process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
   main(process.argv.slice(2)).catch((e) => { console.error(e.message ?? e); process.exit(1); });
 }
