@@ -352,6 +352,10 @@ next action
 
 Markdown/skill自体はschedulerではない。Claude `/loop`等、hostに実在する反復機構だけが次のwakeを作る。各loop adapter（`.claude/loop.md`、`.codex/skills/loop/SKILL.md`、`.agents/skills/loop/SKILL.md`）は本節を参照する。
 
+## Bottleneck recovery priority (2026-11-27)
+
+Follow [OPEN_DECISIONS.md](OPEN_DECISIONS.md) “2026-11-27 owner-delegated bottleneck recovery”. Prioritize ready-to-merge work, shared guard / S3, quiet Linux CPU evidence, then dependent form and Ops UI. Limit active focus to 5–8 writer lanes globally, without stealing existing Draft ownership. One integration coordinator serializes final main merges; others continue dependency-independent work/review. Group coherent implementation+checkpoint pushes; use existing focused tests, record CI/review links in comments, avoid gratuitous reruns or files. The approved MIG-0714 decomposition is a scoped exception to one-MIG-one-PR: only after Lead records exact non-overlapping work scopes and child IDs/Work Orders (preferred), or serial partial merge with the parent remaining READY and checker-validated ledger/checkpoint. No duplicate live writer or premature DONE. Technical Lead decisions within existing semantics do not wait for human approval.
+
 ## Wake decision（1 wake = 下記のうち1つだけ。上から順に判定）
 
 ```text
