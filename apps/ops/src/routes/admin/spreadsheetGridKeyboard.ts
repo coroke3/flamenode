@@ -20,6 +20,14 @@ export function moveSpreadsheetFocus(
   else if (key === "ArrowRight") col += 1;
   else if (key === "Home") col = 0;
   else if (key === "End") col = columnCount - 1;
+  else if (key === "CtrlHome") { row = 0; col = 0; }
+  else if (key === "CtrlEnd") { row = rowCount - 1; col = columnCount - 1; }
+  else if (key === "CtrlArrowUp") row = 0;
+  else if (key === "CtrlArrowDown") row = rowCount - 1;
+  else if (key === "CtrlArrowLeft") col = 0;
+  else if (key === "CtrlArrowRight") col = columnCount - 1;
+  else if (key === "PageUp") row -= 10;
+  else if (key === "PageDown") row += 10;
   else return current;
   return {
     row: Math.max(0, Math.min(rowCount - 1, row)),

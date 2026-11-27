@@ -947,3 +947,485 @@ test("MIG-0737 U01 column sizing: pending save and history keep their requests a
     assert.match(ui.host.textContent, /保存しました/);
   } finally { await ui.cleanup(); }
 });
+
+
+const navigationData = {
+  ...rangeData,
+  columns: [...rangeData.columns,
+    { name: "extra", type: "TEXT", editable: false, pk: 0, notNull: false },
+    { name: "last", type: "TEXT", editable: false, pk: 0, notNull: false }],
+  rows: Array.from({ length: 25 }, (_, index) => ({
+    id: "r" + (index + 1), title: "Title" + (index + 1), note: "n" + (index + 1),
+    extra: "x" + (index + 1), last: "z" + (index + 1),
+  })),
+  page: 7, limit: 25, hasMore: true,
+};
+function watchNavigationScroll(ui) {
+  const calls = [];
+  for (const node of ui.host.querySelectorAll("[data-grid-cell]")) {
+    node.scrollIntoView = options => calls.push({ position: node.dataset.gridCell, options });
+  }
+  return calls;
+}
+function assertNavigation(ui, focus, selection = [focus]) {
+  assert.deepEqual(selectedCells(ui), selection);
+  assert.ok(document.activeElement === gridCell(ui, focus), "expected navigation DOM focus at " + focus);
+  assert.deepEqual([...ui.host.querySelectorAll('[data-grid-cell][tabindex="0"]')]
+    .map(node => node.dataset.gridCell), [focus]);
+}
+async function selectNavigationRange(ui, anchor, focus) {
+  await selectCell(ui, anchor);
+  const target = gridCell(ui, focus);
+  await React.act(async () => {
+    target.dispatchEvent(new dom.window.MouseEvent("mousedown", {
+      bubbles: true, cancelable: true, button: 0, buttons: 1, detail: 1, shiftKey: true,
+    }));
+    target.dispatchEvent(new dom.window.MouseEvent("mouseup", { bubbles: true, button: 0, detail: 1 }));
+    target.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, button: 0, detail: 1 }));
+  });
+}
+
+test("MIG-0737 U01 navigation: ordinary and Alt arrow/Home/End keys move and reveal their TD", async () => {
+  const effects = [];
+  const ui = await mount({ data: navigationData,
+    fetchFn: async () => { effects.push("request"); throw Error("navigation must not request"); },
+    onRefresh: () => { effects.push("refresh"); },
+  });
+  const scrolls = watchNavigationScroll(ui);
+  try {
+    for (const [key, options, end] of [
+      ["ArrowUp", {}, "11:2"], ["ArrowDown", { altKey: true }, "13:2"],
+      ["ArrowLeft", { altKey: true }, "12:1"], ["ArrowRight", {}, "12:3"],
+      ["Home", { altKey: true }, "12:0"], ["End", {}, "12:4"],
+    ]) {
+      await selectCell(ui, "12:2");
+      scrolls.length = 0;
+      assert.equal((await press(document.activeElement, key, options)).defaultPrevented, true, key);
+      assertNavigation(ui, end);
+      assert.deepEqual(scrolls, [{ position: end, options: { block: "nearest", inline: "nearest" } }], key);
+    }
+    assert.deepEqual(effects, []);
+    assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 0);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 navigation: Ctrl and Cmd extremes retain Alt and collapse modified Shift ranges", async () => {
+  const effects = [];
+  const ui = await mount({ data: navigationData,
+    fetchFn: async () => { effects.push("request"); throw Error("navigation must not request"); },
+    onRefresh: () => { effects.push("refresh"); },
+  });
+  const scrolls = watchNavigationScroll(ui);
+  try {
+    for (const [key, options, end] of [
+      ["Home", { ctrlKey: true }, "0:0"], ["End", { metaKey: true }, "24:4"],
+      ["ArrowUp", { ctrlKey: true, altKey: true }, "0:2"],
+      ["ArrowDown", { metaKey: true }, "24:2"],
+      ["ArrowLeft", { ctrlKey: true, metaKey: true, shiftKey: true }, "12:0"],
+      ["ArrowRight", { metaKey: true, altKey: true, shiftKey: true }, "12:4"],
+      ["Home", { metaKey: true, altKey: true, shiftKey: true }, "0:0"],
+      ["End", { ctrlKey: true, altKey: true, shiftKey: true }, "24:4"],
+    ]) {
+      await selectNavigationRange(ui, "12:0", "12:2");
+      scrolls.length = 0;
+      assert.equal((await press(document.activeElement, key, options)).defaultPrevented, true, key);
+      assertNavigation(ui, end);
+      assert.deepEqual(scrolls, [{ position: end, options: { block: "nearest", inline: "nearest" } }], key);
+    }
+    assert.deepEqual(effects, []);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 navigation: Page keys move ten displayed rows without requesting another data page", async () => {
+  const effects = [];
+  const ui = await mount({ data: navigationData,
+    fetchFn: async () => { effects.push("request"); throw Error("Page keys must not load a page"); },
+    onRefresh: () => { effects.push("refresh"); },
+  });
+  const scrolls = watchNavigationScroll(ui);
+  try {
+    for (const [key, options, end] of [
+      ["PageUp", {}, "2:2"], ["PageDown", {}, "22:2"],
+      ["PageUp", { ctrlKey: true, metaKey: true, altKey: true, shiftKey: true }, "2:2"],
+      ["PageDown", { metaKey: true, altKey: true, shiftKey: true }, "22:2"],
+    ]) {
+      await selectNavigationRange(ui, "12:0", "12:2");
+      scrolls.length = 0;
+      assert.equal((await press(document.activeElement, key, options)).defaultPrevented, true, key);
+      assertNavigation(ui, end);
+      assert.deepEqual(scrolls, [{ position: end, options: { block: "nearest", inline: "nearest" } }], key);
+      assert.equal(ui.host.querySelector('[data-grid-row-header="0"]').textContent, "151");
+    }
+    await press(document.activeElement, "PageDown");
+    assertNavigation(ui, "24:2");
+    assert.deepEqual(effects, []);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 navigation: boundary keys consume without scrolling, including same-coordinate collapse", async () => {
+  const ui = await mount({ data: navigationData });
+  const scrolls = watchNavigationScroll(ui);
+  try {
+    for (const scenario of [
+      { key: "ArrowUp", start: "0:2" }, { key: "ArrowDown", start: "24:2" },
+      { key: "ArrowLeft", start: "12:0" }, { key: "ArrowRight", start: "12:4" },
+      { key: "Home", start: "12:0" }, { key: "End", start: "12:4" },
+      { key: "PageUp", start: "0:2" }, { key: "PageDown", start: "24:2" },
+      { key: "Home", start: "0:0", options: { ctrlKey: true } },
+      { key: "End", start: "24:4", options: { metaKey: true } },
+      { key: "End", anchor: "12:1", start: "12:4", options: { shiftKey: true } },
+      { key: "ArrowUp", anchor: "1:2", start: "0:2", options: { shiftKey: true }, selected: ["0:2", "1:2"] },
+      { key: "ArrowUp", anchor: "1:2", start: "0:2", options: { ctrlKey: true, shiftKey: true } },
+    ]) {
+      if (scenario.anchor) await selectNavigationRange(ui, scenario.anchor, scenario.start);
+      else await selectCell(ui, scenario.start);
+      scrolls.length = 0;
+      assert.equal((await press(document.activeElement, scenario.key, scenario.options)).defaultPrevented, true, scenario.key);
+      assertNavigation(ui, scenario.start, scenario.selected);
+      assert.deepEqual(scrolls, [], "same coordinates do not cause a scroll");
+    }
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 navigation: only unmodified-classified Shift arrows extend the original anchor", async () => {
+  const ui = await mount({ data: navigationData });
+  try {
+    for (const [key, options, end, selected] of [
+      ["Home", { shiftKey: true }, "12:0"], ["End", { shiftKey: true }, "12:4"],
+      ["PageUp", { shiftKey: true }, "2:2"], ["PageDown", { shiftKey: true }, "22:2"],
+      ["ArrowUp", { ctrlKey: true, shiftKey: true }, "0:2"],
+      ["ArrowDown", { metaKey: true, shiftKey: true, altKey: true }, "24:2"],
+      ["ArrowLeft", { altKey: true, shiftKey: true }, "12:1", ["12:0", "12:1"]],
+      ["ArrowRight", { shiftKey: true }, "12:3", ["12:0", "12:1", "12:2", "12:3"]],
+      ["ArrowUp", { altKey: true, shiftKey: true }, "11:2",
+        ["11:0", "11:1", "11:2", "12:0", "12:1", "12:2"]],
+      ["ArrowDown", { altKey: true, shiftKey: true }, "13:2",
+        ["12:0", "12:1", "12:2", "13:0", "13:1", "13:2"]],
+    ]) {
+      await selectNavigationRange(ui, "12:0", "12:2");
+      assert.equal((await press(document.activeElement, key, options)).defaultPrevented, true, key);
+      assertNavigation(ui, end, selected);
+    }
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 navigation: batched jump then Shift arrow retain the roving endpoint, status and TSV", async () => {
+  // Preserve TARGET's established TD-coordinate batching adaptation; CURRENT's viewport reads committed state.
+  const previous = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+  const copied = [];
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: {
+    writeText: async text => { copied.push(text); },
+  } });
+  const ui = await mount({ data: navigationData });
+  const scrolls = watchNavigationScroll(ui);
+  try {
+    await selectCell(ui, "12:2");
+    scrolls.length = 0;
+    await React.act(async () => {
+      document.activeElement.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
+        key: "End", ctrlKey: true, bubbles: true, cancelable: true,
+      }));
+      document.activeElement.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
+        key: "ArrowUp", shiftKey: true, bubbles: true, cancelable: true,
+      }));
+    });
+    assertNavigation(ui, "23:4", ["23:4", "24:4"]);
+    assert.deepEqual(scrolls.at(-1), { position: "23:4", options: { block: "nearest", inline: "nearest" } });
+    assert.equal(ui.host.querySelector("[data-spreadsheet-grid-status]").firstElementChild.textContent, "2 セル · 入力 2");
+    assert.deepEqual(copied, []);
+    await press(document.activeElement, "c", { ctrlKey: true });
+    assert.deepEqual(copied, ["z24\nz25"]);
+  } finally {
+    await ui.cleanup();
+    if (previous) Object.defineProperty(navigator, "clipboard", previous);
+    else delete navigator.clipboard;
+  }
+});
+
+test("MIG-0737 U01 navigation: readonly, default-off and missing-PK grids still navigate without writes", async () => {
+  for (const variant of [
+    { mode: "readonly", allowMutations: true, primaryKeys: ["id"] },
+    { mode: "editable", allowMutations: false, primaryKeys: ["id"] },
+    { mode: "editable", allowMutations: true, primaryKeys: [] },
+  ]) {
+    const effects = [];
+    const ui = await mount({ data: { ...navigationData, def: { ...navigationData.def, mode: variant.mode },
+      primaryKeys: variant.primaryKeys }, allowMutations: variant.allowMutations,
+    fetchFn: async () => { effects.push("request"); throw Error("navigation must not write"); },
+    onRefresh: () => { effects.push("refresh"); } });
+    try {
+      await selectCell(ui, "12:2");
+      assert.equal((await press(document.activeElement, "Home", { metaKey: true })).defaultPrevented, true);
+      assertNavigation(ui, "0:0");
+      await press(document.activeElement, "PageDown");
+      assertNavigation(ui, "10:0");
+      assert.equal(ui.host.querySelectorAll('button[aria-label="1行 title を編集"]').length, 0);
+      assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 0);
+      assert.deepEqual(effects, []);
+    } finally { await ui.cleanup(); }
+  }
+});
+
+test("MIG-0737 U01 navigation: live and invalidated drafts keep their value and navigation fence", async () => {
+  const effects = [];
+  const ui = await mount({ data: rangeData, allowMutations: true,
+    fetchFn: async () => { effects.push("request"); throw Error("draft must not save"); },
+    onRefresh: () => { effects.push("refresh"); },
+  });
+  try {
+    const cell = await selectCell(ui, "1:1");
+    await press(cell, "Enter");
+    const input = cell.querySelector("input");
+    assert.ok(input);
+    await React.act(async () => {
+      Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value").set.call(input, "Unsaved draft");
+      input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    });
+    for (const [key, options] of [["Home", {}], ["PageDown", {}], ["ArrowRight", { altKey: true }], ["End", { ctrlKey: true }]]) {
+      assert.equal((await press(cell, key, options)).defaultPrevented, false, key);
+      assert.deepEqual(selectedCells(ui), ["1:1"]);
+      assert.ok(document.activeElement === input, "live draft retains focus");
+      assert.equal(input.value, "Unsaved draft");
+    }
+    await ui.render({ data: { ...rangeData, rows: [rangeData.rows[0], { ...rangeData.rows[1], title: "Server change" }, rangeData.rows[2]] } });
+    assert.ok(cell.querySelector("input") === null, "invalidated draft is not rendered");
+    assert.match(ui.host.textContent, /編集中の行または列の状態が変更/);
+    const active = document.activeElement;
+    for (const key of ["Home", "End", "PageUp", "PageDown"]) {
+      assert.equal((await press(cell, key)).defaultPrevented, false, key);
+      assert.deepEqual(selectedCells(ui), ["1:1"]);
+      assert.ok(document.activeElement === active, "invalidated draft does not take focus");
+    }
+    assert.deepEqual(effects, []);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 navigation: an edit started in the same batch fences the following TD key", async () => {
+  const ui = await mount({ data: rangeData, allowMutations: true });
+  try {
+    const cell = await selectCell(ui, "1:1");
+    const edit = cell.querySelector('button[aria-label="2行 title を編集"]');
+    assert.ok(edit);
+    const navigation = new dom.window.KeyboardEvent("keydown", { key: "Home", bubbles: true, cancelable: true });
+    await React.act(async () => { edit.click(); cell.dispatchEvent(navigation); });
+    assert.equal(navigation.defaultPrevented, false);
+    assert.deepEqual(selectedCells(ui), ["1:1"]);
+    const input = cell.querySelector("input");
+    assert.ok(input);
+    assert.ok(document.activeElement === input, "new live draft owns focus");
+    assert.equal(input.value, "Beta");
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 navigation: descendant controls retain navigation keys and their draft focus", async () => {
+  const ui = await mount({ data: rangeData, allowMutations: true });
+  try {
+    const cell = await selectCell(ui, "1:1");
+    const edit = cell.querySelector("button");
+    edit.focus();
+    for (const [key, options] of [["Home", { ctrlKey: true }], ["End", { metaKey: true }], ["PageDown", {}]]) {
+      assert.equal((await press(edit, key, options)).defaultPrevented, false);
+      assert.deepEqual(selectedCells(ui), ["1:1"]);
+      assert.ok(document.activeElement === edit, "child button keeps its focus");
+    }
+    await clickButton(ui, "2行 title を編集");
+    const input = cell.querySelector("input");
+    assert.ok(input);
+    for (const key of ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"]) {
+      assert.equal((await press(input, key, { ctrlKey: true, shiftKey: true, altKey: true })).defaultPrevented, false, key);
+      assert.ok(cell.querySelector("input") === input, "same draft node retained");
+      assert.ok(document.activeElement === input, "input owns navigation");
+      assert.equal(input.value, "Beta");
+      assert.deepEqual(selectedCells(ui), ["1:1"]);
+    }
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 navigation: excluded Tab, F2, Enter and text keys retain the previous nonediting behavior", async () => {
+  // JSDOM does not execute native Tab traversal; this checks only the existing uncancelled grid event boundary.
+  const ui = await mount({ data: rangeData });
+  const scrolls = watchNavigationScroll(ui);
+  try {
+    await selectCell(ui, "1:1");
+    scrolls.length = 0;
+    for (const key of ["Tab", "Enter", "F2", "Escape", "x", "Homebrew"]) {
+      assert.equal((await press(document.activeElement, key)).defaultPrevented, false, key);
+      assertNavigation(ui, "1:1");
+      assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 0);
+    }
+    assert.deepEqual(scrolls, []);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 navigation: ordinary pending save and refresh permit navigation without another operation", async () => {
+  const requests = [];
+  let releaseRefresh;
+  let refreshes = 0;
+  const ui = await mount({ data: rangeData, allowMutations: true,
+    fetchFn: (_, init) => new Promise(resolve => requests.push({ init, resolve })),
+    onRefresh: () => { refreshes++; return new Promise(resolve => { releaseRefresh = resolve; }); },
+  });
+  try {
+    const cell = await beginTitleSave(ui, "Changed");
+    assert.equal(requests.length, 1);
+    assert.equal((await press(cell, "End", { altKey: true })).defaultPrevented, true);
+    assertNavigation(ui, "1:2");
+    await React.act(async () => requests[0].resolve(successfulWrite()));
+    assert.equal(refreshes, 1);
+    const receipt = ui.host.querySelector('[role="status"]');
+    assert.ok(receipt);
+    await press(document.activeElement, "Home");
+    assertNavigation(ui, "1:0");
+    await press(document.activeElement, "PageDown");
+    assertNavigation(ui, "2:0");
+    assert.ok(ui.host.querySelector('[role="status"]') === receipt, "navigation retains the save receipt");
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].init.signal.aborted, false);
+    await React.act(async () => releaseRefresh());
+    await flush();
+    assert.equal(refreshes, 1);
+    assert.equal(requests.length, 1);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 navigation: same-batch Undo locks only its current history operation", async () => {
+  const requests = [];
+  let refreshes = 0;
+  const ui = await mount({ data: rangeData, allowMutations: true,
+    fetchFn: (_, init) => new Promise(resolve => requests.push({ init, resolve })),
+    onRefresh: () => { refreshes++; },
+  });
+  try {
+    const cell = await beginTitleSave(ui, "Changed");
+    await React.act(async () => requests[0].resolve(successfulWrite()));
+    await flush();
+    const navigation = new dom.window.KeyboardEvent("keydown", { key: "End", bubbles: true, cancelable: true });
+    await React.act(async () => {
+      cell.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "z", ctrlKey: true, bubbles: true }));
+      cell.dispatchEvent(navigation);
+    });
+    assert.equal(requests.length, 2);
+    assert.equal(navigation.defaultPrevented, false);
+    assertNavigation(ui, "1:1");
+    for (const key of ["Home", "PageDown", "ArrowUp"]) {
+      assert.equal((await press(document.activeElement, key)).defaultPrevented, false, key);
+      assertNavigation(ui, "1:1");
+    }
+    await pressHeader(ui, rowHeader(0));
+    assert.deepEqual(selectedCells(ui), ["0:0", "0:1", "0:2"]);
+    assert.equal((await press(document.activeElement, "Home")).defaultPrevented, false);
+    assert.deepEqual(selectedCells(ui), ["0:0", "0:1", "0:2"]);
+    assert.equal(requests[1].init.signal.aborted, false);
+    await React.act(async () => requests[1].resolve(successfulWrite()));
+    await flush();
+    assert.equal((await press(document.activeElement, "Home")).defaultPrevented, true);
+    assertNavigation(ui, "0:0");
+    assert.equal(refreshes, 2);
+    assert.equal(requests.length, 2);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 navigation: obsolete history completion cannot unlock a newer transport", async () => {
+  // Keep both controller lifetimes together so a stale completion cannot clear the new navigation fence.
+  const oldRequests = [];
+  const newRequests = [];
+  const ui = await mount({ data: rangeData, allowMutations: true,
+    fetchFn: (_, init) => new Promise(resolve => oldRequests.push({ init, resolve })),
+  });
+  try {
+    const oldCell = await beginTitleSave(ui, "Old");
+    await React.act(async () => oldRequests[0].resolve(successfulWrite()));
+    await flush();
+    await press(oldCell, "z", { ctrlKey: true });
+    await ui.render({ fetchFn: (_, init) => new Promise(resolve => newRequests.push({ init, resolve })) });
+    assert.equal(oldRequests[1].init.signal.aborted, true);
+    const currentCell = await beginTitleSave(ui, "New");
+    await React.act(async () => newRequests[0].resolve(successfulWrite()));
+    await flush();
+    await press(currentCell, "z", { metaKey: true });
+    await React.act(async () => oldRequests[1].resolve(successfulWrite()));
+    await flush();
+    assert.equal((await press(currentCell, "Home")).defaultPrevented, false);
+    assertNavigation(ui, "1:1");
+    assert.equal(newRequests.length, 2);
+    assert.equal(newRequests[1].init.signal.aborted, false);
+    await React.act(async () => newRequests[1].resolve(successfulWrite()));
+    await flush();
+    assert.equal((await press(currentCell, "Home")).defaultPrevented, true);
+    assertNavigation(ui, "1:0");
+    assert.equal(newRequests.length, 2);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 navigation: an ordinary pending deletion does not become a history lock", async () => {
+  const requests = [];
+  let refreshes = 0;
+  const ui = await mount({ data: rangeData, allowMutations: true, confirmDelete: () => true,
+    fetchFn: (_, init) => new Promise(resolve => requests.push({ init, resolve })),
+    onRefresh: () => { refreshes++; },
+  });
+  try {
+    const cell = await selectCell(ui, "1:1");
+    await clickButton(ui, "2行を削除");
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].init.method, "DELETE");
+    assert.equal((await press(cell, "PageDown")).defaultPrevented, true);
+    assertNavigation(ui, "2:1");
+    assert.equal(requests[0].init.signal.aborted, false);
+    assert.equal(refreshes, 0);
+    await React.act(async () => requests[0].resolve(successfulWrite()));
+    await flush();
+    assert.equal(requests.length, 1);
+    assert.equal(refreshes, 1);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 navigation: context reset replaces the previous endpoint before the next jump", async () => {
+  for (const change of ["page", "table", "transport", "opt-in"]) {
+    const effects = [];
+    const ui = await mount({ data: navigationData,
+      fetchFn: async () => { effects.push("request"); throw Error("context navigation must not request"); },
+      onRefresh: () => { effects.push("refresh"); },
+    });
+    try {
+      await selectCell(ui, "12:2");
+      await press(document.activeElement, "PageDown");
+      assertNavigation(ui, "22:2");
+      const next = change === "page" ? { data: { ...navigationData, page: 8 } }
+        : change === "table" ? { data: { ...navigationData, def: { ...navigationData.def, table: "events" } } }
+        : change === "opt-in" ? { allowMutations: true }
+        : { fetchFn: async () => { effects.push("request"); throw Error("replacement must not request"); } };
+      await ui.render(next);
+      assertNavigation(ui, "0:0");
+      await press(document.activeElement, "End", { ctrlKey: true });
+      assertNavigation(ui, "24:4");
+      assert.deepEqual(effects, []);
+    } finally { await ui.cleanup(); }
+  }
+});
+
+test("MIG-0737 U01 navigation: shrinking and empty pages retain the bounded Tab entry and table fallback", async () => {
+  const ui = await mount({ data: navigationData });
+  const shrunk = { ...navigationData, rows: navigationData.rows.slice(0, 2), columns: navigationData.columns.slice(0, 2) };
+  try {
+    await selectCell(ui, "24:4");
+    await ui.render({ data: shrunk });
+    assertNavigation(ui, "1:1");
+    await press(document.activeElement, "PageUp");
+    assertNavigation(ui, "0:1");
+    await press(document.activeElement, "End", { ctrlKey: true });
+    assertNavigation(ui, "1:1");
+    await ui.render({ data: { ...shrunk, rows: [] } });
+    const table = ui.host.querySelector("table");
+    assert.ok(document.activeElement === table, "existing empty-grid fallback keeps focus");
+    assert.equal(table.tabIndex, 0);
+    assert.equal(ui.host.querySelectorAll('[data-grid-cell][tabindex="0"]').length, 0);
+    assert.equal((await press(table, "PageDown")).defaultPrevented, false, "empty-table navigation remains out of scope");
+    await ui.render({ data: shrunk });
+    assert.deepEqual([...ui.host.querySelectorAll('[data-grid-cell][tabindex="0"]')]
+      .map(node => node.dataset.gridCell), ["0:1"]);
+    await selectCell(ui, "0:1");
+    assert.equal((await press(document.activeElement, "End")).defaultPrevented, true);
+    assertNavigation(ui, "0:1");
+  } finally { await ui.cleanup(); }
+});

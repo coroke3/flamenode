@@ -452,7 +452,7 @@ export function AdminSpreadsheetEditableGrid({
     }
   }
 
-  // Keep shortcut precedence in one dispatcher: Shift+Space wins over Ctrl/Cmd+Space.
+  // Keep CURRENT shortcut precedence and editor ownership in one dispatcher; Shift+Space wins over Ctrl/Cmd+Space.
   function handleGridKey(
     event: React.KeyboardEvent<HTMLTableCellElement>,
     rowIndex: number,
@@ -489,12 +489,19 @@ export function AdminSpreadsheetEditableGrid({
       if (startCellEdit(rowIndex, colIndex)) event.preventDefault();
       return;
     }
-    if (event.ctrlKey || event.metaKey || event.altKey) return;
-    const moved = moveSpreadsheetFocus({ row: rowIndex, col: colIndex }, event.key, rows.length, columns.length);
-    if (moved.row === rowIndex && moved.col === colIndex) return;
+    if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"].includes(event.key)) return;
+    const historyBusy = inFlight.current !== null && historyInFlight.current === inFlight.current;
+    if (identityChanged || !isCurrent() || liveSelection.current !== null || historyBusy ||
+        rows.length === 0 || columns.length === 0) return;
+    const navigation = shortcut && !event.key.startsWith("Page") ? `Ctrl${event.key}` : event.key;
+    const moved = moveSpreadsheetFocus({ row: rowIndex, col: colIndex }, navigation, rows.length, columns.length);
     event.preventDefault();
-    if (!event.shiftKey) setAnchorCell(moved);
+    if (!(event.shiftKey && navigation.startsWith("Arrow"))) setAnchorCell(moved);
     focusGridCell(moved);
+    if (moved.row !== rowIndex || moved.col !== colIndex) {
+      tableRef.current?.querySelector<HTMLTableCellElement>(`[data-grid-cell="${moved.row}:${moved.col}"]`)
+        ?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+    }
   }
 
   async function addRow(): Promise<void> {
