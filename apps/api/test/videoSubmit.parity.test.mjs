@@ -882,4 +882,99 @@ if (runUnderRootTsx(import.meta.url)) {
       globalThis.__submitGuard = previousGuard;
     }
   });
+
+  test("U03a SA-088: CURRENT reservation group denial order and absolute cap, no writes", async () => {
+    const { submitSlotVideo } = await import("../../../src/lib/actions/video/submitSlotVideo.ts");
+    const inconsistent = "連続枠の予約者情報が不整合です。運営へ連絡してください。";
+    const cases = [
+      { name: "21 rows rejected before identity checks", count: 21,
+        sibling: { reserved_x_id_snapshot: "x_notos" },
+        message: "連続枠の件数が上限を超えています。" },
+      { name: "snapshot mismatch precedes mixed owner",
+        sibling: { reserved_x_id_snapshot: "x_notos", reserved_by_user_id: "u_notos" },
+        message: "予約グループのX IDスナップショットが一致しません。" },
+      { name: "mixed owner", sibling: { reserved_by_user_id: "u_notos" }, message: inconsistent },
+      { name: "mixed X", sibling: { x_user_id: "x_notos" }, message: inconsistent },
+      { name: "mixed assigned and unassigned X", sibling: { x_user_id: null }, message: inconsistent },
+      { name: "mixed display names", sibling: { display_name: "Other" }, message: inconsistent },
+      { name: "status precedes mismatched video",
+        sibling: { status: "submitted", video_id: "v_group_other" },
+        message: "予約中でない枠を含む連続枠は提出できません。" },
+      { name: "different video on still-reserved sibling",
+        sibling: { video_id: "v_group_other" },
+        message: "連続枠に別の作品が紐づいています。" },
+      { name: "gap exceeds configured part boundary", sibling: { start_time: 1901 },
+        message: "連続していない枠をまとめて提出できません。" },
+      { name: "single already-submitted slot", count: 1,
+        anchor: { reservation_group_id: null, status: "submitted", video_id: "v_group_other" },
+        message: "予約中の枠だけ作品を提出できます。" },
+    ];
+    const previousGuard = globalThis.__submitGuard;
+    const previousEnv = globalThis.__cfEnv;
+    const previousWake = globalThis.__wakeEnv;
+    try {
+      for (const scenario of cases) {
+        const w = seedWorld();
+        try {
+          w.sqlite.prepare("UPDATE events SET slot_part_gap_minutes=15, max_slots_per_video=1, parts_json=NULL, required_video_fields_json=NULL WHERE id='ev_closed'").run();
+          if (scenario.anchor?.video_id || scenario.sibling?.video_id) {
+            insert(w.sqlite, "videos", {
+              id: "v_group_other", creator_x_user_id: "x_owner", submitted_by_user_id: "u_owner",
+              creator_display_name: "Owner", title: "Previously linked", visibility_status: "pending",
+              created_at: 100, updated_at: 100,
+            });
+          }
+          for (let index = 0; index < (scenario.count ?? 2); index++) {
+            insert(w.sqlite, "slots", {
+              id: index === 0 ? "slot_submit" : "slot_sibling_" + index,
+              event_id: "ev_closed", reservation_group_id: "group_submit",
+              reserved_by_user_id: "u_owner", x_user_id: "x_owner", reserved_x_id_snapshot: "x_owner",
+              display_name: "Owner", status: "reserved", video_id: null,
+              start_time: 1000 + index * 100, sort_order: index + 1,
+              updated_at: 100, version: 1,
+              ...(index === 0 ? scenario.anchor : index === 1 ? scenario.sibling : undefined),
+            });
+          }
+          const before = snapshotDb(w.sqlite);
+          const beforeSlots = w.sqlite.prepare("SELECT * FROM slots ORDER BY id").all();
+          let guardCalls = 0;
+          const wakes = [];
+          globalThis.__cfEnv = () => ({
+            DB: w.d1, BUCKET: w.bucket, NEXT_PUBLIC_SITE_URL: SITE,
+            [QUEUE_FEATURE_FLAG_NAMES.dispatch]: "1",
+            [QUEUE_BINDING_NAMES.notificationWake]: { send: async (p) => wakes.push(p) },
+            [QUEUE_BINDING_NAMES.staticRebuildWake]: { send: async (p) => wakes.push(p) },
+            [QUEUE_BINDING_NAMES.youtubeSyncWake]: { send: async (p) => wakes.push(p) },
+          });
+          globalThis.__wakeEnv = () => globalThis.__cfEnv();
+          globalThis.__submitGuard = async (opts) => {
+            guardCalls++;
+            assert.deepEqual(opts, { requireApprovedActiveXId: true, feature: "post_video_slotted" });
+            return {
+              ok: true, db: drizzle(w.d1),
+              user: { id: "u_owner", name: "Owner User", role: "user", active_x_user_id: "x_owner" },
+              activeXId: "x_owner", approvedXIds: ["x_owner"], hasPendingXRequest: false,
+            };
+          };
+          const fd = baseForm({ youtubeUrl: "" });
+          fd.set("slot_id", "slot_submit");
+          const actual = await submitSlotVideo(fd);
+          assert.deepEqual(actual, { ok: false, message: scenario.message }, scenario.name);
+          assert.equal(guardCalls, 1, scenario.name);
+          assert.equal(w.d1.stats.batches, 0, scenario.name);
+          assert.deepEqual(snapshotDb(w.sqlite), before, scenario.name);
+          assert.deepEqual(w.sqlite.prepare("SELECT * FROM slots ORDER BY id").all(), beforeSlots, scenario.name);
+          assert.deepEqual(w.bucket.puts, [], scenario.name);
+          assert.deepEqual(w.bucket.deletes, [], scenario.name);
+          assert.deepEqual(wakes, [], scenario.name);
+        } finally {
+          w.sqlite.close();
+        }
+      }
+    } finally {
+      globalThis.__submitGuard = previousGuard;
+      globalThis.__cfEnv = previousEnv;
+      globalThis.__wakeEnv = previousWake;
+    }
+  });
 }
