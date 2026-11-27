@@ -44,7 +44,7 @@ async function loadGuard(
          s.cost_guard_exception_until AS cost_guard_exception_until,
          s.cost_guard_exception_features_json AS cost_guard_exception_features_json,
          CASE WHEN s.id IS NULL THEN 0 ELSE 1 END AS has_settings,
-         t.name AS tpl_name, CASE WHEN length(CAST(t.settings_json AS BLOB)) <= ? THEN t.settings_json END AS tpl_settings,
+         t.name AS tpl_name, CASE WHEN typeof(t.settings_json) = 'text' AND length(CAST(t.settings_json AS BLOB)) <= ? THEN t.settings_json END AS tpl_settings,
          length(CAST(t.settings_json AS BLOB)) AS tpl_size
        FROM "user" u
        LEFT JOIN system_settings s ON s.id = 'default'
@@ -102,7 +102,7 @@ export const adminEventTemplatesRoutes = new Hono<AppEnv>().get("/", async (c) =
   return c.json(body);
 });
 
-/** The SQL projection bounds stored bytes; a provider can expand malformed UTF-8 on decode.
+/** The SQL projection bounds stored TEXT bytes; a provider can expand malformed UTF-8 on decode.
  * Keep the same nullable raw-string contract without parsing or truncating the snapshot.
  */
 function boundedTemplateSettings(value: unknown): string | null {

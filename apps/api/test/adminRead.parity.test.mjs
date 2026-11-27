@@ -697,6 +697,8 @@ if (runUnderRootTsx(import.meta.url)) {
     const limit = 64 * 1024;
     const originalSettings = sqlite.prepare("SELECT settings_json FROM event_templates WHERE id = ?").get("tpl2").settings_json;
     const setTemplateSettings = sqlite.prepare("UPDATE event_templates SET settings_json = CAST(? AS TEXT) WHERE id = ?");
+    const setBlobSettings = sqlite.prepare("UPDATE event_templates SET settings_json = ? WHERE id = ?");
+    const storageClass = sqlite.prepare("SELECT typeof(settings_json) AS storage FROM event_templates WHERE id = ?");
     const expectedList = canon((await refGuardList("u_root")).templates);
     try {
       const prefix = '{"v":"';
@@ -730,8 +732,14 @@ if (runUnderRootTsx(import.meta.url)) {
         cases.push({ raw, storedSize: Buffer.byteLength(raw), wire: raw, expected: raw });
       }
       cases.push({ raw: "\u0000" + "x".repeat(limit), storedSize: limit + 1, wire: null, expected: null });
-      for (const { raw, storedSize, wire, expected } of cases) {
-        setTemplateSettings.run(raw, "tpl2");
+      // TEXT affinity does not convert a bound BLOB into TEXT. Do not transfer
+      // binary values even when their stored byte size fits the raw-string DTO.
+      for (const raw of [Buffer.from('{"v":1}'), Buffer.alloc(0), Buffer.alloc(limit, 120), Buffer.alloc(limit + 1, 120)]) {
+        cases.push({ raw, storage: "blob", storedSize: raw.length, wire: null, expected: null });
+      }
+      for (const { raw, storage = "text", storedSize, wire, expected } of cases) {
+        (storage === "blob" ? setBlobSettings : setTemplateSettings).run(raw, "tpl2");
+        assert.equal(storageClass.get("tpl2").storage, storage);
         const backing = createD1(sqlite);
         const receipts = [];
         const d1 = {
