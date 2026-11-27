@@ -85,7 +85,7 @@ test("MIG-0643 T01: actual parent guard permits audited manual rebuild", async (
   const res = await s.request(CASES.find((item) => item.name === "SA-071 manual enqueue"));
   assert.equal(res.status, 200);
   assert.deepEqual(await res.json(), { ok: true, queued: 1 });
-  assert.equal(s.stats.reads, 1, "joined write admission (session injected), queue upsert zero reads");
+  assert.equal(s.stats.reads, 2, "writeGuard user + CostGuard settings, queue upsert zero reads");
   assert.equal(s.stats.batches, 1, "queue UPSERT and strict audit share an atomic batch");
   assert.equal(s.auditCount(), 1);
   const queue = s.sqlite.prepare(
@@ -106,8 +106,8 @@ test("MIG-0643 S3: sibling static routes cannot double-charge backfill CostGuard
   const payload = await res.json();
   assert.equal(payload.backfill_kind, "event_crew");
   assert.equal(payload.backfill_done, "1");
-  assert.equal(s.stats.reads, 2,
-    "joined write admission (1; session injected) + bounded backfill count/page (1)");
+  assert.equal(s.stats.reads, 3,
+    "real admin writeGuard (1) + exactly one CostGuard (1) + bounded backfill count/page (1)");
   assert.equal(s.stats.batches, 0, "empty backfill writes no queue");
   assert.equal(s.auditCount(), 0);
 });

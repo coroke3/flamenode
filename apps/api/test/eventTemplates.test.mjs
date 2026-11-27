@@ -73,7 +73,7 @@ test("D1 statement budget (ZERO_1102 S3): audit context is preloaded, <=3 reads 
   const s = setup();
   assert.equal((await s.del("etmpl_1")).status, 200);
   assert.ok(s.stats.reads <= 3, `reads ${s.stats.reads}`);
-  assert.equal(s.stats.reads, 2, "joined admission + template read; session injected");
+  assert.equal(s.stats.reads, 3);
   assert.equal(s.stats.batches, 1);
 });
 

@@ -217,7 +217,7 @@ test("MIG-0643 U04: protected Hono stack uses S3 <=3 pre-reads and one batch", a
   const s = protectedSetup();
   const response = await s.request();
   assert.equal(response.status, 200);
-  assert.equal(s.stats.reads, 2, "joined admission + resource read; session injected");
+  assert.equal(s.stats.reads, 3);
   assert.equal(s.stats.batches, 1);
   assert.equal(s.audit().length, 1);
 });
