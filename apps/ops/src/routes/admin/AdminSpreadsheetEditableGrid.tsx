@@ -520,7 +520,9 @@ export function AdminSpreadsheetEditableGrid({
         rows.length === 0 || columns.length === 0) return;
     const text = copySpreadsheetSelection(rows, columns, visibleAnchor, visibleFocus);
     const table = tableRef.current;
-    if (!text || !table) return;
+    // The nonempty dimensions and bounded endpoints above establish a selection.
+    // A valid empty single cell serializes to ""; copy it instead of retaining old clipboard text.
+    if (!table) return;
     // A clipboard write cannot be revoked once dispatched. Fence only its receipt:
     // an A -> B -> A context return or a newer copy must not revive an obsolete notice.
     const copyContext = previousContext.current;

@@ -2478,3 +2478,109 @@ test("MIG-0737 U01 range copy receipt: same-context refresh preserves success/fa
     else delete navigator.clipboard;
   }
 });
+
+test("MIG-0737 U01 empty range copy: valid empty scalar overwrites clipboard through grid and formula", async () => {
+  const previous = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+  const success = "選択範囲をコピーしました。";
+  const denied = "クリップボードへのコピーが許可されていません。";
+  try {
+    const blankRows = [{ id: "a", title: "" }, { id: "a", title: null }, { id: "a", title: undefined }, { id: "a" }];
+    for (const row of blankRows) for (const ingress of ["grid", "formula"]) for (const rejected of [false, true]) {
+      const pending = [];
+      let clipboard = "old clipboard";
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: {
+        writeText: value => new Promise((resolve, reject) => pending.push({
+          value, resolve: () => { clipboard = value; resolve(); }, reject,
+        })),
+      } });
+      const ui = await mount({ data: { ...data, rows: [row, ...data.rows.slice(1)] } });
+      try {
+        const td = await select(ui, "0:1");
+        const target = ingress === "formula" ? formulaInput(ui) : td;
+        await React.act(async () => target.focus());
+        const event = await key(target, "c", ingress === "formula" ? { metaKey: true } : { ctrlKey: true });
+        assert.equal(event.defaultPrevented, true);
+        assert.deepEqual(pending.map(p => p.value), [""]);
+        await React.act(async () => rejected ? pending[0].reject(Error("denied")) : pending[0].resolve());
+        assert.equal(clipboard, rejected ? "old clipboard" : "");
+        assert.equal(ui.host.querySelector("[data-spreadsheet-formula-status]").textContent, rejected ? denied : success);
+        assert.deepEqual(selected(ui), ["0:1"]);
+        assert.equal(document.activeElement, target);
+        assert.equal(pending.length, 1);
+        assertNoEffects(ui);
+      } finally { await ui.cleanup(); }
+    }
+  } finally {
+    if (previous) Object.defineProperty(navigator, "clipboard", previous);
+    else delete navigator.clipboard;
+  }
+});
+
+test("MIG-0737 U01 empty range copy: a blank copy participates in latest-receipt ownership", async () => {
+  const previous = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+  const success = "選択範囲をコピーしました。";
+  const denied = "クリップボードへのコピーが許可されていません。";
+  try {
+    for (const blankFirst of [false, true]) for (const oldFirst of [false, true]) for (const rejectOld of [false, true]) {
+      const pending = [];
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: {
+        writeText: value => new Promise((resolve, reject) => pending.push({ value, resolve, reject })),
+      } });
+      const ui = await mount({ data: { ...data, rows: [{ ...data.rows[0], title: "" }, ...data.rows.slice(1)] } });
+      try {
+        await key(await select(ui, blankFirst ? "0:1" : "1:1"), "c", { ctrlKey: true });
+        await select(ui, blankFirst ? "1:1" : "0:1");
+        const formula = formulaInput(ui);
+        await React.act(async () => formula.focus());
+        await key(formula, "c", { metaKey: true });
+        assert.deepEqual(pending.map(p => p.value), blankFirst ? ["", "Beta"] : ["Beta", ""]);
+        const finishOld = () => rejectOld ? pending[0].reject(Error("old denial")) : pending[0].resolve();
+        const finishNew = () => rejectOld ? pending[1].resolve() : pending[1].reject(Error("new denial"));
+        const expected = rejectOld ? success : denied;
+        if (oldFirst) {
+          await React.act(async () => finishOld());
+          assert.equal(ui.host.querySelector("[data-spreadsheet-formula-status]").textContent, "");
+          await React.act(async () => finishNew());
+        } else {
+          await React.act(async () => finishNew());
+          assert.equal(ui.host.querySelector("[data-spreadsheet-formula-status]").textContent, expected);
+          await React.act(async () => finishOld());
+        }
+        assert.equal(ui.host.querySelector("[data-spreadsheet-formula-status]").textContent, expected);
+        assert.equal(pending.length, 2);
+        assertNoEffects(ui);
+      } finally { await ui.cleanup(); }
+    }
+  } finally {
+    if (previous) Object.defineProperty(navigator, "clipboard", previous);
+    else delete navigator.clipboard;
+  }
+});
+
+test("MIG-0737 U01 empty range copy: no rows or columns and retired cells are not valid blank selections", async () => {
+  const previous = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+  const writes = [];
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: {
+    writeText: async value => { writes.push(value); },
+  } });
+  try {
+    for (const empty of [{ rows: [] }, { columns: [] }, { rows: [], columns: [] }]) {
+      const ui = await mount({ data: { ...data, rows: [{ ...data.rows[0], title: "" }, ...data.rows.slice(1)] } });
+      try {
+        const retired = await select(ui, "0:1");
+        await ui.render({ data: { ...data, ...empty } });
+        assert.equal(retired.isConnected, false);
+        await key(retired, "c", { ctrlKey: true });
+        const formula = formulaInput(ui);
+        await React.act(async () => formula.focus());
+        assert.equal((await key(formula, "c", { metaKey: true })).defaultPrevented, true);
+        assert.deepEqual(writes, []);
+        assert.equal(ui.host.querySelector("[data-spreadsheet-formula-status]").textContent, "");
+        assertNoEffects(ui);
+      } finally { await ui.cleanup(); }
+    }
+  } finally {
+    if (previous) Object.defineProperty(navigator, "clipboard", previous);
+    else delete navigator.clipboard;
+  }
+});
