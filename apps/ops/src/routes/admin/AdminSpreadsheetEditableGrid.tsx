@@ -95,6 +95,7 @@ export function AdminSpreadsheetEditableGrid({
   const editorRef = React.useRef<HTMLInputElement>(null);
   // A formula-only navigation can change the target before React commits its new endpoint.
   const formulaNavigationPending = React.useRef(false);
+  const rangeCopyReceipt = React.useRef<object | null>(null);
   const focusedGridElement = React.useRef<HTMLElement | null>(null);
   const displayedPage = React.useRef(data);
   displayedPage.current = data;
@@ -515,15 +516,24 @@ export function AdminSpreadsheetEditableGrid({
   }
 
   async function copyRange(): Promise<void> {
-    if (identityChanged || rows.length === 0 || columns.length === 0) return;
+    if (identityChanged || !isCurrent() || displayedPage.current !== data ||
+        rows.length === 0 || columns.length === 0) return;
     const text = copySpreadsheetSelection(rows, columns, visibleAnchor, visibleFocus);
-    if (!text) return;
+    const table = tableRef.current;
+    if (!text || !table) return;
+    // A clipboard write cannot be revoked once dispatched. Fence only its receipt:
+    // an A -> B -> A context return or a newer copy must not revive an obsolete notice.
+    const copyContext = previousContext.current;
+    const receipt = {};
+    rangeCopyReceipt.current = receipt;
+    const ownsReceipt = () => rangeCopyReceipt.current === receipt &&
+      previousContext.current === copyContext && tableRef.current === table && isCurrent();
     try {
       if (!navigator.clipboard?.writeText) throw new Error("clipboard unavailable");
       await navigator.clipboard.writeText(text);
-      if (isCurrent()) setNotice("選択範囲をコピーしました。");
+      if (ownsReceipt()) setNotice("選択範囲をコピーしました。");
     } catch {
-      if (isCurrent()) setNotice("クリップボードへのコピーが許可されていません。");
+      if (ownsReceipt()) setNotice("クリップボードへのコピーが許可されていません。");
     }
   }
 

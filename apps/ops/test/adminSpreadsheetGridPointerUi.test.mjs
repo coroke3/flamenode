@@ -2365,3 +2365,116 @@ test("MIG-0737 U01 formula history: stale focus, IME, invalidated draft and defa
     assertNoEffects(readonly);
   } finally { await readonly.cleanup(); }
 });
+
+test("MIG-0737 U01 range copy receipt: returning context cannot revive an old success or failure", async () => {
+  const previous = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+  const success = "選択範囲をコピーしました。";
+  const denied = "クリップボードへのコピーが許可されていません。";
+  try {
+    for (const ingress of ["grid", "formula"]) for (const rejectOld of [false, true]) for (const newer of [false, true]) {
+      const pending = [];
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: {
+        writeText: value => new Promise((resolve, reject) => pending.push({ value, resolve, reject })),
+      } });
+      const ui = await mount();
+      try {
+        const dispatch = async position => {
+          const td = await select(ui, position);
+          const input = ingress === "formula" ? formulaInput(ui) : td;
+          await React.act(async () => input.focus());
+          assert.equal((await key(input, "c", { ctrlKey: true })).defaultPrevented, true);
+        };
+        await dispatch("0:1");
+        assert.deepEqual(pending.map(p => p.value), ["Alpha"]);
+        await ui.render({ data: { ...data, page: data.page + 1 } });
+        await ui.render({ data });
+        if (newer) {
+          await dispatch("1:1");
+          assert.deepEqual(pending.map(p => p.value), ["Alpha", "Beta"]);
+          await React.act(async () => rejectOld ? pending[1].resolve() : pending[1].reject(Error("new denial")));
+        }
+        await React.act(async () => rejectOld ? pending[0].reject(Error("old denial")) : pending[0].resolve());
+        const expected = newer ? rejectOld ? success : denied : "";
+        assert.equal(ui.host.querySelector("[data-spreadsheet-formula-status]").textContent, expected);
+        assert.deepEqual([...ui.host.querySelectorAll('[role="status"]')].map(node => node.textContent), expected ? [expected] : []);
+        assert.equal(pending.length, newer ? 2 : 1);
+        assertNoEffects(ui);
+      } finally { await ui.cleanup(); }
+    }
+  } finally {
+    if (previous) Object.defineProperty(navigator, "clipboard", previous);
+    else delete navigator.clipboard;
+  }
+});
+
+test("MIG-0737 U01 range copy receipt: only newest overlapping copy can report, independent of completion order", async () => {
+  const previous = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+  const success = "選択範囲をコピーしました。";
+  const denied = "クリップボードへのコピーが許可されていません。";
+  try {
+    for (const oldFirst of [false, true]) for (const rejectOld of [false, true]) {
+      const pending = [];
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: {
+        writeText: value => new Promise((resolve, reject) => pending.push({ value, resolve, reject })),
+      } });
+      const ui = await mount();
+      try {
+        await key(await select(ui, "0:1"), "c", { ctrlKey: true });
+        await select(ui, "1:1");
+        const formula = formulaInput(ui);
+        await React.act(async () => formula.focus());
+        await key(formula, "c", { metaKey: true });
+        assert.deepEqual(pending.map(p => p.value), ["Alpha", "Beta"]);
+        const finishOld = () => rejectOld ? pending[0].reject(Error("old denial")) : pending[0].resolve();
+        const finishNew = () => rejectOld ? pending[1].resolve() : pending[1].reject(Error("new denial"));
+        const expected = rejectOld ? success : denied;
+        if (oldFirst) {
+          await React.act(async () => finishOld());
+          assert.equal(ui.host.querySelector("[data-spreadsheet-formula-status]").textContent, "");
+          await React.act(async () => finishNew());
+        } else {
+          await React.act(async () => finishNew());
+          assert.equal(ui.host.querySelector("[data-spreadsheet-formula-status]").textContent, expected);
+          await React.act(async () => finishOld());
+        }
+        assert.equal(ui.host.querySelector("[data-spreadsheet-formula-status]").textContent, expected);
+        assert.deepEqual(selected(ui), ["1:1"]);
+        assert.equal(document.activeElement, formula);
+        assert.equal(pending.length, 2);
+        assertNoEffects(ui);
+      } finally { await ui.cleanup(); }
+    }
+  } finally {
+    if (previous) Object.defineProperty(navigator, "clipboard", previous);
+    else delete navigator.clipboard;
+  }
+});
+
+test("MIG-0737 U01 range copy receipt: same-context refresh preserves success/failure; retired mount does not retry", async () => {
+  const previous = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+  try {
+    for (const rejected of [false, true]) for (const retired of [false, true]) {
+      const pending = [];
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: {
+        writeText: value => new Promise((resolve, reject) => pending.push({ value, resolve, reject })),
+      } });
+      const ui = await mount();
+      let cleaned = false;
+      try {
+        await key(await select(ui, "0:1"), "c", { ctrlKey: true });
+        assert.deepEqual(pending.map(p => p.value), ["Alpha"]);
+        if (retired) { await ui.cleanup(); cleaned = true; }
+        else await ui.render({ data: { ...data, rows: [...data.rows] } });
+        await React.act(async () => rejected ? pending[0].reject(Error("denied")) : pending[0].resolve());
+        if (retired) assert.equal(ui.host.isConnected, false);
+        else assert.equal(ui.host.querySelector("[data-spreadsheet-formula-status]").textContent,
+          rejected ? "クリップボードへのコピーが許可されていません。" : "選択範囲をコピーしました。");
+        assert.equal(pending.length, 1);
+        assertNoEffects(ui);
+      } finally { if (!cleaned) await ui.cleanup(); }
+    }
+  } finally {
+    if (previous) Object.defineProperty(navigator, "clipboard", previous);
+    else delete navigator.clipboard;
+  }
+});
