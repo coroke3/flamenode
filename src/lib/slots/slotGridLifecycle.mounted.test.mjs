@@ -207,6 +207,13 @@ function assertNoPrivateActionUi(container) {
   assert.doesNotMatch(container.textContent, /previous viewer private name/);
 }
 
+function CommitBoundaryProbe({ onCommit }) {
+  React.useLayoutEffect(() => {
+    onCommit();
+  }, [onCommit]);
+  return null;
+}
+
 for (const name of ["reserve", "release", "extend", "merge"]) {
   for (const boundary of [
     "bfcache-null-X", "pagehide-null-X", "active-X", "event-unmount", "current-control",
@@ -279,6 +286,67 @@ for (const name of ["reserve", "release", "extend", "merge"]) {
         }
         assert.deepEqual([...Array(storage.length)].map((_, i) => [storage.key(i), storage.getItem(storage.key(i))]), storageBefore,
           "null-X action must never persist the previous viewer name");
+      } finally {
+        await settle(() => root.unmount());
+        if (pending) await settle(() => pending.resolve({ ok: false }));
+        container.remove();
+      }
+    });
+  }
+}
+
+
+// A sibling layout effect settles the old action inside the successor commit,
+// before passive cleanup could retire the old generation.
+for (const name of ["reserve", "release", "extend", "merge"]) {
+  for (const transition of ["prop-only", "keyed-event"]) {
+    test("SEC-921 mounted SlotGrid: " + name + " / successor layout commit (" + transition + ")", async () => {
+      const container = document.createElement("div");
+      document.body.appendChild(container);
+      const root = createRoot(container);
+      const start = requests.length;
+      const refreshStart = refreshes.length;
+      const redirectStart = redirects.length;
+      const controlStart = controlRethrows.length;
+      const noCommit = () => {};
+      let pending;
+      try {
+        await settle(() => root.render(h(React.Fragment, null,
+          h(SlotGrid, { key: "a", ...props(slotsFor(name)) }),
+          h(CommitBoundaryProbe, { onCommit: noCommit }),
+        )));
+        await startAction(container, name);
+        assert.equal(requests.length, start + 1);
+        pending = requests[start];
+        const control = new Error("NEXT_REDIRECT");
+        controlErrors.add(control);
+
+        await settle(() => {
+          ReactDOM.flushSync(() => root.render(h(React.Fragment, null,
+            h(SlotGrid, {
+              key: transition === "keyed-event" ? "b" : "a",
+              ...props(freshSlots(), transition === "prop-only" ? "new-x" : null),
+            }),
+            h(CommitBoundaryProbe, {
+              onCommit: () => {
+                if (transition === "prop-only") {
+                  pending.resolve({ ok: true, slotId: "next-free", groupSize: 1 });
+                } else {
+                  pending.reject(control);
+                }
+              },
+            }),
+          )));
+        });
+        pending = null;
+
+        assertNoPrivateActionUi(container);
+        assert.equal(refreshes.length, refreshStart,
+          "a success from the previous viewer must not refresh the successor");
+        assert.equal(redirects.length, redirectStart,
+          "a retired action must not navigate the successor");
+        assert.equal(controlRethrows.length, controlStart,
+          "a retired control rejection must not reach unstable_rethrow");
       } finally {
         await settle(() => root.unmount());
         if (pending) await settle(() => pending.resolve({ ok: false }));

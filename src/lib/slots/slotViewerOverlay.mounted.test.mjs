@@ -114,6 +114,19 @@ async function settle(fn) {
   });
 }
 
+function CommitBoundaryProbe({ onCommit }) {
+  React.useLayoutEffect(() => {
+    onCommit();
+  }, [onCommit]);
+  return null;
+}
+async function commitAtLayout(root, element) {
+  await React.act(async () => {
+    ReactDOM.flushSync(() => root.render(element));
+    for (let i = 0; i < 6; i++) await Promise.resolve();
+  });
+}
+
 test("mounted overlay: persisted pagehide synchronously retires the current private receipt", async () => {
   const container = dom.window.document.createElement("div");
   dom.window.document.body.appendChild(container);
@@ -276,6 +289,54 @@ test("mounted overlay: loaded A cannot reappear on A→B→A while B is still pe
     assertEmpty();
     await settle(() => requests[start + 4].resolve(response(overlay("restored current viewer"))));
     assert.equal(read(container).slots[0].name, "restored current viewer");
+    assert.equal(read(container).slots[0].owned, true);
+  } finally {
+    await settle(() => root.unmount());
+    container.remove();
+  }
+});
+
+test("mounted overlay: stale GETs resolved during successor layout commits stay hidden across A→B→A", async () => {
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.appendChild(container);
+  const root = createRoot(container);
+  const start = requests.length;
+  const noCommit = () => {};
+  const assertEmpty = () => {
+    assert.equal(read(container).slots[0].owned, false);
+    assert.equal(read(container).slots[0].name, null);
+  };
+  try {
+    await settle(() => root.render(React.createElement(React.Fragment, null,
+      React.createElement(EventSlotsViewerPanel, props("a")),
+      React.createElement(CommitBoundaryProbe, { onCommit: noCommit }),
+    )));
+    assert.equal(requests.length, start + 1);
+
+    // Resolve A from a layout effect in the successor B commit. The old
+    // passive fetch cleanup has not run yet, so scope identity must fail closed.
+    await commitAtLayout(root, React.createElement(React.Fragment, null,
+      React.createElement(EventSlotsViewerPanel, props("b")),
+      React.createElement(CommitBoundaryProbe, {
+        onCommit: () => requests[start].resolve(response(overlay("late A private"))),
+      }),
+    ));
+    assertEmpty();
+    assert.equal(requests.length, start + 2, "B fetch starts after the commit-boundary probe");
+
+    // Resolve B during the next A commit. Reusing baseSlots must not revive
+    // either the previous A receipt or the late B response.
+    await commitAtLayout(root, React.createElement(React.Fragment, null,
+      React.createElement(EventSlotsViewerPanel, props("a")),
+      React.createElement(CommitBoundaryProbe, {
+        onCommit: () => requests[start + 1].resolve(response(overlay("late B private"))),
+      }),
+    ));
+    assertEmpty();
+    assert.equal(requests.length, start + 3, "the new A fetch starts after B is retired");
+
+    await settle(() => requests[start + 2].resolve(response(overlay("current A"))));
+    assert.equal(read(container).slots[0].name, "current A");
     assert.equal(read(container).slots[0].owned, true);
   } finally {
     await settle(() => root.unmount());
