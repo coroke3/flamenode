@@ -154,3 +154,50 @@ test("MIG-0645 U02i: SQLite/D1 batch rolls back x_users, rebuild queue and audit
     sqlite.close();
   }
 });
+
+test("MIG-0645 U02j: real mutateWithAudit batch rolls back X-user marker injection", async () => {
+  const { drizzle } = await import("drizzle-orm/d1");
+  const { sql } = await import("drizzle-orm");
+  const { mutateWithAudit } = await import("@flamenode/server-core/audit/mutate");
+  const { createAdminD1, seedBase } = await import("./helpers/sqliteD1.mjs");
+  const { db: d1, sqlite, stats } = createAdminD1();
+  try {
+    seedBase(sqlite);
+    const db = drizzle(d1);
+    const count = (name) => sqlite.prepare('SELECT COUNT(*) AS n FROM "' + name + '"').get().n;
+    sqlite.exec(`CREATE TRIGGER fail_legacy_import_marker
+      BEFORE INSERT ON audit_logs
+      WHEN NEW.table_name = 'legacy_import_steps'
+      BEGIN SELECT RAISE(ABORT, 'injected marker insert failure'); END`);
+    const input = {
+      mutationStatements: [
+        db.run(sql.raw("INSERT INTO x_users (id, x_name, approval_status) VALUES ('legacy_x_2', 'Legacy X 2', 'imported')")),
+        db.run(sql.raw("INSERT INTO static_rebuild_queue (id, target_type, target_id, reason, priority, status) VALUES ('rebuild-x-2', 'users_index', 'global', 'legacy_import_x_users', 'low', 'pending')")),
+      ],
+      expectedMutationChanges: [1, 1],
+      audits: [
+        { table_name: "x_users_import_batch", target_id: "legacy:legacy_x_2", operation: "CREATE",
+          before: null, after: { ids: ["legacy_x_2"] }, actor_user_id: "admin-1",
+          context: "legacy_import", retention_class: "long_audit", restore_strategy: "none" },
+        { table_name: "legacy_import_steps", target_id: "step:x_users:0", operation: "SYSTEM",
+          before: null, after: { stage: "x_users", created: 1 }, actor_user_id: "admin-1",
+          context: "legacy_import:step", retention_class: "long_audit", restore_strategy: "none" },
+      ],
+    };
+    await assert.rejects(mutateWithAudit(db, input), /injected marker insert failure/);
+    assert.equal(stats.batches, 1, "marker failure reached the audited D1 batch");
+    assert.equal(count("x_users"), 0);
+    assert.equal(count("static_rebuild_queue"), 0);
+    assert.equal(count("audit_logs"), 0);
+    sqlite.exec("DROP TRIGGER fail_legacy_import_marker");
+    await mutateWithAudit(db, input);
+    assert.equal(stats.batches, 2);
+    assert.equal(count("x_users"), 1);
+    assert.equal(count("static_rebuild_queue"), 1);
+    assert.equal(count("audit_logs"), 2);
+    assert.deepEqual(sqlite.prepare("SELECT table_name FROM audit_logs ORDER BY table_name").all().map(x => x.table_name),
+      ["legacy_import_steps", "x_users_import_batch"]);
+  } finally {
+    sqlite.close();
+  }
+});
