@@ -64,3 +64,37 @@ export function canRestoreDraftField(
     (permission.field && isFieldDisabled(disabledFields, permission.field))
   );
 }
+
+// Only pass fields produced by videoFormDraftToFields after parsing the draft.
+// Controlled React values and draft authority remain the host's responsibility.
+export function restoreVideoDraftControls(
+  form: HTMLFormElement,
+  fields: Record<string, string | string[]>,
+  disabledSections: string[] | undefined,
+  disabledFields: string[] | undefined,
+): void {
+  const { HTMLInputElement, HTMLTextAreaElement, HTMLSelectElement } =
+    form.ownerDocument.defaultView ?? globalThis;
+  const restored = new FormData();
+  for (const [key, raw] of Object.entries(fields)) {
+    for (const item of Array.isArray(raw) ? raw : [raw]) restored.append(key, item);
+  }
+  for (const element of Array.from(form.elements)) {
+    if (
+      !(
+        element instanceof HTMLInputElement ||
+        element instanceof HTMLTextAreaElement ||
+        element instanceof HTMLSelectElement
+      )
+    ) continue;
+    if (!element.name || !canRestoreDraftField(element.name, disabledSections, disabledFields)) continue;
+    const values = restored.getAll(element.name).map(String);
+    if (element instanceof HTMLInputElement && element.type === "checkbox") {
+      element.checked = values.includes("1") || values.includes("true");
+    } else if (element instanceof HTMLInputElement && element.type === "radio") {
+      element.checked = values.includes(element.value);
+    } else if (values.length > 0) {
+      element.value = values[0] ?? "";
+    }
+  }
+}

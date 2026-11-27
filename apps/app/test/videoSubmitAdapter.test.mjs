@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { canRestoreDraftField, isSectionDisabled, isFieldDisabled } from "../.test-dist/apps/app/src/components/forms/videoFormDraftFields.js";
+import { canRestoreDraftField, isSectionDisabled, isFieldDisabled, restoreVideoDraftControls } from "../.test-dist/apps/app/src/components/forms/videoFormDraftFields.js";
 import {
   mapVideoSubmitMode,
   submitVideoForm,
@@ -193,4 +193,59 @@ test("MIG-0714 part A: omitted, unrelated and exact lock names keep CURRENT sema
   assert.equal(canRestoreDraftField("event_ids", ["video", "members"], []), true);
   // The draft parser/caller limits actual restored fields; this helper is not authorization.
   assert.equal(canRestoreDraftField("unknown_field", ["video"], ["unknown_field"]), true);
+});
+
+test("MIG-0714 part A: restore native controls with CURRENT locks and repeated-value semantics", async () => {
+  const { JSDOM } = await import("jsdom");
+  const dom = new JSDOM(`<form>
+    <input name="title" value="server title">
+    <input name="music" value="server music">
+    <input name="display_name" value="server name">
+    <input name="youtube_url" value="server url">
+    <input name="credit" value="first"><input name="credit" value="second">
+    <textarea name="intro_comment">server intro</textarea>
+    <select name="used_software"><option value="old" selected>Old</option><option value="new">New</option></select>
+    <input type="radio" name="part" value="A" checked><input type="radio" name="part" value="B">
+    <input type="checkbox" name="highlights" checked>
+    <input type="checkbox" name="production_story">
+    <input type="checkbox" name="closing_comment" checked>
+    <input type="checkbox" name="is_collab" checked>
+    <input value="unnamed">
+    <button name="title" value="button">Submit</button>
+  </form>`);
+  try {
+    const form = dom.window.document.querySelector("form");
+    const controls = name => [...form.querySelectorAll(`[name="${name}"]`)];
+    let events = 0;
+    form.addEventListener("input", () => events++);
+    form.addEventListener("change", () => events++);
+    restoreVideoDraftControls(form, {
+      title: "draft title", music: "", display_name: "draft name",
+      credit: ["first draft", "second draft"], intro_comment: "draft intro",
+      used_software: ["new", "old"], part: ["B"],
+      highlights: ["false", "true"], production_story: "1",
+      closing_comment: "false",
+    }, ["submitter"], ["video.title"]);
+    assert.deepEqual(controls("title").map(x => x.value), ["server title", "button"]);
+    assert.equal(controls("music")[0].value, "");
+    assert.equal(controls("display_name")[0].value, "server name");
+    assert.equal(controls("youtube_url")[0].value, "server url");
+    assert.deepEqual(controls("credit").map(x => x.value), ["first draft", "first draft"]);
+    assert.equal(controls("intro_comment")[0].value, "draft intro");
+    assert.equal(controls("used_software")[0].value, "new");
+    assert.deepEqual(controls("part").map(x => x.checked), [false, true]);
+    assert.equal(controls("highlights")[0].checked, true);
+    assert.equal(controls("production_story")[0].checked, true);
+    assert.equal(controls("closing_comment")[0].checked, false);
+    assert.equal(controls("is_collab")[0].checked, false);
+    assert.equal(form.querySelector("input:not([name])").value, "unnamed");
+    restoreVideoDraftControls(form, {}, ["descriptions", "members"], ["video.part"]);
+    assert.equal(controls("highlights")[0].checked, true);
+    assert.equal(controls("production_story")[0].checked, true);
+    assert.deepEqual(controls("part").map(x => x.checked), [false, true]);
+    assert.equal(controls("intro_comment")[0].value, "draft intro");
+    assert.equal(events, 0, "CURRENT restores values without synthetic input/change events");
+  } finally {
+    dom.window.close();
+  }
 });
