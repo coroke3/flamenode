@@ -1452,6 +1452,141 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.doesNotMatch(failed.text, /secret-internal/);
   });
 
+  test("MIG-0626 U06: characterize CURRENT like_count_drift authority, thresholds and transferred rows before SQL decision", async () => {
+    // This is a characterization, NOT approval of CURRENT's legacy authority,
+    // skipped zero-count videos or unbounded D1 result materialization.
+    const endpoint = "/api/admin-read/ops/health/checks/like_count_drift";
+    const prefix = "mig0626-like-characterization-";
+    const authIds = ["u_alice", "u_bob", "u_carol", "u_dave", "u_erin", "u_frank"];
+    const label = "like_count 実数差分 (閾値 max(±5, ±5%))";
+    const note = "保存されているいいね数と video_interactions の実数が大きくズレている作品があります。";
+    const cases = [
+      ["zero", 0, 5, 5, 0, "ok", null],
+      ["abs-below", 4, 0, 0, 0, "ok", null],
+      ["abs-equal", 5, 0, 0, 0, "warn", "stored:5 actual:0 diff:5 threshold:5 [abs(5)]"],
+      ["abs-above", 6, 0, 0, 0, "warn", "stored:6 actual:0 diff:6 threshold:5 [abs(5)]"],
+      ["ratio-below", 105, 110, 0, 0, "ok", null],
+      ["ratio-equal", 104, 110, 0, 0, "warn", "stored:104 actual:110 diff:6 threshold:6 [ratio(6)]"],
+      ["ratio-above", 103, 110, 0, 0, "warn", "stored:103 actual:110 diff:7 threshold:6 [ratio(6)]"],
+      ["ratio-tie", 95, 100, 0, 0, "warn", "stored:95 actual:100 diff:5 threshold:5 [ratio(5)]"],
+      ["auth-healthy-legacy-empty", 6, 0, 6, 0, "warn", "stored:6 actual:0 diff:6 threshold:5 [abs(5)]"],
+      ["legacy-masks-auth-drift", 5, 5, 0, 0, "ok", null],
+      ["bookmarks-not-likes", 5, 0, 0, 8, "warn", "stored:5 actual:0 diff:5 threshold:5 [abs(5)]"],
+    ];
+    const xId = (i) => prefix + "x-" + i;
+    const video = (id, stored) => ins("videos", {
+      id, title: id, creator_display_name: "fixture", submitted_by_user_id: "u_carol",
+      visibility_status: "private", app_like_count: stored, created_at: T0,
+    });
+    const interaction = (id, i, type) => ins("video_interactions", {
+      x_user_id: xId(i), video_id: id, interaction_type: type, created_at: T0,
+    });
+    const measure = async (token = ADMIN) => {
+      const d1 = createD1(sqlite);
+      const prepare = d1.prepare;
+      const projections = [];
+      d1.prepare = (sql) => {
+        const table = /\bfrom\s+"?video_interactions"?(?:\s|$)/i.test(sql)
+          ? "legacy" : /\bfrom\s+"?videos"?(?:\s|$)/i.test(sql)
+            ? "videos" : null;
+        const wrap = (stmt) => {
+          if (!table) return stmt;
+          return {
+            ...stmt,
+            bind: (...args) => wrap(stmt.bind(...args)),
+            async raw(options) {
+              const rows = await stmt.raw(options);
+              const data = options?.columnNames ? rows.slice(1) : rows;
+              projections.push({ table, rows: data.length, bytes: Buffer.byteLength(JSON.stringify(data)) });
+              return rows;
+            },
+            async all() {
+              const result = await stmt.all();
+              projections.push({ table, rows: result.results.length, bytes: Buffer.byteLength(JSON.stringify(result.results)) });
+              return result;
+            },
+          };
+        };
+        return wrap(prepare(sql));
+      };
+      return { ...(await call(endpoint, token, { d1 })), projections };
+    };
+    const expected = (status, count, samples) => ({
+      status: "all", results: [{
+        id: "like_count_drift", label, status, count, samples,
+        ...(count > 0 ? { note } : {}),
+      }], error: null,
+    });
+    const assertReadOnly = (receipt, statements) => {
+      assert.equal(receipt.status, 200);
+      assert.equal(receipt.headers.get("cache-control"), "private, no-store");
+      assert.equal(receipt.stats.statements, statements);
+      assert.equal(receipt.stats.writes, 0);
+      assert.ok(Buffer.byteLength(receipt.text) <= 64 * 1024);
+    };
+    // Isolate fixture from the shared parity database; always restore it.
+    sqlite.exec("SAVEPOINT mig0626_like_characterization");
+    try {
+      sqlite.exec("UPDATE videos SET app_like_count = 0");
+      for (let i = 0; i < 110; i++) {
+        ins("x_users", { id: xId(i), x_name: xId(i), approval_status: "approved" });
+      }
+      const empty = await measure();
+      assertReadOnly(empty, 2);
+      assert.deepEqual(empty.body, expected("ok", 0, []));
+      assert.deepEqual(empty.projections.map(({ table, rows }) => [table, rows]), [["videos", 0]]);
+      const update = sqlite.prepare("UPDATE videos SET app_like_count = ? WHERE id = ?");
+      for (const [suffix, stored, legacyLikes, authLikes, bookmarks, status, sample] of cases) {
+        const id = prefix + suffix;
+        video(id, stored);
+        for (let i = 0; i < legacyLikes; i++) interaction(id, i, "like");
+        for (let i = 0; i < bookmarks; i++) interaction(id, i, "bookmark");
+        for (let i = 0; i < authLikes; i++) {
+          ins("video_interactions_auth", {
+            auth_user_id: authIds[i], video_id: id, interaction_type: "like", created_at: T0,
+          });
+        }
+        const receipt = await measure();
+        assertReadOnly(receipt, stored === 0 ? 2 : 3);
+        assert.deepEqual(receipt.body, expected(status, sample ? 1 : 0, sample ? ["video:" + id + " " + sample] : []), suffix);
+        assert.deepEqual(receipt.projections.map(({ table }) => table), stored === 0 ? ["videos"] : ["videos", "legacy"], suffix);
+        assert.equal(receipt.projections[0].rows, stored === 0 ? 0 : 1, suffix);
+        update.run(0, id);
+      }
+      // All qualifying issues count even though only five examples are shown.
+      // >100 healthy rows deliberately characterize the remaining D1 transfer
+      // blocker without calling it a compliant S2 query.
+      for (let i = 0; i < 120; i++) {
+        const id = prefix + "healthy-" + i;
+        video(id, 1);
+        interaction(id, 0, "like");
+      }
+      const driftIds = Array.from({ length: 7 }, (_, i) => prefix + "aggregate-" + i);
+      for (const id of driftIds) video(id, 6);
+      const aggregate = await measure();
+      assertReadOnly(aggregate, 3);
+      const result = aggregate.body.results[0];
+      assert.equal(result.status, "warn");
+      assert.equal(result.count, 7);
+      assert.equal(result.samples.length, 5);
+      assert.equal(new Set(result.samples).size, 5);
+      // No ORDER BY in CURRENT, so do not invent a stable order contract.
+      const allowed = new Set(driftIds.map((id) => "video:" + id + " stored:6 actual:0 diff:6 threshold:5 [abs(5)]"));
+      assert.ok(result.samples.every((sample) => allowed.has(sample)));
+      assert.deepEqual(aggregate.projections.map(({ table }) => table), ["videos", "legacy"]);
+      assert.equal(aggregate.projections[0].rows, 127);
+      assert.ok(aggregate.projections[1].rows >= 120);
+      assert.ok(aggregate.projections.every(({ rows, bytes }) => rows > 100 && bytes > 0));
+      const denied = await measure("tok-alice");
+      assert.equal(denied.status, 403);
+      assert.equal(denied.stats.statements, 1);
+      assert.equal(denied.stats.writes, 0);
+      assert.deepEqual(denied.projections, []);
+    } finally {
+      sqlite.exec("ROLLBACK TO mig0626_like_characterization; RELEASE mig0626_like_characterization");
+    }
+  });
+
   test("MIG-0626 U06: retention diagnosis bounds the entire UTF-8 JSON response without changing samples or count", async () => {
     const path = "/api/admin-read/ops/health/checks/audit_logs_retention_candidates";
     const prefix = "retention-byte-bound-";
