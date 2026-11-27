@@ -1,13 +1,15 @@
 // Port of CURRENT app/(manage)/manage/events/[id]/edit/page.tsx (MIG-0721 U02c).
 // Staged consumer only. The protected host and canonical mutation ports are not mounted.
 import * as React from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { readManageEventEdit } from "../../api/eventLifecycle.js";
 import type { OpsFetch } from "../../api/read.js";
 import { EventForm, type EventFormInitial, type EventFormProps } from "../../components/event/EventForm.js";
 import { OpsLink } from "../../components/shared/OpsLink.js";
 import { NotFoundView } from "../NotFoundView.js";
 import { useApiResult } from "../useApiResult.js";
+import { RenameEventIdForm } from "./RenameEventIdForm.js";
+import { DeleteEventForm } from "./DeleteEventForm.js";
 
 /**
  * A future protected host must supply the verified committed account identity
@@ -22,6 +24,8 @@ export interface EventEditAuthority {
 
 type EventEditProps = Pick<EventFormProps, "createEvent" | "updateEvent" | "router"> & {
   authority: EventEditAuthority | null;
+  renameEvent?: EventFormProps["updateEvent"];
+  deleteEvent?: EventFormProps["updateEvent"];
   fetchFn?: OpsFetch;
   refreshKey?: number;
 };
@@ -31,6 +35,7 @@ const loading = () => <p role="status" aria-busy="true">イベント設定を読
 /** No default write provider or new router registration. */
 export function EventEdit(props: EventEditProps): React.ReactElement {
   const { id = "" } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const { authority, fetchFn, refreshKey = 0 } = props;
   const [provider, setProvider] = React.useState({ fetchFn, revision: 0 });
   const [retry, setRetry] = React.useState(0);
@@ -51,15 +56,17 @@ export function EventEdit(props: EventEditProps): React.ReactElement {
   const key = JSON.stringify([authority.authUserId, authority.generation, id,
     provider.revision, refreshKey, retry]);
   return <EventEditRead key={key} {...props} authority={authority} id={id}
-    onRetry={() => setRetry(current => current + 1)} />;
+    onRetry={() => setRetry(current => current + 1)}
+    onReplace={href => navigate(href, { replace: true })} />;
 }
 
 function EventEditRead({
-  id, authority, fetchFn, createEvent, updateEvent, router, onRetry,
+  id, authority, fetchFn, createEvent, updateEvent, router, renameEvent, deleteEvent, onRetry, onReplace,
 }: Omit<EventEditProps, "authority"> & {
   id: string;
   authority: EventEditAuthority;
   onRetry: () => void;
+  onReplace: (href: string) => void;
 }): React.ReactElement {
   const result = useApiResult(
     signal => readManageEventEdit(id, fetchFn, signal),
@@ -105,5 +112,28 @@ function EventEditRead({
         draftAuthUserId={data.draftAuthUserId} editableSections={data.editableSections}
         createEvent={createEvent} updateEvent={updateEvent} router={router} />
     </section>
+    {data.isAdmin && renameEvent && deleteEvent ? (
+      <section className="manage-section fn-console-panel fn-console-panel--danger">
+        <h2 className="fn-console-panel-title manage-danger-title">危険操作</h2>
+        <div className="manage-danger-stack">
+          <div>
+            <strong>イベントIDを変更</strong>
+            <p className="fn-muted fn-text-sm manage-danger-copy">
+              参照先と公開用データをまとめて移行します。旧URLは無効になります。
+            </p>
+            <RenameEventIdForm eventId={data.initial.id} renameEvent={renameEvent}
+              onReplace={onReplace} onRefresh={router.refresh} />
+          </div>
+          <div>
+            <strong>イベントを非公開化</strong>
+            <p className="fn-muted fn-text-sm manage-danger-copy">
+              イベントを非公開にすると、公開ページと新規募集を停止します。枠・運営設定・作品との紐付けは保持されます。
+            </p>
+            <DeleteEventForm eventId={data.initial.id} redirectHref="/manage"
+              deleteEvent={deleteEvent} onNavigate={router.push} />
+          </div>
+        </div>
+      </section>
+    ) : null}
   </div>;
 }

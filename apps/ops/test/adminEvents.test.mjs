@@ -27,6 +27,8 @@ import { AdminEvents } from "../.test-dist/apps/ops/src/routes/admin/AdminEvents
 import { EventTemplates } from "../.test-dist/apps/ops/src/routes/admin/EventTemplates.js";
 import { EventNew } from "../.test-dist/apps/ops/src/routes/admin/EventNew.js";
 import { EventEdit } from "../.test-dist/apps/ops/src/routes/manage/EventEdit.js";
+import { RenameEventIdForm } from "../.test-dist/apps/ops/src/routes/manage/RenameEventIdForm.js";
+import { DeleteEventForm } from "../.test-dist/apps/ops/src/routes/manage/DeleteEventForm.js";
 import { buildFormDraftStorageKey } from "../.test-dist/apps/ops/src/lib/useFormDraft.js";
 import { EventGroupsPage } from "../.test-dist/apps/ops/src/routes/admin/EventGroups.js";
 import {
@@ -1518,4 +1520,137 @@ test("MIG-0721 U02c: current grant requires fresh valid owner/resource/section r
       assert.equal(form(), null, "must not trim an opaque authenticated owner into another draft bucket");
       assert.equal(pending.length, count);
     });
+});
+
+
+test("MIG-0721 U02d: rename form preserves CURRENT confirmation, FormData, error and replace/refresh", async () => {
+  let nextResult = { ok: false, message: "rename rejected" };
+  const submitted = [];
+  const replacements = [];
+  const refreshes = [];
+  await withDom("https://flamenode.test/manage/events/event-1/edit", async ({ dom, container, root }) => {
+    await React.act(async () => root.render(React.createElement(RenameEventIdForm, {
+      eventId: "event-1",
+      renameEvent: async formData => { submitted.push(formData); return nextResult; },
+      onReplace: href => replacements.push(href),
+      onRefresh: () => refreshes.push("refresh"),
+    })));
+    const setValue = (input, value) => {
+      Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), "value").set.call(input, value);
+      input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    };
+    const form = container.querySelector("form");
+    const newId = container.querySelector("#admin-new-event-id");
+    const confirm = container.querySelector("#admin-event-id-confirm");
+    const button = form.querySelector('button[type="submit"]');
+    assert.ok(form && newId && confirm && button);
+    assert.equal(button.disabled, true);
+    await React.act(async () => {
+      setValue(newId, "new-event");
+      setValue(confirm, "event-2");
+    });
+    assert.equal(button.disabled, true, "confirmation must exactly match the old ID");
+    await React.act(async () => setValue(confirm, "event-1"));
+    assert.equal(button.disabled, false);
+    await React.act(async () => {
+      form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+      await Promise.resolve();
+    });
+    assert.equal(submitted.length, 1);
+    assert.deepEqual([...submitted[0].entries()], [
+      ["old_event_id", "event-1"], ["new_event_id", "new-event"], ["confirm", "event-1"],
+    ]);
+    assert.match(container.querySelector('[role="alert"]').textContent, /rename rejected/);
+    assert.deepEqual(replacements, []);
+    nextResult = { ok: true, eventId: "renamed/id" };
+    await React.act(async () => {
+      form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+      await Promise.resolve();
+    });
+    assert.deepEqual(replacements, ["/manage/events/renamed%2Fid/edit"]);
+    assert.deepEqual(refreshes, ["refresh"]);
+    assert.equal(submitted.length, 2);
+  });
+});
+
+test("MIG-0721 U02d: delete form rejects a nonmatching confirmation and navigates only after success", async () => {
+  let nextResult = { ok: false, message: "delete rejected" };
+  const submitted = [];
+  const navigations = [];
+  await withDom("https://flamenode.test/manage/events/event-1/edit", async ({ dom, container, root }) => {
+    await React.act(async () => root.render(React.createElement(DeleteEventForm, {
+      eventId: "event-1",
+      redirectHref: "/manage",
+      deleteEvent: async formData => { submitted.push(formData); return nextResult; },
+      onNavigate: href => navigations.push(href),
+    })));
+    const setValue = (input, value) => {
+      Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), "value").set.call(input, value);
+      input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    };
+    const form = container.querySelector("form");
+    const input = form.querySelector("input");
+    const button = form.querySelector('button[type="submit"]');
+    assert.ok(form && input && button);
+    assert.equal(button.disabled, true);
+    await React.act(async () => setValue(input, "event-2"));
+    assert.equal(button.disabled, true);
+    await React.act(async () => {
+      form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+    });
+    assert.equal(submitted.length, 0, "a programmatic submit must still fail closed");
+    assert.match(container.querySelector('[role="alert"]').textContent, /完全一致/);
+    await React.act(async () => setValue(input, "event-1"));
+    assert.equal(button.disabled, false);
+    await React.act(async () => {
+      form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+      await Promise.resolve();
+    });
+    assert.equal(submitted.length, 1);
+    assert.deepEqual([...submitted[0].entries()], [
+      ["event_id", "event-1"], ["confirm", "event-1"],
+    ]);
+    assert.match(container.querySelector('[role="alert"]').textContent, /delete rejected/);
+    assert.deepEqual(navigations, []);
+    nextResult = { ok: true };
+    await React.act(async () => {
+      form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+      await Promise.resolve();
+    });
+    assert.deepEqual(navigations, ["/manage"]);
+    assert.equal(submitted.length, 2);
+  });
+});
+
+test("MIG-0721 U02d: EventEdit exposes danger forms only for admin with both explicit mutation ports", async () => {
+  async function mount({ isAdmin, withPorts }) {
+    const pending = [];
+    const fetchFn = (path, init) => new Promise(resolve => pending.push({ path, init, resolve }));
+    await withEventEdit({
+      ...eventNewPorts,
+      authority: editAuthority("auth-a", "u02d"),
+      fetchFn,
+      ...(withPorts ? {
+        renameEvent: async () => ({ ok: false }),
+        deleteEvent: async () => ({ ok: false }),
+      } : {}),
+    }, async ({ container }) => {
+      assert.equal(pending.length, 1);
+      await React.act(async () => pending[0].resolve(json(200, {
+        ...editReadFixture("auth-a", "Admin event"),
+        isAdmin,
+      })));
+      const danger = container.querySelector(".fn-console-panel--danger");
+      if (isAdmin && withPorts) {
+        assert.ok(danger);
+        assert.ok(container.querySelector('input[name="new_event_id"]'));
+        assert.match(danger.textContent, /イベントを非公開にする/);
+      } else {
+        assert.equal(danger, null, "never render inert or non-admin danger controls");
+      }
+    });
+  }
+  await mount({ isAdmin: true, withPorts: false });
+  await mount({ isAdmin: false, withPorts: true });
+  await mount({ isAdmin: true, withPorts: true });
 });
