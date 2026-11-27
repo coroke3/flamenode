@@ -2131,7 +2131,7 @@ test("MIG-0737 U01 formula navigation: pending save and Undo/Redo allow movement
     }
     await setInput(formula, "blocked history edit");
     assert.equal(ui.host.querySelector("[data-grid-cell] input"), null);
-    assertFormula(ui, "B6 (title)", "Gamma");
+    assertFormula(ui, "B6 (title)", "Gamma", "履歴を適用中…");
     assert.equal(requests.length, 2);
     assert.equal(ui.refreshes, 1);
     await React.act(async () => requests[1].resolve(success()));
@@ -2150,7 +2150,7 @@ test("MIG-0737 U01 formula navigation: pending save and Undo/Redo allow movement
       assert.equal(ui.host.querySelector("[data-grid-cell] input"), null);
     }
     await setInput(formula, "blocked redo edit");
-    assertFormula(ui, "B6 (title)", "Gamma");
+    assertFormula(ui, "B6 (title)", "Gamma", "履歴を適用中…");
     assert.equal(ui.host.querySelector("[data-grid-cell] input"), null);
     assert.equal(requests.length, 3);
     assert.equal(ui.refreshes, 2);
