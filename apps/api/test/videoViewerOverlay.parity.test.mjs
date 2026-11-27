@@ -1320,6 +1320,47 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+  test("RH-031: throwing diagnostic sink preserves degraded D1 responses", async () => {
+    for (const [caseName, marker, expectedLoggedIn] of [
+      ["first D1 projection", "'approved_x_ids'", false],
+      ["second D1 projection", "AS chapters_json", true],
+    ]) {
+      const { env, d1 } = setupTestEnv();
+      const originalPrepare = env.DB.prepare.bind(env.DB);
+      let injected = 0;
+      env.DB.prepare = (sql) => {
+        if (String(sql).includes(marker)) {
+          injected += 1;
+          throw new Error("provider failure");
+        }
+        return originalPrepare(sql);
+      };
+
+      const originalError = console.error;
+      console.error = () => { throw new Error("diagnostic sink unavailable"); };
+      let response;
+      try {
+        response = await app.request("/api/videos/vid-pub/viewer-overlay", {
+          headers: { cookie: "authjs.session-token=tok-alice" },
+        }, env);
+      } finally {
+        console.error = originalError;
+      }
+
+      assert.equal(injected, 1, caseName + ": hit the intended D1 failure");
+      assert.equal(response.status, 200, caseName + ": diagnostic failure must not replace degraded response");
+      assert.equal(response.headers.get("Cache-Control"),
+        "private, no-store, no-cache, must-revalidate");
+      const body = await response.json();
+      assert.equal(VideoViewerOverlayResponseSchema.safeParse(body).success, true);
+      assert.equal(body.loggedIn, expectedLoggedIn);
+      assert.equal(body.authUnavailable, true);
+      assert.equal(body.viewerCanEditChapters, false);
+      assert.deepEqual(body.privateChapters, []);
+      assert.ok(d1.stats.statements <= 3, caseName + ": no additional D1 read");
+    }
+  });
+
   test("Issue #709: valid 300K-char playlist never serializes an oversized viewer DTO", async () => {
     const { env, bucket, d1 } = setupTestEnv();
     const hugeTitle = "Very long valid public title ".repeat(12_000);
