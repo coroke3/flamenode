@@ -27,8 +27,16 @@ const EMPTY_OVERLAY: SlotViewerOverlayDto = {
   slots: [],
 };
 
+type ViewerOverlayScope = {
+  eventId: string;
+  baseSlots: readonly SlotRow[];
+  refreshNonce: number;
+};
+
 type ViewerOverlayState = {
   value: SlotViewerOverlayDto;
+  /** A distinct receipt for each committed request scope, including A→B→A. */
+  scope: ViewerOverlayScope | null;
   /** Viewer data belongs to one event, even when slot arrays are reused. */
   eventId: string | null;
   /** このviewer情報と同時に表示してよいpublic slot base。 */
@@ -158,6 +166,7 @@ export function EventSlotsViewerPanel({
 }): React.ReactElement {
   const [overlayState, setOverlayState] = React.useState<ViewerOverlayState>({
     value: EMPTY_OVERLAY,
+    scope: null,
     eventId: null,
     baseSlots: null,
   });
@@ -166,7 +175,14 @@ export function EventSlotsViewerPanel({
   // Invalidate stale GET completions synchronously on Active X or BFCache restoration.
   const overlayGeneration = React.useRef(0);
 
+  // Event/base equality alone can resurrect an earlier A receipt on A→B→A
+  // before B finishes. A new scope object is created whenever these inputs change.
+  const overlayScope = React.useMemo<ViewerOverlayScope>(
+    () => ({ eventId, baseSlots, refreshNonce }),
+    [eventId, refreshNonce, baseSlots],
+  );
   const overlayIsCurrent =
+    overlayState.scope === overlayScope &&
     overlayState.eventId === eventId && overlayState.baseSlots === baseSlots;
   const viewerOverlay = overlayIsCurrent ? overlayState.value : EMPTY_OVERLAY;
   const viewerLoading = loading || !overlayIsCurrent;
@@ -180,6 +196,7 @@ export function EventSlotsViewerPanel({
     );
     const requestBaseSlots = baseSlots;
     const requestEventId = eventId;
+    const requestScope = overlayScope;
     const requestGeneration = overlayGeneration.current;
     setLoading(true);
     void fetch(
@@ -207,7 +224,7 @@ export function EventSlotsViewerPanel({
       })
       .then((value) => {
         if (!active || !value || requestGeneration !== overlayGeneration.current) return;
-        setOverlayState({ value, eventId: requestEventId, baseSlots: requestBaseSlots });
+        setOverlayState({ value, eventId: requestEventId, baseSlots: requestBaseSlots, scope: requestScope });
         setLoading(false);
       })
       .finally(() => {
@@ -218,13 +235,13 @@ export function EventSlotsViewerPanel({
       window.clearTimeout(timeoutId);
       controller.abort();
     };
-  }, [eventId, refreshNonce, baseSlots]);
+  }, [eventId, refreshNonce, baseSlots, overlayScope]);
 
   React.useEffect(() => {
     const refresh = () => {
       overlayGeneration.current += 1;
       // Active X切替直後に旧Xの本人枠・表示名を残さない。
-      setOverlayState({ value: EMPTY_OVERLAY, eventId: null, baseSlots: null });
+      setOverlayState({ value: EMPTY_OVERLAY, eventId: null, baseSlots: null, scope: null });
       setLoading(true);
       setRefreshNonce((value) => value + 1);
     };

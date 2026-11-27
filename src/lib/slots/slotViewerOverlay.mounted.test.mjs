@@ -158,3 +158,57 @@ test("mounted overlay: reused baseSlots event change retires delayed old GET and
     container.remove();
   }
 });
+
+test("mounted overlay: loaded A cannot reappear on A→B→A while B is still pending", async () => {
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.appendChild(container);
+  const root = createRoot(container);
+  const start = requests.length;
+  const assertEmpty = () => {
+    assert.equal(read(container).slots[0].owned, false);
+    assert.equal(read(container).slots[0].name, null);
+  };
+  try {
+    await settle(() => root.render(React.createElement(EventSlotsViewerPanel, props("a"))));
+    await settle(() => requests[start].resolve(response(overlay("previous A private"))));
+    assert.equal(read(container).slots[0].name, "previous A private");
+
+    await settle(() => root.render(React.createElement(EventSlotsViewerPanel, props("b"))));
+    assertEmpty();
+    await settle(() => root.render(React.createElement(EventSlotsViewerPanel, props("a"))));
+    assert.equal(requests.length, start + 3);
+    assertEmpty();
+
+    // A response for B is allowed to complete even if the mock fetch ignored abort.
+    await settle(() => requests[start + 1].resolve(response(overlay("late B private"))));
+    assertEmpty();
+    await settle(() => requests[start + 2].resolve(response(overlay("current A"))));
+    assert.equal(read(container).slots[0].name, "current A");
+
+    // An ordinary non-persisted pageshow must not force another request.
+    await settle(() => dom.window.dispatchEvent(new dom.window.Event("pageshow")));
+    assert.equal(requests.length, start + 3);
+    assert.equal(read(container).slots[0].name, "current A");
+
+    // Active X invalidation followed by persisted restoration retires both the
+    // loaded receipt and the replacement request that has not settled yet.
+    await settle(() => dom.window.dispatchEvent(new dom.window.Event("fn:test-active-x-changed")));
+    assertEmpty();
+    assert.equal(requests.length, start + 4);
+    await settle(() => {
+      const event = new dom.window.Event("pageshow");
+      Object.defineProperty(event, "persisted", { value: true });
+      dom.window.dispatchEvent(event);
+    });
+    assertEmpty();
+    assert.equal(requests.length, start + 5);
+    await settle(() => requests[start + 3].resolve(response(overlay("retired Active X response"))));
+    assertEmpty();
+    await settle(() => requests[start + 4].resolve(response(overlay("restored current viewer"))));
+    assert.equal(read(container).slots[0].name, "restored current viewer");
+    assert.equal(read(container).slots[0].owned, true);
+  } finally {
+    await settle(() => root.unmount());
+    container.remove();
+  }
+});

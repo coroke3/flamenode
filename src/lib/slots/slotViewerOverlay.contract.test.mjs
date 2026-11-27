@@ -85,9 +85,9 @@ test("base slot/Active X変更時は旧viewer ownershipを即時無効化する"
   assert.match(panel, /overlayIsCurrent \? overlayState\.value : EMPTY_OVERLAY/);
   assert.match(panel, /const requestBaseSlots = baseSlots/);
   assert.match(panel, /const requestEventId = eventId/);
-  assert.match(panel, /setOverlayState\(\{ value, eventId: requestEventId, baseSlots: requestBaseSlots \}\)/);
+  assert.match(panel, /setOverlayState\(\{ value, eventId: requestEventId, baseSlots: requestBaseSlots, scope: requestScope \}\)/);
   assert.match(panel, /\[eventId, refreshNonce, baseSlots\]/);
-  assert.match(panel, /setOverlayState\(\{ value: EMPTY_OVERLAY, eventId: null, baseSlots: null \}\)/);
+  assert.match(panel, /setOverlayState\(\{ value: EMPTY_OVERLAY, eventId: null, baseSlots: null, scope: null \}\)/);
   assert.match(panel, /ACTIVE_X_CHANGED_EVENT/);
 });
 
@@ -117,7 +117,7 @@ test("BFCache復元時は旧viewer overlay・予約ダイアログの両方を�
   assert.match(panel, /if \(event\.persisted\) refresh\(\)/);
   assert.match(panel, /window\.addEventListener\("pageshow", onPageShow\)/);
   assert.match(panel, /window\.removeEventListener\("pageshow", onPageShow\)/);
-  assert.match(panel, /const refresh = \(\) => \{[\s\S]*?setOverlayState\(\{ value: EMPTY_OVERLAY, eventId: null, baseSlots: null \}\);[\s\S]*?setRefreshNonce\(/);
+  assert.match(panel, /const refresh = \(\) => \{[\s\S]*?setOverlayState\(\{ value: EMPTY_OVERLAY, eventId: null, baseSlots: null, scope: null \}\);[\s\S]*?setRefreshNonce\(/);
   assert.match(slotGrid, /if \(event\.persisted\) clearViewerPrivateUi\(\)/);
   assert.match(slotGrid, /window\.addEventListener\("pageshow", onPageShow\)/);
   assert.match(slotGrid, /window\.removeEventListener\("pageshow", onPageShow\)/);
@@ -141,7 +141,7 @@ test("eventId change with an identical baseSlots reference cannot authorize an o
   assert.match(panel, /eventId: string \| null/);
   assert.match(panel, /overlayState\.eventId === eventId && overlayState\.baseSlots === baseSlots/);
   assert.match(panel, /const requestEventId = eventId/);
-  assert.match(panel, /setOverlayState\(\{ value, eventId: requestEventId, baseSlots: requestBaseSlots \}\)/);
+  assert.match(panel, /setOverlayState\(\{ value, eventId: requestEventId, baseSlots: requestBaseSlots, scope: requestScope \}\)/);
   assert.match(panel, /const viewerOverlay = overlayIsCurrent \? overlayState\.value : EMPTY_OVERLAY/);
   assert.match(panel, /const viewerLoading = loading \|\| !overlayIsCurrent/);
   assert.match(panel, /\[eventId, refreshNonce, baseSlots\]/);
@@ -163,4 +163,12 @@ test("unmount and viewer identity effect cleanup invalidate pending slot action 
   }
   assert.ok((slotGrid.match(/submittedGeneration !== viewerGeneration\.current/g) ?? []).length >= 8);
   assert.match(panel, /<SlotGrid\s+key=\{eventId\}\s+slots=\{slots\}/);
+});
+
+test("a repeated event and baseSlots reference cannot revive a previous request scope", () => {
+  assert.match(panel, /const overlayScope = React\.useMemo<ViewerOverlayScope>/);
+  assert.match(panel, /overlayState\.scope === overlayScope/);
+  assert.match(panel, /const requestScope = overlayScope/);
+  assert.match(panel, /setOverlayState\(\{ value, eventId: requestEventId, baseSlots: requestBaseSlots, scope: requestScope \}\)/);
+  assert.match(panel, /\[eventId, refreshNonce, baseSlots, overlayScope\]/);
 });
