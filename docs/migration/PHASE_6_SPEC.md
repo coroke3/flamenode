@@ -3308,7 +3308,7 @@ PRをrevert。`apps/api` に route が増えるだけで、本番 Route・D1・�
 
 ### MIG-0689: shared request-local write admission snapshot (D-19-2, #893 prerequisite)
 - **Model:** lead
-- **Readiness:** DECIDED (D-19-2 implementation direction approved); implementation/evidence still IN_PROGRESS
+- **Readiness:** NEEDS_REFINEMENT — 2026-11-27 P0 direction approved; high-risk Lead implementation/evidence still IN_PROGRESS
 - **Recipe:** R-API
 - **Runtime:** S3
 - **Depends on:** MIG-0602 / **Decisions:** D-19-2 (2026-11-27)

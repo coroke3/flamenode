@@ -81,6 +81,62 @@ test("S3 budget parity: guard-fed audit equals audit that reads settings/actor i
   assert.equal(JSON.parse(a.actor_snapshot_json).icon_url, "https://img/u.png");
 });
 
+
+// The SQL receipt is lossless for CostGuard's decision inputs, not a new policy.
+// Use the existing mounted SQLite-backed Hono suite; session is injected here.
+test("MIG-0689: joined feature-list receipts stay bounded and preserve CostGuard decisions", async () => {
+  const { evaluateCostGuardCore, WRITE_FEATURE_KEYS } = await import("@flamenode/domain/admin");
+  const { evaluateCostGuardSnapshot } = await import("../src/middleware/costGuard.ts");
+  const { loadTosState } = await import("../src/middleware/writeOrigin.ts");
+  const feature = "admin_announcement_broadcast";
+  const now = Math.floor(Date.now() / 1000);
+  const allow = JSON.stringify([feature]);
+  const padded = "[ " + " ".repeat(100000) + JSON.stringify(feature) + "]";
+  const malformed = "!" + "x".repeat(100000);
+  const duplicates = JSON.stringify(Array(100).fill("reserve_slot"));
+  const overflowCount = JSON.stringify(Array(101).fill("reserve_slot"));
+  const cases = [
+    ["normal", null, null, null],
+    ["normal", JSON.stringify(WRITE_FEATURE_KEYS), null, null],
+    ["normal", padded, null, null],
+    ["normal", duplicates, null, null],
+    ["normal", overflowCount, null, null],
+    ["normal", '["admin_announcement_broadcas\\u0074"]', null, null],
+    ["normal", '["admin_announcement_broadcast\\u0000"]', null, null],
+    ["normal", allow + "\u0000garbage", null, null],
+    ["normal", '["admin_announcement_broadcast",]', null, null],
+    ["normal", '["unknown"]', null, null],
+    ["maintenance", malformed, null, null],
+    ["maintenance", malformed, now + 3600, padded],
+    ["normal", malformed, now - 60, allow],
+    ["normal", null, now + 3600, JSON.stringify(WRITE_FEATURE_KEYS)],
+    ["normal", null, now + 3600, '["unknown"]'],
+    ["maintenance", null, now + 3600, malformed],
+  ];
+  const maxBytes = Buffer.byteLength(JSON.stringify(WRITE_FEATURE_KEYS));
+  for (const [operationMode, disabledFeaturesJson, exceptionUntil, exceptionFeaturesJson] of cases) {
+    const app = setup();
+    app.sqlite.prepare("UPDATE system_settings SET operation_mode=?, disabled_features_json=?, cost_guard_exception_until=?, cost_guard_exception_features_json=? WHERE id='default'")
+      .run(operationMode, disabledFeaturesJson, exceptionUntil, exceptionFeaturesJson);
+    const expected = evaluateCostGuardCore({ feature, operationMode, disabledFeaturesJson, exceptionUntil, exceptionFeaturesJson, now });
+    const state = await loadTosState(app.db, "admin-1", undefined, true);
+    assert.ok(state?.cost_guard_settings);
+    for (const value of [state.cost_guard_settings.disabled_features_json, state.cost_guard_settings.cost_guard_exception_features_json]) {
+      assert.ok(Buffer.byteLength(value ?? "") <= maxBytes);
+    }
+    const denied = expected.blocked ? (expected.reason === "mode" ? "maintenance_mode" : "cost_guard_blocked") : null;
+    assert.equal(evaluateCostGuardSnapshot({ row: state.cost_guard_settings }, feature, now).denied, denied);
+    assert.equal(app.stats.reads, 1);
+    const response = await app.request("POST", "/api/admin/announcements", { ...VALID, id: "compact-receipt" });
+    assert.equal(response.status, denied ? 503 : 200);
+    if (denied) assert.equal((await response.json()).reason, denied);
+    assert.equal(app.stats.reads, 2, "one additional joined read for mounted request");
+    assert.equal(app.stats.batches, denied ? 0 : 1);
+    assert.equal(app.sqlite.prepare("SELECT COUNT(*) AS n FROM announcements").get().n, denied ? 0 : 1);
+    assert.equal(app.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, denied ? 0 : 1);
+  }
+});
+
 // ---------------- B3: body cap ----------------
 
 test("B3: Content-Length over 64KB -> 413 without reading", async () => {
