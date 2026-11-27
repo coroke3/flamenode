@@ -114,8 +114,8 @@ test("SA-012 create: row + audit bytes + queue row + response; 1 pre-read within
     [queue[0].target_type, queue[0].target_id, queue[0].reason, queue[0].priority, queue[0].status, queue[0].requested_by_user_id],
     ["video", "v_pub", "chapter_create", "normal", "pending", "u_owner"],
   );
-  // guard user read + settings read (reused by the audit) + 1 video read, then one batch.
-  assert.equal(d1.stats.reads, 3);
+  // Joined admission (session injected) + one video read, then one batch.
+  assert.equal(d1.stats.reads, 2);
   assert.equal(d1.stats.batches, 1);
   assert.ok(d1.stats.maxBinds <= 100);
 });
@@ -238,8 +238,8 @@ test("SA-013 update: audit before/after bytes, queue reason, response, budget", 
   });
   assert.equal(audit.operation, "UPDATE");
   assert.equal(sqlite.prepare("SELECT reason FROM static_rebuild_queue").get().reason, "chapter_update");
-  // guard user + settings + chapter(+video) read; own chapter needs no permission read.
-  assert.equal(d1.stats.reads, 3);
+  // Joined admission (session injected) + chapter(+video) read; no extra permission read.
+  assert.equal(d1.stats.reads, 2);
   assert.equal(d1.stats.batches, 1);
 });
 
@@ -247,8 +247,8 @@ test("S3: event staff update / delete / bulk stay within 3 D1 reads including th
   const upd = setup({ as: "u_staff" });
   const res = await upd.request("PUT", "/api/videos/chapters/ch_owner", { chapter_time: "20", chapter_label: "Edited" });
   assert.equal(res.status, 200);
-  // guard user + settings + 1 chapter/video read (events and staff rows are subqueries).
-  assert.equal(upd.d1.stats.reads, 3);
+  // Joined admission (session injected) + one chapter/video read (staff rows are subqueries).
+  assert.equal(upd.d1.stats.reads, 2);
   assert.equal(upd.d1.stats.batches, 1);
   assert.ok(upd.d1.stats.maxBinds <= 100);
   const del = setup({ as: "u_staff" });
@@ -266,7 +266,7 @@ test("SA-013 update: admin needs no permission read; unknown chapter 404; invali
   const admin = setup({ as: "u_admin" });
   const ok = await admin.request("PUT", "/api/videos/chapters/ch_owner", { chapter_time: "20", chapter_label: "E" });
   assert.equal(ok.status, 200);
-  assert.equal(admin.d1.stats.reads, 3);
+  assert.equal(admin.d1.stats.reads, 2, "joined admission + chapter read; session injected");
   const miss = await admin.request("PUT", "/api/videos/chapters/ghost", { chapter_time: "20", chapter_label: "E" });
   assert.equal(miss.status, 404);
   assert.deepEqual(await miss.json(), { ok: false, message: "チャプターが見つかりません。" });
@@ -344,7 +344,7 @@ test("SA-015 bulk: admin inserts valid rows in one statement; audit per row; que
   assert.equal(count(sqlite, "audit_logs"), 3);
   assert.equal(count(sqlite, "static_rebuild_queue"), 1);
   assert.equal(sqlite.prepare("SELECT reason FROM static_rebuild_queue").get().reason, "chapter_bulk_create");
-  assert.equal(d1.stats.reads, 3, "guard user + settings + video; admin needs no permission read");
+  assert.equal(d1.stats.reads, 2, "joined admission + video; session injected; no extra permission read");
   assert.equal(d1.stats.batches, 1);
   assert.ok(d1.stats.maxBinds <= 100);
 });
