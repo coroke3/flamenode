@@ -31,7 +31,12 @@ import type { Context, Next } from "hono";
 import type { D1DatabaseLike, SessionUser } from "../auth/session.ts";
 import { actorSnapshotFromRow, type ActorSnapshotRow } from "@flamenode/server-core/audit/logger";
 import { MAX_SINGLE_ROW_LIMIT } from "../lib/limits.ts";
-import { evaluateCostGuardWithSettings } from "./costGuard.ts";
+import {
+  evaluateCostGuardSnapshot,
+  loadCostGuardSettingsRow,
+  type CostGuardRow,
+  type CostGuardSnapshot,
+} from "./costGuard.ts";
 
 export type WriteGuardDenyReason =
   | "origin_verification_unavailable"
@@ -211,11 +216,13 @@ export async function loadTosState(
   db: D1DatabaseLike,
   userId: string,
   activeX: WriteActiveXOptions | undefined = undefined,
+  includeCostGuardSettings = false,
 ): Promise<{
   is_tos_accepted: number;
   terms_reaccept_required: number;
   actor_snapshot_json: string;
   active_x: ActiveXRow | null;
+  cost_guard_settings?: CostGuardRow | null;
 } | null> {
   const needActive = Boolean(
     activeX?.requireActiveXId || activeX?.requireApprovedActiveXId,
@@ -240,6 +247,22 @@ export async function loadTosState(
          ) approved) AS approved_x_ids_json`
              : ""
          }`;
+  const costGuardColumns = includeCostGuardSettings
+    ? `,
+         s."id" AS cost_guard_settings_id,
+         s."operation_mode" AS cost_guard_operation_mode,
+         s."disabled_features_json" AS cost_guard_disabled_features_json,
+         s."cost_guard_exception_until" AS cost_guard_exception_until,
+         s."cost_guard_exception_features_json" AS cost_guard_exception_features_json,
+         s."audit_normal_retention_days" AS cost_guard_audit_normal_retention_days,
+         s."audit_restorable_retention_days" AS cost_guard_audit_restorable_retention_days,
+         s."audit_long_retention_days" AS cost_guard_audit_long_retention_days,
+         s."audit_max_payload_bytes" AS cost_guard_audit_max_payload_bytes,
+         s."audit_compact_after_days" AS cost_guard_audit_compact_after_days`
+    : "";
+  const costGuardJoin = includeCostGuardSettings
+    ? `LEFT JOIN "system_settings" s ON s."id" = 'default'`
+    : "";
   const row = await db
     .prepare(
       `SELECT
@@ -293,9 +316,10 @@ export async function loadTosState(
          END AS terms_reaccept_required,
          u."discord_id" AS discord_id, u."name" AS discord_name,
          u."active_x_user_id" AS active_x_user_id, u."image" AS user_image,
-         x."x_name" AS x_name, x."icon_url" AS x_icon_url${activeXColumns}
+         x."x_name" AS x_name, x."icon_url" AS x_icon_url${activeXColumns}${costGuardColumns}
        FROM "user" u
        LEFT JOIN "x_users" x ON x."id" = u."active_x_user_id"
+       ${costGuardJoin}
        WHERE u."id" = ?
        LIMIT ${MAX_SINGLE_ROW_LIMIT}`,
     )
@@ -306,6 +330,16 @@ export async function loadTosState(
         terms_reaccept_required: number | null;
         x_approval_status?: string | null;
         approved_x_ids_json?: string | null;
+        cost_guard_settings_id?: string | null;
+        cost_guard_operation_mode?: string | null;
+        cost_guard_disabled_features_json?: string | null;
+        cost_guard_exception_until?: number | null;
+        cost_guard_exception_features_json?: string | null;
+        cost_guard_audit_normal_retention_days?: number | null;
+        cost_guard_audit_restorable_retention_days?: number | null;
+        cost_guard_audit_long_retention_days?: number | null;
+        cost_guard_audit_max_payload_bytes?: number | null;
+        cost_guard_audit_compact_after_days?: number | null;
       } & ActorSnapshotRow
     >();
 
@@ -335,6 +369,23 @@ export async function loadTosState(
     // Same user row the audit actor snapshot needs: saves a second D1 read
     // (ZERO_1102 S3: at most 3 pre-reads).
     actor_snapshot_json: JSON.stringify(actorSnapshotFromRow(row)),
+    ...(includeCostGuardSettings
+      ? {
+          cost_guard_settings: row.cost_guard_settings_id == null
+            ? null
+            : {
+                operation_mode: row.cost_guard_operation_mode ?? null,
+                disabled_features_json: row.cost_guard_disabled_features_json ?? null,
+                cost_guard_exception_until: row.cost_guard_exception_until ?? null,
+                cost_guard_exception_features_json: row.cost_guard_exception_features_json ?? null,
+                audit_normal_retention_days: row.cost_guard_audit_normal_retention_days,
+                audit_restorable_retention_days: row.cost_guard_audit_restorable_retention_days,
+                audit_long_retention_days: row.cost_guard_audit_long_retention_days,
+                audit_max_payload_bytes: row.cost_guard_audit_max_payload_bytes,
+                audit_compact_after_days: row.cost_guard_audit_compact_after_days,
+              } as CostGuardRow,
+        }
+      : {}),
   };
 }
 
@@ -490,6 +541,7 @@ export function writeGuardMiddleware(options: WriteGuardMiddlewareOptions) {
 
     let actorSnapshotJson: string | undefined;
     let activeXRow: ActiveXRow | null = null;
+    let costGuardSnapshot: CostGuardSnapshot | undefined;
     const outcome = await evaluateAdminWriteGuard({
       user,
       hasDb: db !== undefined,
@@ -500,16 +552,39 @@ export function writeGuardMiddleware(options: WriteGuardMiddlewareOptions) {
       loadTosState:
         user && db
           ? async () => {
-              const state = await loadTosState(db, user.id, options.activeX);
-              actorSnapshotJson = state?.actor_snapshot_json;
-              activeXRow = state?.active_x ?? null;
-              return state;
+              try {
+                // Successful writes get a fresh request-local admission snapshot:
+                // identity/ToS/actor and the default CostGuard/audit row share one D1 read.
+                const state = await loadTosState(db, user.id, options.activeX, true);
+                actorSnapshotJson = state?.actor_snapshot_json;
+                activeXRow = state?.active_x ?? null;
+                costGuardSnapshot = { row: state?.cost_guard_settings ?? null };
+                return state;
+              } catch {
+                // Preserve the original failure classes. Re-read ToS alone first;
+                // if that fails, evaluateAdminWriteGuard returns db_unavailable.
+                const state = await loadTosState(db, user.id, options.activeX);
+                actorSnapshotJson = state?.actor_snapshot_json;
+                activeXRow = state?.active_x ?? null;
+                // Only after ToS succeeds do we retry CostGuard independently.
+                // Its provider failure retains the established cost_guard_blocked response.
+                try {
+                  costGuardSnapshot = {
+                    row: await loadCostGuardSettingsRow(db as unknown as D1Database),
+                  };
+                } catch {
+                  costGuardSnapshot = { row: null, unavailable: true };
+                }
+                return state;
+              }
             }
           : undefined,
     });
     if (!outcome.ok) {
       return writeGuardDenyResponse(c, outcome.reason, outcome.status);
     }
+    const admissionSnapshot = costGuardSnapshot ?? { row: null, unavailable: true };
+    c.set("costGuardSnapshot", admissionSnapshot);
     // Active X (fail closed, independent of whether costGuardMiddleware is
     // mounted): CURRENT order identity -> CostGuard -> active X is evaluated
     // here, so an activeX route can never skip the check.
@@ -519,13 +594,10 @@ export function writeGuardMiddleware(options: WriteGuardMiddlewareOptions) {
       if (!feature || !activeXState || !db) {
         return writeGuardDenyResponse(c, "cost_guard_blocked", 503);
       }
-      const cost = await evaluateCostGuardWithSettings(
-        db as unknown as D1Database,
-        feature,
-      );
+      const cost = evaluateCostGuardSnapshot(admissionSnapshot, feature);
       if (cost.denied) return writeGuardDenyResponse(c, cost.denied, 503);
       if (cost.auditSettings) c.set("auditSettings", cost.auditSettings);
-      // costGuardMiddleware on the same route skips its (second) read.
+      // costGuardMiddleware on the same route skips the already evaluated snapshot.
       c.set("costGuardEvaluated", true);
       const activeXDeny = evaluateActiveXAccess(options.activeX, activeXState);
       if (activeXDeny) return writeGuardDenyResponse(c, activeXDeny, 403);
