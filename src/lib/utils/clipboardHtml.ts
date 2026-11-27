@@ -23,7 +23,7 @@ function decodeHtmlEntities(text: string): string {
 
 function stripHtmlTags(fragment: string): string {
   // Keep explicit BR separators separate from text whitespace trimming.
-  const parts = fragment.split(/(<!--[\s\S]*?-->|<!(?!--)[^<>]*>|<\?[^<>]*>|<\/?[a-z][\w:-]*(?=[\s/>])(?:[^"'<>]|"[^"]*"|'[^']*')*>)/gi);
+  const parts = fragment.split(/(<!--(?:-?>|[\s\S]*?--!?>)|<!(?!--)[^<>]*>|<\?[^<>]*>|<\/?[a-z][\w:-]*(?=[\s/>])(?:[^"'<>]|"[^"]*"|'[^']*')*>)/gi);
   const lines = [""];
   for (const [index, part] of parts.entries()) {
     // Decode each text token before joining across markup; otherwise removing
@@ -39,8 +39,9 @@ function stripHtmlTags(fragment: string): string {
 /** DOM なし環境向けの簡易 HTML 表パース */
 function parseHtmlTableRegex(html: string): string[][] {
   // Use the same quote/comment-aware tokens as cell text extraction. Never
-  // search raw attributes or comments for row/cell delimiters.
-  const tokens = /<!--[\s\S]*?-->|<!(?!--)[^<>]*>|<\?[^<>]*>|<\/?[a-z][\w:-]*(?=[\s/>])(?:[^"'<>]|"[^"]*"|'[^']*')*>/gi;
+  // search raw attributes or comments for row/cell delimiters. HTML5 also
+  // closes comments at --!>, <!--> and <!--->; do not consume later cells.
+  const tokens = /<!--(?:-?>|[\s\S]*?--!?>)|<!(?!--)[^<>]*>|<\?[^<>]*>|<\/?[a-z][\w:-]*(?=[\s/>])(?:[^"'<>]|"[^"]*"|'[^']*')*>/gi;
   const rows: string[][] = [];
   let inTable = false;
   let row: string[] | null = null;

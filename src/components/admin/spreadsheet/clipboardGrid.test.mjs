@@ -445,3 +445,38 @@ test("HTML clipboard fallback never reinterprets decoded character-reference tex
     assert.deepEqual(parseClipboardContent("PLAIN\tEND", html), [["PLAIN", "END"]], html);
   }
 });
+
+test("HTML clipboard fallback preserves cell and row boundaries after recovered comments", () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "DOMParser");
+  try {
+    for (const mode of ["absent", "throws"]) {
+      if (mode === "absent") delete globalThis.DOMParser;
+      else Object.defineProperty(globalThis, "DOMParser", {
+        configurable: true,
+        value: class DOMParserStub {
+          parseFromString() { throw new Error("parser unavailable"); }
+        },
+      });
+      for (const comment of ["<!-- x --!>", "<!-->", "<!--->", "<!-- x -->"]) {
+        const fixtures = [
+          ["<table><tr><td>A" + comment + "B<!-- y -->C</td><td>END</td></tr></table>", [["ABC", "END"]]],
+          ["<table><tr><td>A" + comment + "</td><td>B<!-- y -->C</td><td>D</td></tr></table>", [["A", "BC", "D"]]],
+          ["<table><tr><td>A" + comment + "</td><td>B</td></tr><tr><td>C<!-- y -->D</td><td>E</td></tr></table>", [["A", "B"], ["CD", "E"]]],
+          ["<table><tr><td>A" + comment + "B<br>C</td><td>END</td></tr></table>", [["AB\nC", "END"]]],
+        ];
+        for (const [html, expected] of fixtures) {
+          const message = mode + ": " + html;
+          const plain = expected.map(row => row.map((_, i) => "PLAIN" + i));
+          assert.deepEqual(parseHtmlClipboardTable(html), expected, message);
+          assert.deepEqual(parseClipboardContent("", html), expected, message);
+          assert.deepEqual(parseClipboardContent("KEEP", html), expected, message);
+          assert.equal(looksLikeTabularClipboard("", html), true, message);
+          assert.deepEqual(parseClipboardContent(plain.map(row => row.join("\t")).join("\n"), html), plain, message);
+        }
+      }
+    }
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "DOMParser", previous);
+    else delete globalThis.DOMParser;
+  }
+});
