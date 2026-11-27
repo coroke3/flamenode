@@ -2003,10 +2003,16 @@ if (runUnderRootTsx(import.meta.url)) {
     let jsonAccesses = 0;
     let queries = 0;
     let orderedQueries = 0;
-    const customRows = Array.from({ length: 498 }, (_, i) => ({
-      id: "custom-" + i, event_id: "ev1", x_user_id: "custom-x-" + i, permission_preset: "custom",
-      get custom_permission_keys_json() { jsonAccesses++; return "{not json"; },
-    }));
+    const customRows = [
+      { id: "owner", event_id: "ev1", x_user_id: "owner-x", permission_preset: "owner",
+        get custom_permission_keys_json() { throw new Error("owner JSON must not be accessed"); } },
+      { id: "manager", event_id: "ev1", x_user_id: "manager-x", permission_preset: "manager",
+        get custom_permission_keys_json() { throw new Error("manager JSON must not be accessed"); } },
+      ...Array.from({ length: 498 }, (_, i) => ({
+        id: "custom-" + i, event_id: "ev1", x_user_id: "custom-x-" + i, permission_preset: "custom",
+        get custom_permission_keys_json() { jsonAccesses++; return "{not json"; },
+      })),
+    ];
     const db = {
       select(columns) {
         queries++;
@@ -2101,6 +2107,67 @@ if (runUnderRootTsx(import.meta.url)) {
           adminHref: "/manage/events/ev%201/staff",
         })));
       }
+    }
+  });
+
+  test("MIG-0626 U05: selected custom diagnostics preserve the mixed CURRENT 500-row population", async () => {
+    const { buildPermissionIntegrityChecks } = await import("@flamenode/server-core/admin/permissionIntegrityChecks");
+    for (const [ownerCount, managerCount, customCount, expectedCustom] of [
+      [499, 0, 5, 1],
+      [500, 0, 5, 0],
+      [0, 500, 5, 0],
+      [0, 0, 5, 5],
+    ]) {
+      let jsonReads = 0;
+      const nonCustom = (preset, prefix, count) => Array.from({ length: count }, (_, i) => ({
+        id: prefix + i,
+        event_id: "ev1",
+        x_user_id: prefix + "x-" + i,
+        permission_preset: preset,
+        get custom_permission_keys_json() {
+          throw new Error(preset + " JSON must not be accessed by the custom check");
+        },
+      }));
+      const custom = Array.from({ length: customCount }, (_, i) => ({
+        id: "custom-" + i,
+        event_id: "ev1",
+        x_user_id: "custom-x-" + i,
+        permission_preset: "custom",
+        get custom_permission_keys_json() {
+          jsonReads++;
+          return "{not json";
+        },
+      }));
+      const rows = [
+        ...nonCustom("owner", "owner-", ownerCount),
+        ...nonCustom("manager", "manager-", managerCount),
+        ...custom,
+      ];
+      let queries = 0;
+      const db = {
+        select(columns) {
+          queries++;
+          assert.deepEqual(Object.keys(columns), [
+            "id", "event_id", "x_user_id", "permission_preset", "custom_permission_keys_json",
+          ]);
+          return { from: () => ({ where: () => ({ limit: async (limit) => {
+            assert.equal(limit, 500);
+            return rows.slice(0, limit);
+          } }) }) };
+        },
+      };
+      const result = await buildPermissionIntegrityChecks(db, "staff_custom_json_invalid");
+      assert.equal(queries, 1);
+      assert.equal(jsonReads, expectedCustom);
+      if (expectedCustom === 0) {
+        assert.deepEqual(result, []);
+        continue;
+      }
+      assert.equal(result.length, 1);
+      assert.equal(result[0].id, "staff_custom_json_invalid");
+      assert.equal(result[0].count, expectedCustom);
+      assert.equal(result[0].issues.length, expectedCustom);
+      assert.equal(result[0].moreCount, 0);
     }
   });
 

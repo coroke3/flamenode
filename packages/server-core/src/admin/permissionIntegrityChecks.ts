@@ -161,9 +161,7 @@ export async function buildPermissionIntegrityChecks(
         custom_permission_keys_json: sql<string | null>`custom_permission_keys_json`,
       })
       .from(sql`event_staff`)
-      .where(selectedId === "staff_custom_json_invalid"
-        ? sql`permission_preset = 'custom'`
-        : sql`permission_preset IN ('owner', 'manager', 'custom')`)
+      .where(sql`permission_preset IN ('owner', 'manager', 'custom')`)
       .limit(500) : Promise.resolve([]),
   ]);
   // Keep the established three-result compatibility Promise.all shape used by the
