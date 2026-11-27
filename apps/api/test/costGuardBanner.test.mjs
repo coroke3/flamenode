@@ -566,3 +566,43 @@ test("MIG-0661 T09 / #916: UTF-8 byte ceiling with multibyte JSON preserves mode
     }
   }
 });
+
+test("MIG-0661 T09 / #916: long whitespace and numeric tokens retain JSON grammar and mode", async () => {
+  const spaces = " \t\r\n".repeat(18 * 1024);
+  const digits = "9".repeat(70 * 1024);
+  const prefix = '{"mode":"maintenance","updated_at":';
+  const cases = [
+    [prefix + spaces + '1}', 1],
+    [prefix + '-1e-' + digits + '}', -0],
+    [prefix + '1,"extra":[' + digits + ']}', 1],
+    [prefix + '1,"extra":[0.' + digits + ']}', 1],
+    [prefix + '1,"extra":[1e-' + digits + ']}', 1],
+    [prefix + '1,' + spaces + '"extra":[01]}', null],
+    [prefix + '1,' + spaces + '"extra":[1.]}', null],
+    [prefix + '1,' + spaces + '"extra":[1e+]}', null],
+    [prefix + '1,' + spaces + '\u00a0"extra":0}', null],
+    [prefix + '1,' + spaces + '\u2028"extra":0}', null],
+    [prefix + '1e' + digits + '}', null],
+  ];
+  for (const [raw, timestamp] of cases) {
+    assert.ok(Buffer.byteLength(raw, "utf8") > 64 * 1024);
+    if (timestamp !== null) {
+      assert.ok(Object.is(JSON.parse(raw).updated_at, timestamp));
+    } else {
+      // The final case is valid JSON but an invalid non-finite timestamp.
+      if (raw.startsWith(prefix + "1e")) assert.equal(JSON.parse(raw).updated_at, Infinity);
+      else assert.throws(() => JSON.parse(raw), SyntaxError);
+    }
+    resetOperationModeCachesForTests();
+    const d1 = { count: 0 }, kv = { count: 0 };
+    const binding = kvResponse(raw, kv);
+    const env = { DB: unavailableD1(d1), KV: binding };
+    const expectedMode = timestamp === null ? "normal" : "maintenance";
+    assert.equal(await resolvePublicOperationMode(env, { allowD1: false }), expectedMode);
+    assert.deepEqual(await readOperationModeKvMirror(binding), timestamp === null
+      ? null : { mode: "maintenance", updated_at: timestamp, reason: null });
+    assert.deepEqual(await requestWith(env), { mode: expectedMode, reason: null });
+    assert.equal(kv.count, 1);
+    assert.equal(d1.count, 0);
+  }
+});

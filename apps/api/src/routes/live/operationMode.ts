@@ -67,8 +67,14 @@ export const KV_MIRROR_PARSE_LIMIT = 64 * 1024;
 function scanOversizedKvMirror(raw: string): ParsedOperationModeKvMirror | null {
   let i = 0;
   const n = raw.length;
+  // Only JSON's four ASCII whitespace characters are allowed. Skip long
+  // runs natively rather than paying a JS iteration for every code unit.
+  const whitespaceRun = /[ \t\n\r]+/y;
   const whitespace = (): void => {
-    while (i < n && (raw[i] === " " || raw[i] === "\t" || raw[i] === "\n" || raw[i] === "\r")) i++;
+    const c = raw[i];
+    if (c !== " " && c !== "\t" && c !== "\n" && c !== "\r") return;
+    whitespaceRun.lastIndex = i;
+    if (whitespaceRun.test(raw)) i = whitespaceRun.lastIndex;
   };
   // Scan long legacy reason values with the engine's native regex search.
   // Only quote, escape and control characters require per-character handling.
@@ -96,26 +102,14 @@ function scanOversizedKvMirror(raw: string): ParsedOperationModeKvMirror | null 
   };
   const smallString = (token: [number, number]): string | null =>
     token[1] - token[0] <= 128 ? JSON.parse(raw.slice(token[0], token[1])) as string : null;
+  // A sticky match consumes a valid JSON number prefix. The enclosing
+  // array/object state still rejects any invalid suffix (01, 1., 1e+, etc.).
+  const numberPattern = /-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/y;
   const numberToken = (): [number, number] => {
     const start = i;
-    if (raw[i] === "-") i++;
-    if (i >= n) throw new Error("number");
-    if (raw[i] === "0") i++;
-    else {
-      if (raw[i] < "1" || raw[i] > "9") throw new Error("number digit");
-      while (i < n && raw[i] >= "0" && raw[i] <= "9") i++;
-    }
-    if (raw[i] === ".") {
-      i++;
-      if (i >= n || raw[i] < "0" || raw[i] > "9") throw new Error("fraction");
-      while (i < n && raw[i] >= "0" && raw[i] <= "9") i++;
-    }
-    if (raw[i] === "e" || raw[i] === "E") {
-      i++;
-      if (raw[i] === "+" || raw[i] === "-") i++;
-      if (i >= n || raw[i] < "0" || raw[i] > "9") throw new Error("exponent");
-      while (i < n && raw[i] >= "0" && raw[i] <= "9") i++;
-    }
+    numberPattern.lastIndex = i;
+    if (!numberPattern.test(raw)) throw new Error("number");
+    i = numberPattern.lastIndex;
     return [start, i];
   };
   type Frame = { kind: "object" | "array"; state: string; root: boolean; key: string | null };
