@@ -279,3 +279,134 @@ test("MIG-0714 part A: controlled draft patch preserves CURRENT event and field 
   assert.equal("members" in buildVideoDraftControlledState(draft, { ...input, disabledFields: ["members"] }), false);
   assert.deepEqual(draft.members[0].chapters, newChapters, "no draft mutation");
 });
+
+test("MIG-0714 B01: submitter field preserves CURRENT readonly, unlock and profile FormData", async () => {
+  const { JSDOM } = await import("jsdom");
+  const ts = await import("typescript");
+  const dom = new JSDOM("<!doctype html><html><body></body></html>");
+  const globals = ["window", "document", "navigator", "HTMLElement", "Node", "IS_REACT_ACT_ENVIRONMENT"];
+  const previous = new Map(globals.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  for (const key of globals) {
+    Object.defineProperty(globalThis, key, {
+      configurable: true,
+      value: key === "IS_REACT_ACT_ENVIRONMENT" ? true : key === "window" ? dom.window : dom.window[key],
+    });
+  }
+  try {
+    const React = await import("react");
+    const { createRoot } = await import("react-dom/client");
+    const { EditSubmitterField } = await import("../.test-dist/apps/app/src/components/forms/EditSubmitterField.js");
+    const { Icon } = await import("../.test-dist/apps/app/src/routes/ui/Icon.js");
+    const { normalizeXId } = await import("@flamenode/domain/xid");
+    const legacy = readFileSync(new URL("../../../src/components/forms/VideoForm.tsx", import.meta.url), "utf8");
+    const parsed = ts.createSourceFile("VideoForm.tsx", legacy, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+    const current = parsed.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === "EditSubmitterField");
+    assert.ok(current, "compare the actual CURRENT component, not a hand-maintained copy");
+    const compiled = ts.transpileModule(current.getText(parsed), {
+      compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None },
+    }).outputText;
+    const CurrentSubmitterField = new Function("React", "Icon", "normalizeXId", `${compiled}\nreturn EditSubmitterField;`)(React, Icon, normalizeXId);
+    const defaults = {
+      initialXId: "@ALICE", selectedDefault: "alice", hasSelectableXIds: true,
+      xIdOptions: [{ id: "ALICE", x_name: "Alice" }, { id: "Bob", x_name: "Bob" }],
+      disabled: false, sectionDisabled: false, canChangeSubmitter: true, lockNoteId: "submitter-lock-note",
+    };
+    async function withPair(props, inspect) {
+      const mounts = [CurrentSubmitterField, EditSubmitterField].map((Component) => {
+        const container = dom.window.document.createElement("div");
+        dom.window.document.body.append(container);
+        return { Component, container, root: createRoot(container) };
+      });
+      try {
+        await React.act(async () => {
+          for (const { Component, root } of mounts) root.render(React.createElement("form", null, React.createElement(Component, { ...defaults, ...props })));
+        });
+        const forms = mounts.map(({ container }) => container.querySelector("form"));
+        const data = (form) => [...new dom.window.FormData(form).entries()];
+        const parity = () => {
+          assert.equal(forms[1].innerHTML, forms[0].innerHTML, "CURRENT and target markup/state must agree");
+          assert.deepEqual(data(forms[1]), data(forms[0]), "CURRENT and target submitted fields must agree");
+          assert.equal(forms[1].checkValidity(), forms[0].checkValidity());
+          return forms[1];
+        };
+        const operate = async (fn) => {
+          await React.act(async () => { for (const form of forms) fn(form); });
+          return parity();
+        };
+        await inspect({ parity, operate, data });
+      } finally {
+        await React.act(async () => { for (const { root } of mounts) root.unmount(); });
+        for (const { container } of mounts) container.remove();
+      }
+    }
+    for (const props of [{ canChangeSubmitter: false }, { xIdOptions: [], hasSelectableXIds: false }]) {
+      await withPair(props, async ({ parity, data }) => {
+        const form = parity();
+        const input = form.querySelector("#creator_x_user_id");
+        assert.equal(input.readOnly, true);
+        assert.equal(input.getAttribute("aria-readonly"), "true");
+        assert.equal(input.getAttribute("aria-describedby"), "submitter-lock-note");
+        assert.equal(form.querySelector('input[type="checkbox"]'), null);
+        assert.deepEqual(data(form), [["creator_x_user_id", "@ALICE"]]);
+      });
+    }
+    await withPair({ initialXId: "", xIdOptions: [], hasSelectableXIds: false }, async ({ parity, data }) => {
+      const form = parity();
+      assert.equal(form.textContent, "提出主体 X ID が設定されていません。");
+      assert.deepEqual(data(form), []);
+    });
+    for (const props of [{ disabled: true }, { sectionDisabled: true }]) {
+      await withPair(props, async ({ parity, operate, data }) => {
+        const form = parity();
+        assert.equal(form.querySelector('input[type="checkbox"]').disabled, true);
+        await operate((node) => node.querySelector('input[type="checkbox"]').click());
+        assert.equal(form.querySelector("select"), null, "disabled unlock cannot change the submission identity");
+        assert.deepEqual(data(form), props.sectionDisabled ? [] : [["creator_x_user_id", "@ALICE"]]);
+      });
+    }
+    await withPair({}, async ({ parity, operate, data }) => {
+      assert.deepEqual(data(parity()), [["creator_x_user_id", "@ALICE"]]);
+      let form = await operate((node) => node.querySelector('input[type="checkbox"]').click());
+      // jsdom 26 reflects a reused text->hidden input differently from Chromium.
+      // Full FormData equality above pins CURRENT parity; real-browser evidence checks flag "1".
+      const identityData = (node) => {
+        assert.equal(new dom.window.FormData(node).has("allow_submitter_change"), true);
+        return data(node).filter(([name]) => name !== "allow_submitter_change");
+      };
+      assert.deepEqual(identityData(form), [["creator_x_user_id", "alice"]]);
+      assert.equal(form.querySelector("fieldset"), null, "normalized initial identity has not changed");
+      const choose = (value) => (node) => {
+        const select = node.querySelector("select");
+        select.value = value;
+        select.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+      };
+      form = await operate(choose("bob"));
+      assert.equal(form.checkValidity(), false, "identity change requires an explicit profile choice");
+      assert.deepEqual(identityData(form), [["creator_x_user_id", "bob"]]);
+      for (const action of ["keep", "copy_default"]) {
+        form = await operate((node) => node.querySelector(`input[value="${action}"]`).click());
+        assert.equal(form.checkValidity(), true);
+        assert.deepEqual(identityData(form), [["creator_x_user_id", "bob"], ["submitter_profile_action", action]]);
+      }
+      form = await operate((node) => node.querySelector("button").click());
+      assert.deepEqual(data(form), [["creator_x_user_id", "@ALICE"]]);
+      assert.equal(form.querySelector("fieldset"), null);
+      form = await operate((node) => node.querySelector('input[type="checkbox"]').click());
+      assert.equal(form.querySelector("select").value, "bob", "CURRENT keeps the tentative X selection after cancel");
+      assert.equal(form.checkValidity(), false, "cancel clears the former profile choice");
+      form = await operate((node) => node.querySelector('input[value="keep"]').click());
+      form = await operate(choose("alice"));
+      assert.equal(form.querySelector("fieldset"), null);
+      assert.deepEqual(identityData(form), [["creator_x_user_id", "alice"]]);
+      form = await operate(choose("bob"));
+      assert.equal(form.checkValidity(), false, "returning to original identity also resets the profile choice");
+      assert.equal(new dom.window.FormData(form).has("submitter_profile_action"), false);
+    });
+  } finally {
+    dom.window.close();
+    for (const [key, descriptor] of previous) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+  }
+});
