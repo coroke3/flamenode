@@ -206,7 +206,15 @@ function scanOversizedKvMirror(raw: string): ParsedOperationModeKvMirror | null 
 /** Mirrors CURRENT kvMirrorCore: invalid reason is absent, not coerced. */
 export function parseKvMirror(raw: string | null): ParsedOperationModeKvMirror | null {
   if (!raw) return null;
-  if (raw.length > KV_MIRROR_PARSE_LIMIT) return scanOversizedKvMirror(raw);
+  // String.length counts UTF-16 code units, not UTF-8 bytes. A unit
+  // occupies at most three UTF-8 bytes (a surrogate pair uses four total).
+  // Only borderline inputs need encoding; encodeInto caps the temporary
+  // allocation at the parse limit and stops before an incomplete code point.
+  if (
+    raw.length > KV_MIRROR_PARSE_LIMIT ||
+    (raw.length > Math.floor(KV_MIRROR_PARSE_LIMIT / 3) &&
+      new TextEncoder().encodeInto(raw, new Uint8Array(KV_MIRROR_PARSE_LIMIT)).read !== raw.length)
+  ) return scanOversizedKvMirror(raw);
   try {
     const parsed = JSON.parse(raw) as {
       mode?: unknown;

@@ -523,3 +523,46 @@ test("MIG-0661 T09 / #916: oversized finite exponent underflow matches JSON.pars
   assert.equal(kv.count, 1);
   assert.equal(d1.count, 0);
 });
+
+test("MIG-0661 T09 / #916: UTF-8 byte ceiling with multibyte JSON preserves mode and cache", async () => {
+  const limit = 64 * 1024;
+  const prefix = '{"mode":"normal","updated_at":1,"reason":"bounded note","extra":"';
+  const suffix = '","mode":"maintenance"}';
+  const overhead = Buffer.byteLength(prefix + suffix, "utf8");
+  const realParse = JSON.parse;
+  for (const unit of ["\u65e5", "\u{1f680}"]) {
+    const unitBytes = Buffer.byteLength(unit, "utf8");
+    for (const byteSize of [limit - 1, limit, limit + 1]) {
+      const padding = byteSize - overhead;
+      const raw = prefix + unit.repeat(Math.floor(padding / unitBytes))
+        + "x".repeat(padding % unitBytes) + suffix;
+      assert.equal(Buffer.byteLength(raw, "utf8"), byteSize);
+      assert.ok(raw.length < limit, "UTF-16 length alone must not choose the parse path");
+      assert.equal(realParse(raw).mode, "maintenance");
+      resetOperationModeCachesForTests();
+      const d1 = { count: 0 }, kv = { count: 0 };
+      const env = { DB: unavailableD1(d1), KV: kvResponse(raw, kv) };
+      let oversizedParses = 0;
+      let wholeMirrorParses = 0;
+      JSON.parse = (value, ...args) => {
+        if (typeof value === "string" && Buffer.byteLength(value, "utf8") > limit) oversizedParses++;
+        if (value === raw) wholeMirrorParses++;
+        return realParse(value, ...args);
+      };
+      try {
+        assert.equal(await resolvePublicOperationMode(env, { allowD1: false }), "maintenance");
+        assert.deepEqual(await requestWith(env), {
+          mode: "maintenance",
+          reason: byteSize > limit ? null : "bounded note",
+        });
+      } finally {
+        JSON.parse = realParse;
+      }
+      assert.equal(oversizedParses, 0, "request-time JSON.parse input must remain within 64 KiB");
+      assert.equal(wholeMirrorParses, byteSize > limit ? 0 : 1,
+        "at the byte limit use the ordinary parser; above it use the bounded scanner");
+      assert.equal(kv.count, 1, "the live resolver and banner share a mirror");
+      assert.equal(d1.count, 0);
+    }
+  }
+});
