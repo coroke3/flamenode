@@ -46,7 +46,10 @@ export async function getEditPermissions({
 
   try {
     const parsed = EditPermissionsResponseSchema.safeParse(await response.json());
-    return parsed.success ? { status: "ok", data: parsed.data } : { status: "unavailable" };
+    if (!parsed.success || (parsed.data.kind === "ok" && parsed.data.video.id !== videoId)) {
+      return { status: "unavailable" };
+    }
+    return { status: "ok", data: parsed.data };
   } catch {
     return { status: "unavailable" };
   }

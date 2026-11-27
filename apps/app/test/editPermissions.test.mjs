@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { dom, flush, ok } from "./helpers.mjs";
 
 const { getEditPermissions } = await import("../.test-dist/apps/app/src/api/videoCollaborators.js");
@@ -230,4 +230,110 @@ test("MIG-0715 U02 preserves explicit 409/403 denial and distinguishes network/a
   const disconnected = await upsertVideoCollaborator(payload, async () => { count++; throw Error("connection reset"); });
   assert.equal(disconnected.status, "unavailable", "unknown commit outcome is not success");
   assert.equal(count, 1, "do not retry a permission-changing POST/PUT implicitly");
+});
+
+const permissionReceipt = (id, title) => ({
+  kind: "ok", privilegeMode: "normal",
+  video: { id, title, youtube_video_id: null, collaboration_type: "collab" },
+  showCollabSection: true, subjects: [{
+    x_user_id: "coauthor", user_id: null, display_name: "private-" + title, can_edit: 1,
+    is_public_member: 0, has_discord_link: false, can_notify: false,
+  }], publicMembers: [], truncated: false,
+});
+
+test("MIG-0715 U01: GET refuses a schema-valid receipt for a different video", async () => {
+  for (const [returned, expected] of [["A", "ok"], ["B", "unavailable"]]) {
+    const result = await getEditPermissions({
+      videoId: "A", privilegeModes: ["admin"],
+      fetchFn: async () => res(200, permissionReceipt(returned, "private-title")),
+    });
+    assert.equal(result.status, expected);
+    if (expected === "unavailable") assert.deepEqual(result, { status: "unavailable" });
+  }
+  // Server fallback and denial carry their original privilege mode.
+  assert.deepEqual(await getEditPermissions({
+    videoId: "A", privilegeModes: ["admin"],
+    fetchFn: async () => res(200, { kind: "no_access", privilegeMode: "normal" }),
+  }), ok({ kind: "no_access", privilegeMode: "normal" }));
+});
+
+test("MIG-0715 U01: injected wrong-video receipt never renders private subjects", async () => {
+  const m = await mountPermissions("/dashboard/edit/A/permissions",
+    async () => ok(permissionReceipt("B", "wrong-video")));
+  try {
+    assert.match(m.container.textContent, /画面の表示中に問題が発生しました/);
+    assert.doesNotMatch(m.container.textContent, /wrong-video/);
+    assert.equal(m.container.querySelectorAll("button,form").length, 0);
+  } finally {
+    await m.unmount();
+  }
+});
+
+test("MIG-0715 U01: resource and exact privilege tuple own the committed read view", async () => {
+  const container = dom.window.document.createElement("div");
+  const root = createRoot(container);
+  const requests = [];
+  const snapshots = [];
+  let navigate;
+  const load = options => new Promise(resolve => requests.push({ ...options, resolve }));
+  function Probe() {
+    navigate = useNavigate();
+    const location = useLocation();
+    // Observe committed DOM before passive effects can replace a stale view.
+    React.useLayoutEffect(() => {
+      snapshots.push({ path: location.pathname + location.search, text: container.textContent });
+    }, [location.key]);
+    return null;
+  }
+  const path = id => "/dashboard/edit/" + id + "/permissions";
+  const go = async to => {
+    await act(async () => { navigate(to); });
+    await flush();
+  };
+  const complete = async (i, id, title) => {
+    await act(async () => { requests[i].resolve(ok(permissionReceipt(id, title))); });
+    await flush();
+  };
+  try {
+    await act(async () => {
+      root.render(React.createElement(MemoryRouter, { initialEntries: [path("A")] },
+        React.createElement(React.Fragment, null,
+          React.createElement(Routes, null, React.createElement(Route, {
+            path: "/dashboard/edit/:id/permissions",
+            element: React.createElement(Permissions, { load }),
+          })),
+          React.createElement(Probe))));
+    });
+    await flush();
+    assert.equal(requests.length, 1);
+    await complete(0, "A", "old-A");
+    assert.match(container.textContent, /private-old-A/);
+    await go(path("B"));
+    assert.equal(requests[0].signal.aborted, true);
+    assert.doesNotMatch(snapshots.at(-1).text, /old-A/);
+    assert.doesNotMatch(container.textContent, /old-A/);
+    await go(path("A"));
+    assert.equal(requests[1].signal.aborted, true);
+    assert.equal(requests.length, 3);
+    await complete(1, "B", "late-B");
+    assert.doesNotMatch(container.textContent, /late-B|old-A/);
+    await complete(2, "A", "new-A");
+    assert.match(container.textContent, /private-new-A/);
+
+    await go(path("A") + "?privileged=admin&privileged=event");
+    assert.deepEqual(requests[3].privilegeModes, ["admin", "event"]);
+    assert.doesNotMatch(snapshots.at(-1).text, /new-A/);
+    await complete(3, "A", "duplicate-mode");
+    assert.match(container.textContent, /private-duplicate-mode/);
+    await go(path("A") + "?privileged=admin%00event");
+    assert.equal(requests[3].signal.aborted, true);
+    assert.deepEqual(requests[4].privilegeModes, ["admin\u0000event"]);
+    assert.doesNotMatch(snapshots.at(-1).text, /duplicate-mode/);
+    assert.doesNotMatch(container.textContent, /duplicate-mode/);
+    await complete(4, "A", "server-fallback");
+    assert.match(container.textContent, /private-server-fallback/);
+    assert.equal(container.querySelectorAll("button,form").length, 0);
+  } finally {
+    await act(async () => root.unmount());
+  }
 });

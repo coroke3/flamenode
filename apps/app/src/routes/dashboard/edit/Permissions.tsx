@@ -13,27 +13,47 @@ export function Permissions({ load = getEditPermissions }: { load?: typeof getEd
   const { id } = useParams<{ id: string }>();
   const [params] = useSearchParams();
   const modes = params.getAll("privileged");
-  const queryKey = modes.join("\u0000");
-  const [state, setState] = React.useState<LoadState>({ status: "loading" });
+  if (!id) return <NotFound />;
+  // Resource and exact ordered query tuple own the whole read lifecycle. A
+  // new resource/mode must render loading before any passive-effect cleanup.
+  // JSON encoding distinguishes duplicate values and embedded separators.
+  return <PermissionsForResource key={JSON.stringify([id, modes])} id={id} modes={modes} load={load} />;
+}
+
+function PermissionsForResource({ id, modes, load }: {
+  id: string;
+  modes: readonly string[];
+  load: typeof getEditPermissions;
+}): React.ReactElement {
+  const queryKey = JSON.stringify(modes);
+  const [snapshot, setSnapshot] = React.useState<{ loader: typeof load; result: LoadState }>({
+    loader: load,
+    result: { status: "loading" },
+  });
+  const state: LoadState = snapshot.loader === load ? snapshot.result : { status: "loading" };
 
   React.useEffect(() => {
-    if (!id) return;
     const controller = new AbortController();
-    setState({ status: "loading" });
+    setSnapshot({ loader: load, result: { status: "loading" } });
     load({ videoId: id, privilegeModes: modes, signal: controller.signal }).then(
       (result) => {
-        if (!controller.signal.aborted) setState(result);
+        if (controller.signal.aborted) return;
+        // Even an injected loader cannot display a receipt for another video.
+        const ownedResult = result.status === "ok" && result.data.kind === "ok" && result.data.video.id !== id
+          ? { status: "unavailable" as const }
+          : result;
+        setSnapshot({ loader: load, result: ownedResult });
       },
       () => {
-        if (!controller.signal.aborted) setState({ status: "unavailable" });
+        if (!controller.signal.aborted) setSnapshot({ loader: load, result: { status: "unavailable" } });
       },
     );
     return () => controller.abort();
-    // The key includes duplicate privileged values so URL history always refetches.
+    // Exact ordered values (including duplicates) are represented by queryKey.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, queryKey, load]);
 
-  if (!id) return <NotFound />;
+
   if (state.status === "loading") return <SessionLoading />;
   if (state.status === "anonymous") return <LoginRequired next={"/dashboard/edit/" + encodeURIComponent(id) + "/permissions"} />;
   if (state.status === "banned") return <BannedNotice />;
