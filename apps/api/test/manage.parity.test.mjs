@@ -59,6 +59,40 @@ if (runUnderRootTsx(import.meta.url)) {
     return { status: response.status, headers: response.headers, body: text ? JSON.parse(text) : null, stats: d1.stats, bytes: Buffer.byteLength(text) };
   }
 
+
+  // Simulate only the first notification-inclusive D1 read failing, while
+  // keeping a real migrated node:sqlite DB and every subsequent statement.
+  function firstNotificationReadFault(sqlite, failure) {
+    const backing = createD1(sqlite);
+    let faults = 0;
+    let retryProbes = 0;
+    return {
+      ...backing,
+      get faults() { return faults; },
+      get retryProbes() { return retryProbes; },
+      prepare(sql) {
+        const original = backing.prepare(sql);
+        return {
+          ...original,
+          bind(...values) {
+            const bound = original.bind(...values);
+            return {
+              ...bound,
+              async first() {
+                if (sql.includes("pragma_table_info('notification_outbox')")) retryProbes++;
+                if (faults === 0 && sql.includes("FROM notification_outbox")) {
+                  faults++;
+                  throw failure;
+                }
+                return bound.first();
+              },
+            };
+          },
+        };
+      },
+    };
+  }
+
   // ---------- CURRENT reference loaders ----------
   async function refSnapshot(name) {
     const id = `u_${name}`;
@@ -476,22 +510,302 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(r.stats.statements, 4, "session + staff + failed data + retry data");
   });
 
-  // ---------------- staff ----------------
-  test("T-staff: staff page equals CURRENT for every user and event", async () => {
-    for (const name of WITH_ACCESS.filter((n) => n !== "many")) {
-      for (const eventId of ["evA", "evB", "evC", "evD", "evNull", "evTie1", "evTie2", "missingEvent", "nope"]) {
-        const r = await call(`/api/manage/events/${eventId}/staff`, `tok-${name}`);
-        const ref = await refStaff(name, eventId);
-        if (ref === 404) {
-          assert.equal(r.status, 404, `${name} ${eventId}`);
-          assert.equal(r.headers.get("cache-control"), "private, no-store");
-          continue;
-        }
-        assert.equal(r.status, 200, `${name} ${eventId}`);
-        assert.deepEqual(r.body, canon(ref), `${name} ${eventId}`);
-        record("staff", r);
+
+  test("SEC-809: manage dashboard legacy notification fallback ignores a throwing warning sink", async () => {
+    const old = createSqlite();
+    seed(old);
+    old.exec("DROP INDEX IF EXISTS notification_outbox_event_idx");
+    old.exec("ALTER TABLE notification_outbox DROP COLUMN event_id");
+    const previousWarn = console.warn;
+    const warnings = [];
+    console.warn = (code) => {
+      warnings.push(code);
+      throw new Error("SEC809_LOGGER_FAILED");
+    };
+    try {
+      const r = await call("/api/manage", "tok-owner", { sqlite: old });
+      assert.equal(r.status, 200);
+      assert.equal(r.body.notificationSchemaMissing, true);
+      assert.deepEqual(r.body.notifications, []);
+      assert.equal(r.body.failedNotificationCount, 0);
+      assert.ok(r.body.events.length > 0 && r.body.inbox.length > 0);
+      assert.equal(r.stats.statements, 4, "session, staff, failed read, retry read");
+      assert.deepEqual(warnings, ["[manage] notification_outbox.event_id unavailable"]);
+    } finally {
+      console.warn = previousWarn;
+      old.close();
+    }
+  });
+
+
+  test("SEC-811: healthy notification schema and an initial transient D1 fault never return a misleading dashboard 200", async () => {
+    const local = createSqlite();
+    seed(local);
+    const d1 = firstNotificationReadFault(local, new Error("synthetic temporary provider failure"));
+    try {
+      const r = await call("/api/manage", "tok-owner", { d1 });
+      assert.equal(d1.faults, 1);
+      assert.equal(d1.retryProbes, 1, "schema verification shares the retry SELECT");
+      assert.equal(r.status, 503);
+      assert.equal(r.headers.get("cache-control"), "private, no-store");
+      assert.deepEqual(r.body, { error: "unavailable" });
+      assert.equal(d1.stats.writes, 0);
+    } finally {
+      local.close();
+    }
+  });
+
+  test("SEC-811: healthy notification schema and a hostile provider error never return a misleading event-overview 200", async () => {
+    const local = createSqlite();
+    seed(local);
+    const providerError = new Error("private SQL and params must not be printed");
+    Object.defineProperty(providerError, "message", {
+      configurable: true,
+      get() { throw new Error("SECRET_GETTER_MUST_NOT_RUN"); },
+    });
+    const d1 = firstNotificationReadFault(local, providerError);
+    const previousError = console.error;
+    const messages = [];
+    console.error = (...args) => { messages.push(args); };
+    try {
+      const r = await call("/api/manage/events/evA", "tok-owner", { d1 });
+      assert.equal(d1.faults, 1);
+      assert.equal(d1.retryProbes, 1);
+      assert.equal(r.status, 503);
+      assert.equal(r.headers.get("cache-control"), "private, no-store");
+      assert.deepEqual(r.body, { error: "unavailable" });
+      assert.deepEqual(messages, [["[manage] READ_FAILED"]], "no untrusted exception details in logs");
+      assert.equal(d1.stats.writes, 0);
+    } finally {
+      console.error = previousError;
+      local.close();
+    }
+  });
+
+  for (const path of ["/api/manage", "/api/manage/events/evA"]) {
+    test(`SEC-811: ${path} keeps its private 503 when the diagnostic sink throws`, async () => {
+      const local = createSqlite();
+      const previousError = console.error;
+      const messages = [];
+      try {
+        seed(local);
+        const d1 = firstNotificationReadFault(local, new Error("synthetic temporary provider failure"));
+        console.error = (...args) => {
+          messages.push(args);
+          throw new Error("SEC811_LOGGER_FAILED");
+        };
+
+        const r = await call(path, "tok-owner", { d1 });
+        assert.equal(r.status, 503);
+        assert.equal(r.headers.get("cache-control"), "private, no-store");
+        assert.deepEqual(r.body, { error: "unavailable" });
+        assert.deepEqual(messages, [["[manage] READ_FAILED"]]);
+        assert.equal(d1.faults, 1);
+        assert.equal(d1.retryProbes, 1);
+        assert.equal(d1.stats.writes, 0);
+        assert.equal(d1.stats.batches, 0);
+      } finally {
+        console.error = previousError;
+        local.close();
+      }
+    });
+  }
+
+  test("SEC-811: completely missing notification_outbox is not misreported as old event_id-only schema", async () => {
+    for (const route of ["/api/manage", "/api/manage/events/evA"]) {
+      const local = createSqlite();
+      seed(local);
+      local.exec("DROP TABLE notification_outbox");
+      try {
+        const r = await call(route, "tok-owner", { sqlite: local });
+        assert.equal(r.status, 503, route);
+        assert.equal(r.headers.get("cache-control"), "private, no-store");
+        assert.deepEqual(r.body, { error: "unavailable" });
+        assert.equal(r.stats.writes, 0);
+      } finally {
+        local.close();
       }
     }
+  });
+
+
+  function corruptFirstNotificationJson(sqlite, column, invalid) {
+    const base = createD1(sqlite);
+    let corrupted = 0;
+    let schemaProbes = 0;
+    return {
+      ...base,
+      get corrupted() { return corrupted; },
+      get schemaProbes() { return schemaProbes; },
+      prepare(sql) {
+        // Metadata access is not needed after a successful fused SELECT.
+        // Simulate a provider that rejects schema introspection.
+        if (sql.includes("pragma_table_info('notification_outbox')")) {
+          schemaProbes++;
+          throw new Error("SYNTHETIC_SCHEMA_PROBE_UNAVAILABLE");
+        }
+        const original = base.prepare(sql);
+        return {
+          ...original,
+          bind(...values) {
+            const bound = original.bind(...values);
+            return {
+              ...bound,
+              async first() {
+                const row = await bound.first();
+                if (!corrupted && sql.includes("FROM notification_outbox") &&
+                    row && Object.prototype.hasOwnProperty.call(row, column)) {
+                  corrupted++;
+                  return { ...row, [column]: invalid };
+                }
+                return row;
+              },
+            };
+          },
+        };
+      },
+    };
+  }
+
+  test("SEC-811: CURRENT notification-only malformed/oversized JSON still degrades 200 without hiding events", async () => {
+    const cases = [
+      ["/api/manage", "notifications", "{bad-json"],
+      ["/api/manage/events/evA", "notif_counts", "{bad-json"],
+      ["/api/manage/events/evA", "notifications", "x".repeat(65_537)],
+    ];
+    for (const [path, column, invalid] of cases) {
+      const local = createSqlite();
+      seed(local);
+      const d1 = corruptFirstNotificationJson(local, column, invalid);
+      const previousWarn = console.warn;
+      const warnings = [];
+      console.warn = (message) => { warnings.push(message); };
+      try {
+        const r = await call(path, "tok-owner", { d1 });
+        assert.equal(d1.corrupted, 1, path + " corruption injected into a real SQL result");
+        assert.equal(d1.schemaProbes, 0, path + " notification-only fallback must not query schema metadata");
+        assert.equal(r.status, 200, path + " must preserve CURRENT notification-only degradation");
+        assert.equal(r.headers.get("cache-control"), "private, no-store");
+        assert.equal(r.body.notificationSchemaMissing, true);
+        assert.deepEqual(r.body.notifications, []);
+        assert.ok(path === "/api/manage" ? r.body.events.length > 0 && r.body.inbox.length > 0 :
+          r.body.event.id === "evA" && r.body.notifCounts.all === 0);
+        assert.deepEqual(warnings, ["[manage] notification_json_invalid"]);
+        assert.equal(d1.stats.writes, 0);
+        assert.ok(d1.stats.statements <= 4);
+      } finally {
+        console.warn = previousWarn;
+        local.close();
+      }
+    }
+  });
+
+  test("SEC-811: synchronous D1 prepare exception against a current schema also fails closed", async () => {
+    for (const path of ["/api/manage", "/api/manage/events/evA"]) {
+      const local = createSqlite();
+      seed(local);
+      const backing = createD1(local);
+      let rejected = 0;
+      const d1 = {
+        ...backing,
+        prepare(sql) {
+          if (!rejected && sql.includes("FROM notification_outbox")) {
+            rejected++;
+            throw new Error("SYNTHETIC_SYNC_D1_PREPARE_FAILURE");
+          }
+          return backing.prepare(sql);
+        },
+      };
+      try {
+        const r = await call(path, "tok-owner", { d1 });
+        assert.equal(rejected, 1);
+        assert.equal(r.status, 503);
+        assert.equal(r.headers.get("cache-control"), "private, no-store");
+        assert.deepEqual(r.body, { error: "unavailable" });
+        assert.equal(d1.stats.writes, 0);
+      } finally {
+        local.close();
+      }
+    }
+  });
+
+  // ---------------- staff ----------------
+  test("T-staff: staff page equals CURRENT for every user and event", async () => {
+    // Both CURRENT and Hono sign internal profile icons in 60-second buckets.
+    // Calling them sequentially against the wall clock can cross that bucket:
+    // identical behavior then produces different exp/sig values. Freeze the
+    // clock for this isolated comparison, without discarding signature parity.
+    const realDateNow = Date.now;
+    const frozenNow = Math.floor(realDateNow() / 60_000) * 60_000 + 30_000;
+    Date.now = () => frozenNow;
+    try {
+      for (const name of WITH_ACCESS.filter((n) => n !== "many")) {
+        for (const eventId of ["evA", "evB", "evC", "evD", "evNull", "evTie1", "evTie2", "missingEvent", "nope"]) {
+          const r = await call(`/api/manage/events/${eventId}/staff`, `tok-${name}`);
+          const ref = await refStaff(name, eventId);
+          if (ref === 404) {
+            assert.equal(r.status, 404, `${name} ${eventId}`);
+            assert.equal(r.headers.get("cache-control"), "private, no-store");
+            continue;
+          }
+          assert.equal(r.status, 200, `${name} ${eventId}`);
+          assert.deepEqual(r.body, canon(ref), `${name} ${eventId}`);
+          record("staff", r);
+        }
+      }
+    } finally {
+      Date.now = realDateNow;
+    }
+  });
+
+
+  test("Issue #681: CURRENT and Hono staff icon signatures match on both sides of a 60s boundary", async () => {
+    const { resolveManageXIconUrl: honoIconUrl } = await import("../src/routes/manage/icon.ts");
+    const input = {
+      iconUrl: "/api/media/xicons/mgr.png",
+      approvalStatus: "approved",
+      authSecret: "test-secret",
+    };
+    const before = 1_800_000_059;
+    const sameBucket = before - 1;
+    const after = before + 1;
+    const currentSameBucket = await resolveManageXIconUrl({
+      ...input, options: { now: sameBucket },
+    });
+    const honoSameBucket = await honoIconUrl({ ...input, now: sameBucket });
+    const currentBefore = await resolveManageXIconUrl({
+      ...input, options: { now: before },
+    });
+    const honoBefore = await honoIconUrl({ ...input, now: before });
+    const currentAfter = await resolveManageXIconUrl({
+      ...input, options: { now: after },
+    });
+    const honoAfter = await honoIconUrl({ ...input, now: after });
+
+    assert.equal(currentSameBucket, honoSameBucket, "CURRENT/Hono parity earlier in the same bucket");
+    assert.equal(currentSameBucket, currentBefore, "CURRENT signs identically within a minute");
+    assert.equal(honoSameBucket, honoBefore, "Hono signs identically within a minute");
+    assert.equal(currentBefore, honoBefore, "signature and expiry parity before boundary");
+    assert.equal(currentAfter, honoAfter, "signature and expiry parity after boundary");
+    assert.notEqual(currentBefore, currentAfter, "a new minute bucket intentionally rotates the signature");
+    for (const [url, now] of [[currentSameBucket, sameBucket], [currentBefore, before], [currentAfter, after]]) {
+      assert.ok(url);
+      const signed = new URL(url, "https://x.test");
+      assert.equal(
+        await verifyManageXIconSignatureInput({
+          key: "xicons/mgr.png",
+          expiresAt: Number(signed.searchParams.get("exp")),
+          signature: signed.searchParams.get("sig"),
+          secret: "test-secret",
+          now,
+        }),
+        true,
+        "signed URL must still authenticate against CURRENT verifier",
+      );
+    }
+    const expiryBefore = Number(new URL(currentBefore, "https://x.test").searchParams.get("exp"));
+    const expiryAfter = Number(new URL(currentAfter, "https://x.test").searchParams.get("exp"));
+    assert.equal(expiryAfter - expiryBefore, 60, "bucket boundary advances expiry exactly one minute");
   });
 
   test("T-staff: owner-0 event, read-only reviewers, icon rules", async () => {
@@ -973,24 +1287,77 @@ if (runUnderRootTsx(import.meta.url)) {
   }
 
   test("T-xlink: x-link-requests (enrichment, legacy ids, video icon fallback, signing) equals CURRENT; only xid reviewers and admins", async () => {
-    for (const name of WITH_ACCESS.filter((n) => n !== "many")) {
-      const r = await call("/api/manage/x-link-requests", `tok-${name}`);
-      const ref = await refXLinks(name);
-      if (ref === 404) {
-        assert.equal(r.status, 404, name);
-        continue;
+    // #728: CURRENT and Hono sign x-icons in 60-second buckets. Sequential
+    // HTTP/reference calls can cross a real clock boundary and differ by one
+    // minute even when the full signed exp/sig contract is identical. Use a
+    // fixed interior of a minute for this comparison; unlike normalizing URLs,
+    // this still asserts the *entire* signature and expiration are equal.
+    // The staff test above separately verifies real t=59/60 signature rotation.
+    const realDateNow = Date.now;
+    const frozenNow = Math.floor(realDateNow() / 60_000) * 60_000 + 30_000;
+    Date.now = () => frozenNow;
+    try {
+      for (const name of WITH_ACCESS.filter((n) => n !== "many")) {
+        const r = await call("/api/manage/x-link-requests", `tok-${name}`);
+        const ref = await refXLinks(name);
+        if (ref === 404) {
+          assert.equal(r.status, 404, name);
+          continue;
+        }
+        assert.equal(r.status, 200, name);
+        assert.deepEqual(r.body, canon(ref), name);
+        record("xlink", r);
       }
-      assert.equal(r.status, 200, name);
-      assert.deepEqual(r.body, canon(ref), name);
-      record("xlink", r);
+      const body = (await call("/api/manage/x-link-requests", "tok-admin")).body;
+      assert.equal(body.rows.length, 100, "pending list is capped at 100 (PENDING_LIMIT)");
+      assert.ok(body.rows.every((row) => row.request_type === "new_link" || row.request_type === "existing_link"));
+      assert.equal((await call("/api/manage/x-link-requests", "tok-owner")).status, 404);
+      assert.equal((await call("/api/manage/x-link-requests", "tok-plain")).status, 403);
+      const stats0 = (await call("/api/manage/x-link-requests", "tok-custom")).stats;
+      assert.equal(stats0.statements, 3);
+    } finally {
+      Date.now = realDateNow;
     }
-    const body = (await call("/api/manage/x-link-requests", "tok-admin")).body;
-    assert.equal(body.rows.length, 100, "pending list is capped at 100 (PENDING_LIMIT)");
-    assert.ok(body.rows.every((row) => row.request_type === "new_link" || row.request_type === "existing_link"));
-    assert.equal((await call("/api/manage/x-link-requests", "tok-owner")).status, 404);
-    assert.equal((await call("/api/manage/x-link-requests", "tok-plain")).status, 403);
-    const stats0 = (await call("/api/manage/x-link-requests", "tok-custom")).stats;
-    assert.equal(stats0.statements, 3);
+  });
+
+  test("Issue #728: X-link signed-icon parity across the 59/60-second boundary", async () => {
+    // Compare the *complete* payload and HMAC, not a normalized URL. The
+    // existing T-xlink comparison freezes one clock bucket; this separate
+    // regression proves that real signature rotation still occurs across it.
+    const realDateNow = Date.now;
+    const bucketStart = Math.floor(realDateNow() / 60_000) * 60_000;
+    const urls = [];
+    try {
+      for (const frozenNow of [bucketStart + 59_000, bucketStart + 60_000]) {
+        Date.now = () => frozenNow;
+        const r = await call("/api/manage/x-link-requests", "tok-admin");
+        assert.equal(r.status, 200);
+        const ref = await refXLinks("admin");
+        assert.deepEqual(r.body, canon(ref), "CURRENT/Hono full signed URL parity");
+        // manageSeed: xr3 targets approved req_i (internal xicons/i.png).
+        // xr9 targets req_c (empty icon) and is intentionally NOT signed.
+        const signedIcon = r.body.rows.find((row) =>
+          row.id === "xr3" && row.target_icon_url?.startsWith("/api/media/manage-x-icon/"));
+        assert.ok(signedIcon, "the signed target icon fixture must be present");
+        const url = new URL(signedIcon.target_icon_url, "https://x.test");
+        const expiresAt = Number(url.searchParams.get("exp"));
+        const signature = url.searchParams.get("sig");
+        assert.ok(signature, "signed icon URL retains an HMAC signature");
+        assert.equal(await verifyManageXIconSignatureInput({
+          key: "xicons/i.png", expiresAt, signature,
+          secret: "test-secret", now: Math.floor(frozenNow / 1000),
+        }), true, "CURRENT verifier must accept the Hono URL's signature");
+        urls.push(url);
+      }
+    } finally {
+      Date.now = realDateNow;
+    }
+    assert.equal(
+      Number(urls[1].searchParams.get("exp")) - Number(urls[0].searchParams.get("exp")),
+      60, "the expiry advances exactly one minute at a 59/60-second boundary",
+    );
+    assert.notEqual(urls[0].searchParams.get("sig"), urls[1].searchParams.get("sig"),
+      "the signed HMAC must rotate at the minute boundary");
   });
 
   test("T-overview: event overview equals CURRENT for every user, event and notification filter", async () => {
@@ -1026,6 +1393,32 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(degraded.body.notificationSchemaMissing, true);
     assert.deepEqual(degraded.body.notifications, []);
     assert.equal(degraded.body.notifCounts.all, 0);
+  });
+
+
+  test("SEC-809: manage event overview legacy notification fallback ignores a throwing warning sink", async () => {
+    const old = createSqlite();
+    seed(old);
+    old.exec("DROP INDEX IF EXISTS notification_outbox_event_idx");
+    old.exec("ALTER TABLE notification_outbox DROP COLUMN event_id");
+    const previousWarn = console.warn;
+    const warnings = [];
+    console.warn = (code) => {
+      warnings.push(code);
+      throw new Error("SEC809_LOGGER_FAILED");
+    };
+    try {
+      const r = await call("/api/manage/events/evA", "tok-owner", { sqlite: old });
+      assert.equal(r.status, 200);
+      assert.equal(r.body.notificationSchemaMissing, true);
+      assert.deepEqual(r.body.notifications, []);
+      assert.equal(r.body.notifCounts.all, 0);
+      assert.equal(r.body.event.id, "evA");
+      assert.deepEqual(warnings, ["[manage] notification_outbox.event_id unavailable"]);
+    } finally {
+      console.warn = previousWarn;
+      old.close();
+    }
   });
 
   test("T-center: notification center equals CURRENT for every user and filter", async () => {

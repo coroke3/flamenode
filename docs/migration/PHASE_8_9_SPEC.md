@@ -148,40 +148,55 @@ PRをrevert。
 
 ### MIG-0804: CPU/security review
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — MIG-0803 の後
+- **Readiness:** NEEDS_REFINEMENT — 既存 PR #693 の U01 計測を Lead が再開する。Auth.js シナリオを既存 #456 harness owner と調整し、実測前に DONE にしない
 - **Recipe:** R-EVIDENCE
 - **Runtime:** N
 - **Depends on:** MIG-0803, MIG-0807 / **Decisions:** D-07 DECIDED, D-16-14（main にある Hono session / write guard の review は MIG-0807 が `SECURITY_REVIEW.md` §1 に書く。本 task は Auth.js 側を §2 に足す）
-- **Verified against:** `aacf4fd` (2026-10-15)
+- **Verified against:** `86608709455937e6512bc6f413f04f7271f5f440` (2026-11-27); live #693 `017543bb35d7d000febff3ee932ef252d4cd3ef0`
 #### Source snapshot
 - 目標: `ZERO_1102.md` §3 の最大値。session 解決（S4）は 2ms 以内、それを含む API 全体は S2 < 7ms / S3 < 8ms。p95 は参考として記録する。
 - 既存の安全なリダイレクト: `src/lib/auth/origin.ts`, `#utils/next` の `sanitizeNextPath`。
+- `apps/api/src/auth/authjs.ts#buildUnmountedAuthConfig` と `apps/api/src/routes/auth.ts#createUnmountedAuthRoutes` が実際の Auth.js session / csrf / signout 経路。`routes/authComplete.ts#createUnmountedAuthCompleteRoutes` は `auth/complete.ts` の CURRENT 互換 retry を使う。いずれも本番 `app.ts` へ mount しない。
+- #693 の既存 `apps/api/test/authjsSecurityReview.test.mjs` は #695 の provider 障害修正後に U02 と U01 の D1 回数を検証済みと記録している。古い PR 本文の T03 failure は現状ではない。ただし Nov 27 の独立レビューでは `/auth/complete` が provider failure monitor を通らず、Auth.js が D1 障害を200/nullに変換した場合に missing と分類する残件を確認した。既存HTTP回帰はorigin不一致の注入だけでこの経路を覆っておらず、U02全体は未完了。missing-session の最大4 SELECT retry も characterization であり S2 の3 statement以内を満たす証拠ではない。
+- `scripts/benchmark-api-cpu.mjs` の `S4` は Hono の内部 session resolver (`/__bench/session`)。Auth.js の4経路全体の代用にはならない。#456 が計測 harness、#714 が `session.ts`、#901 が shared admission の既存 owner。
 #### Owned paths
 - 変更: `docs/migration/auth/SECURITY_REVIEW.md`（MIG-0807 が作る。本 task は §2 Auth.js）
-- 変更: `apps/api/src/auth/**`（見つかった問題の修正のみ）
+- 既存 #693 内のみ変更: `apps/api/test/authjsSecurityReview.test.mjs`、`docs/migration/work-items/MIG-0804.md`、`docs/migration/FILE_MIGRATION_MATRIX.md` の MIG-0804 行。main 上に未統合のファイルは同じ owner branch で再開する。
+- 調整先: #456 owner が `scripts/benchmark-api-cpu.mjs` と既存 benchmark fixture/test の計測経路を担当する。並行する別 harness / workflow / owner PR を作らない。
+- 触らない: `apps/api/src/auth/session.ts` (#714)、shared write middleware (#901)、OAuth/session runtime、`app.ts` の mount、MIG-0807 の §1。runtime 修正が必要なら該当 owner への具体的 handoff を記録する。
 #### Micro-units
-- **U01 measure**: request あたりの D1 query 数と CPU を非本番で測る。
-- **U02 security**: cookie 改ざん、期限、CSRF、別 host、BAN の即時反映、open redirect、D1 失敗時の fail-closed を確認し文書化。
+- **U01a request accounting**: #693 の実 cookie / canonical SQLite fixtures と既存 `authjsCrossRuntime.test.mjs` / `authCompleteParity.test.mjs` を使う。session、csrf、signout、complete の通常・上限・期限切れ/失効/BAN・provider failure を、HTTP status、private headers、cookie 更新/削除、D1 SELECT/UPDATE/DELETE 回数ごとに記録する。session 単体の S4 と全 request の S2/S3 を分け、4 SELECT retry や renewal write を隠さない。CURRENT retry/expiry を変えて予算内に見せない。
+- **U01b harness coordination**: #456 の既存 harness に、unmounted Auth.js factories を使うシナリオと対応する実 D1 trace/replay を追加する範囲を owner と確定する。origin/session/CSRF setup を計測から外すだけでは cold 証拠にならない。cold は fresh isolate の最初の request と検証できる setup を使い、事前 ping や HTTP replay 設定で warm になった sample は診断扱いにする。真正な cold 証拠がなければ `STOP_COLD` を維持する。
+- **U01c local preparation**: 固定 source SHA、quiet Linux、Node 22 と repository Wrangler/workerd の版を記録し、通常・上限・不正・cold を各50回以上測る。warmup と cold を warm 集計へ混ぜない。実 D1 と synthetic replay を区別し、raw p50/p95/max、baseline、D1 回数、response byte、HTTP outcome、isolate provenance を保存する。既存 harness の noise/resolution/coverage gate を通して §3 の最大値で診断する。ローカル結果は §5 の補助証拠であり、単独では U01 / MIG-0804 DONE にしない。
+- **U01d official acceptance**: `ZERO_1102.md` §5 に従い、許可済みの非本番 Worker で同じ Auth.js シナリオの `wrangler tail` `cpuTime` を測る。通常・上限・不正・cold を各50回以上、cold を分離して raw 最大値と整数 ms の分解能を記録し、§3 の予算を確認する。必要な remote deploy/binding 操作は別途許可済みの具体的手順で実施する。この証拠が未取得なら U01 は未完了、ローカル準備は継続可能。
+- **U02 security**: cookie 改ざん、期限、CSRF、別 host、BAN の即時反映、open redirect、D1 失敗時の fail-closed を確認し文書化。次の既存suite単位は `/auth/complete` の有効cookie下で実adapterのsession read/renew/delete障害を注入し、missingではなくunavailable landing、private/no-store、部分試行のcookieを再送しないことをCURRENT対照で検証する。runtime ownerへrequest-local failure monitorの再利用をhandoffし、#695のsession/signout成功だけでU02全体をAPPROVEしない。最新mainのlogger hardening (#868) も保持する。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
 | T01 | `next=https://evil.example` | 拒否 |
 | T02 | D1 失敗 | fail-closed |
 | T03 | BAN 直後のリクエスト | 拒否 |
+| T04 | session renewal、expiry、signout、complete retry | 実 SELECT と write、cookie/HTTP 契約を記録し、S4 と全 request の予算を別々に判定 |
+| T05 | ping/setup 後の cold sample、noise 超過、Auth.js シナリオ不足 | 計測 gate は未達。汎用 Hono S4 の成功で代用しない |
 #### Commands
 ```bash
+# #693 owner branch で既存 security / request-accounting suites を実行する。
+node --experimental-strip-types --test apps/api/test/authjsSecurityReview.test.mjs apps/api/test/authProviderFailures.test.mjs apps/api/test/authjsCrossRuntime.test.mjs apps/api/test/authCompleteParity.test.mjs
 npm run test:critical
 npm run build --workspace=@flamenode/api
 npm run check:project-docs
 ```
+U01 の CPU command/flags は #456 の実装済み Auth.js scenario と実行 host を確認して #693 work-item に記録する。未実装の flag、未実行の計測値や成功結果を記入しない。
 #### Ledger updates
 `SECURITY_REVIEW.md` の §2 を足す（§1 は MIG-0807）。
 #### DONE checklist
-- [ ] 測定値と条件が記録されている
+- [ ] 4つの実 Auth.js 経路について §5 の公式非本番 tail 測定値・条件・D1 read/write・runtime class・cold provenance が記録され、CURRENT parity と最大値予算を満たす（local workerd は補助）
 - [ ] 高リスクの未解決差分が0件
 - [ ] 独立レビューの APPROVE
+- [ ] 最新 main を統合した最終 HEAD の必須 CI が成功。MIG-0805 は本 task の全条件達成と merge 後だけ READY にする
 #### STOP
 - 認可結果や secret を cache に入れる設計になったら止める。
+- 予算超過・未検証の cold・不足する Auth.js coverage・runtime owner の重複があれば該当 unit を未完了として記録する。人間承認待ちという理由だけで既存 owner の非本番計測準備を止めない。
 #### Rollback
 PRをrevert。
 
@@ -269,7 +284,7 @@ npm run check:project-docs
 
 ### MIG-0806: Phase 8 Gate
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — Phase Gate はエージェントが自動承認しない
+- **Readiness:** NEEDS_REFINEMENT — MIG-0805完了後、2026-11-27 owner policyに従い非本番Gateを独立Leadが証跡で判定する。依存・受入証拠は省略しない
 - **Recipe:** R-EVIDENCE
 - **Runtime:** N
 - **Depends on:** MIG-0805 / **Decisions:** D-07 DECIDED
@@ -281,7 +296,7 @@ npm run check:project-docs
 - 変更: `docs/migration/STATUS.md`（承認後だけ）
 #### Micro-units
 - **U01 evidence**: session 継続、ログイン・ログアウト・連携、CSRF、CPU の証跡をまとめる。本番切替を実施済みかどうかを分けて書く。
-- **U02 review**: 独立レビューと人間の Phase Gate 承認を依頼。
+- **U02 review**: 独立レビューと追加の独立Leadによる非本番Phase Gate判定を記録する（2026-11-27 owner policy）。本番切替の実施承認とは分離する。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
@@ -295,9 +310,9 @@ npm run check:project-docs
 #### Ledger updates
 承認後に `STATUS.md` の MIG-0806 を DONE。
 #### DONE checklist
-- [ ] 独立レビューの APPROVE と人間の Phase Gate 承認
+- [ ] 独立レビューの APPROVE、追加の独立Leadによる証拠付き非本番Gate承認、最終HEADの必須CI成功
 #### STOP
-- 人間の承認なしに STATUS を DONE にしない。
+- MIG-0805の依存・実受入証拠・独立Lead承認・最終HEAD CIが不足したままSTATUSをDONEにしない。非本番Gate通過を本番切替済みと扱わない。
 #### Rollback
 Gate のPRをrevert。
 
@@ -517,7 +532,7 @@ PRをrevert。旧 Worker は停止前なら再 deploy で戻る。
 - **Readiness:** NEEDS_REFINEMENT — MIG-0904 の後。消す前の呼び出し元 0件を `rg` で示してから
 - **Recipe:** R-REMOVE
 - **Runtime:** N
-- **Depends on:** MIG-0904, MIG-0610, MIG-0627 / **Decisions:** D-09 DECIDED
+- **Depends on:** MIG-0904, MIG-0610, MIG-0627, MIG-0665, MIG-0666 / **Decisions:** D-09 DECIDED, D-19-4
 - **Verified against:** `96f20dc` (2026-10-15)
 #### Source snapshot
 - 消す対象: `workers/json-generator/**`、static rebuild queue の consumer（`workers/content-jobs/staticRebuildWakeQueue.ts`）、生成を起こすだけの段（`workers/content-jobs/index.ts:201〜318`、`workers/sync-jobs/index.ts:205`）、`src/lib/staticRebuild/**` と `src/lib/queues/wakeStaticRebuildQueueAfterCommit.ts`（MIG-0903・0904 で残っていれば）。

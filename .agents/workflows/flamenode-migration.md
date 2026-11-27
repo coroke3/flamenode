@@ -19,6 +19,6 @@ Antigravity adapter only. Do not invent a separate migration process.
 10. Backend changes must include optimization and code-quality review; line-count reduction is not a goal.
 11. Checkpoint policy: WORK_ITEM_ONLY. Writer wakes save `IN_PROGRESS` while units remain, `REVIEW` after all units pass, or `BLOCKED` with recovery conditions in their own `work-items/MIG-XXXX.md`. Persist actual validation/rollback evidence and affected ledgers/matrices. Review-only wakes leave evidence in the reviewed PR without branch/checkpoint edits; wait/no-action wakes report the gate without a checkpoint-only push. `STATUS.md` is reconciled only at pre-merge integration (after independent review/CI).
 
-Never automatically cross a Phase Gate or perform production deploy, Worker Route, Custom Domain, Remote D1, or secret changes without explicit approval.
+Non-production Phase Gates require independent Lead review and the prescribed acceptance evidence under the 2026-11-27 owner policy. Production cutover, manual production deploy, Worker Route, Custom Domain/DNS, Remote D1/data migration, secrets, and product/permission/visibility semantic changes still require separate explicit user approval.
 
 Open PR live state: `docs/migration/work-items/MIG-XXXX.md` is updated by its owner on writer wakes. `STATUS.md` is the merged task/dependency summary and is updated only at merge integration. See `GIT_WORKFLOW.md`.

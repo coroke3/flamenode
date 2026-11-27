@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { handleNotificationWakeQueue } from "../fast-jobs/notificationQueueConsumer.ts";
+import { handleStaticRebuildWakeQueue } from "../content-jobs/staticRebuildWakeQueue.ts";
 import { logWorkerJob, logQueueConsumerFailure, normalizeQuotaStopReason, safeErrorSummary } from "./safeLog.ts";
 
 test("safeErrorSummary redacts credentials from worker logs", () => {
@@ -68,4 +70,77 @@ test("logWorkerJob emits structured observability fields", () => {
   const parsed = JSON.parse(line);
   assert.equal(parsed.external_api_calls, 2);
   assert.equal(parsed.commit_sha, "a".repeat(40));
+});
+test("SEC-785: hostile Error.message, Proxy and non-string messages remain safe", () => {
+  let readCount = 0;
+  const poisoned = new Error("PROVIDER_SECRET");
+  Object.defineProperty(poisoned, "message", {
+    get() {
+      readCount += 1;
+      throw new Error("POISONED_MESSAGE_ACCESS");
+    },
+  });
+  assert.equal(safeErrorSummary(poisoned), "worker task failed");
+  assert.equal(readCount, 1);
+
+  const hostile = new Proxy(new Error("PROVIDER_PRIVATE"), {
+    getPrototypeOf() {
+      throw new Error("POISONED_PROXY_PROTOTYPE");
+    },
+  });
+  assert.equal(safeErrorSummary(hostile), "worker task failed");
+
+  const wrongType = new Error("original");
+  Object.defineProperty(wrongType, "message", { value: { toString() { throw new Error("POISONED_TO_STRING"); } } });
+  assert.equal(safeErrorSummary(wrongType), "worker task failed");
+
+  const prior = console.warn;
+  let emitted = "";
+  console.warn = (line) => { emitted = String(line); };
+  try {
+    logQueueConsumerFailure({ service: "test-worker", queueKind: "notification_available", messageCount: 1, error: poisoned });
+  } finally {
+    console.warn = prior;
+  }
+  assert.equal(JSON.parse(emitted).error, "worker task failed");
+  assert.doesNotMatch(emitted, /PROVIDER_SECRET|POISONED_/);
+});
+
+test("SEC-785: a broken console.warn cannot block actual notification and static rebuild Queue retries", async () => {
+  const poison = new Error("PRIVATE_PROVIDER_PAYLOAD");
+  Object.defineProperty(poison, "message", {
+    get() { throw new Error("POISONED_MESSAGE_GETTER"); },
+  });
+  const env = {
+    DB: { prepare() { throw poison; } },
+    R2: { async get() { return null; }, async put() {} },
+    KV: {},
+    QUEUE_DISPATCH_ENABLED: "1",
+    QUEUE_CONTINUATION_ENABLED: "0",
+  };
+  const mkMessage = (kind) => ({
+    body: { version: 1, kind, source: "web", requested_at: 1, trace_id: "trace-1" },
+    ackCalls: 0,
+    retryCalls: 0,
+    ack() { this.ackCalls++; },
+    retry() { this.retryCalls++; },
+  });
+  const notification = mkMessage("notification_available");
+  const staticRebuild = mkMessage("static_rebuild_available");
+  const original = console.warn;
+  let failedLogCalls = 0;
+  console.warn = () => { failedLogCalls++; throw new Error("BROKEN_LOG_SINK"); };
+  try {
+    await handleNotificationWakeQueue({ messages: [notification] }, env);
+    const result = await handleStaticRebuildWakeQueue({ messages: [staticRebuild] }, env);
+    assert.equal(result.retryBatch, true);
+    assert.equal(result.failed, 1);
+  } finally {
+    console.warn = original;
+  }
+  assert.equal(failedLogCalls, 2, "both consumer catch paths attempted best-effort diagnostics");
+  for (const message of [notification, staticRebuild]) {
+    assert.equal(message.ackCalls, 0, "a failed D1 drain must not be acknowledged");
+    assert.equal(message.retryCalls, 1, "logger failure must not stop the Queue retry");
+  }
 });
