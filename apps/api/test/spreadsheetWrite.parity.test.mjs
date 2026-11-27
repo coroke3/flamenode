@@ -811,7 +811,9 @@ if (runUnderRootTsx(import.meta.url)) {
       ["PATCH", "/data", { table: "software_catalog", primaryKey: { id: "sw-base" }, column: "name", value: "changed" }, rowRead],
       ["DELETE", "/data", { table: "software_catalog", primaryKey: { id: "sw-base" } }, rowRead],
       ["PATCH", "/data", { table: "slots", primaryKey: { id: "slot-base" }, column: "event_id", value: "a-open" },
-        sql => sql.startsWith('SELECT "id" AS value FROM "events" WHERE "id" IN (')],
+        sql => sql.startsWith('SELECT "id" AS value FROM "events" WHERE "id" IN (') ||
+        (sql.startsWith("WITH snapshot AS (") &&
+          sql.includes('fk_0 AS (SELECT "id" AS value FROM "events"'))],
       ["POST", "/import", apply, sql => sql.startsWith('SELECT * FROM "software_catalog" WHERE ("id" = ?) LIMIT ')],
     ];
     const snapshot = () => ({
@@ -1106,7 +1108,9 @@ if (runUnderRootTsx(import.meta.url)) {
       ["PATCH", "/data", patch, rowRead],
       ["DELETE", "/data", { table: "software_catalog", primaryKey: { id: "sw-base" } }, rowRead],
       ["PATCH", "/data", { table: "slots", primaryKey: { id: "slot-base" }, column: "event_id", value: "a-open" },
-        sql => sql.startsWith('SELECT "id" AS value FROM "events" WHERE "id" IN (')],
+        sql => sql.startsWith('SELECT "id" AS value FROM "events" WHERE "id" IN (') ||
+        (sql.startsWith("WITH snapshot AS (") &&
+          sql.includes('fk_0 AS (SELECT "id" AS value FROM "events"'))],
       ["POST", "/import", apply, sql => sql.startsWith('SELECT * FROM "software_catalog" WHERE ("id" = ?) LIMIT ')],
       ["PATCH", "/data", patch, sql => sql.includes("FROM pragma_table_xinfo(?) AS x")],
     ];
@@ -1537,6 +1541,33 @@ if (runUnderRootTsx(import.meta.url)) {
     const dDel = diff(s2, snap());
     assert.equal(dDel.batches, 1);
     assert.equal(dDel.reads, 4, "warm DELETE adds 1 before-image read (4 total) + 1 atomic batch");
+
+    // Single-key FK-bearing CRUD combines the fresh before-image and all FK
+    // lookups. Cold still pays one catalog read; warm pays only the CTE read.
+    resetAllCaches();
+    const s3 = snap();
+    const rSlotCold = await callHono("PATCH", "/data", {
+      table: "slots",
+      primaryKey: { id: "slot-base" },
+      column: "event_id",
+      value: "a-open",
+    });
+    assert.equal(rSlotCold.status, 200);
+    const dSlotCold = diff(s3, snap());
+    assert.equal(dSlotCold.batches, 1);
+    assert.equal(dSlotCold.reads, 5, "cold slots PATCH uses 3 middleware + catalog + combined snapshot/FK reads");
+
+    const s4 = snap();
+    const rSlotWarm = await callHono("PATCH", "/data", {
+      table: "slots",
+      primaryKey: { id: "slot-base" },
+      column: "event_id",
+      value: "a-open",
+    });
+    assert.equal(rSlotWarm.status, 200);
+    const dSlotWarm = diff(s4, snap());
+    assert.equal(dSlotWarm.batches, 1);
+    assert.equal(dSlotWarm.reads, 4, "warm slots PATCH uses 3 middleware + one combined snapshot/FK read");
   });
 
   test("MIG-0638 T06: bounded member FK/release SELECT plan (#893)", async () => {

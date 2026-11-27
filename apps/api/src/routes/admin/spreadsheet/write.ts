@@ -1040,6 +1040,246 @@ function buildSpreadsheetMemberSnapshotFkReleaseLookup(
  * Every FK group is validated in original planner order before release
  * overflow/row validation, preserving CURRENT's FK-first error precedence.
  */
+
+
+/**
+ * Combine a fresh single-key CRUD before-image and every effective FK lookup
+ * into one bounded read. Release-bearing tables keep their dedicated planner.
+ */
+export function buildSpreadsheetSnapshotFkLookup(
+  ctx: SpreadsheetWriteTableContext,
+  foreignKeys: readonly SpreadsheetForeignKey[],
+  prepared: PreparedSpreadsheetCrudMutation,
+): { statement: string; binds: readonly (string | number | null)[] } | null {
+  if ((prepared.method !== "PATCH" && prepared.method !== "DELETE") ||
+      ctx.def.table === "video_members" ||
+      ctx.def.table === "video_events" ||
+      ctx.def.table === "videos" ||
+      ctx.primaryKeys.length !== 1 ||
+      foreignKeys.length < 1 ||
+      foreignKeys.length > SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES ||
+      ctx.columns.length < 1) {
+    return null;
+  }
+  const names = ctx.columns.map(column => column.name);
+  const prefix = "__mig0638_";
+  if (new Set(names).size !== names.length ||
+      names.some(name => !isValidSqliteTableName(name) || name.startsWith(prefix)) ||
+      foreignKeys.some(fk => !names.includes(fk.column) ||
+        !isValidSqliteTableName(fk.column) ||
+        !isValidSqliteTableName(fk.referencedTable) ||
+        !isValidSqliteTableName(fk.referencedColumn))) {
+    return null;
+  }
+  const primaryKey = prepared.pk as unknown as Record<string, unknown>;
+  if (!primaryKey || typeof primaryKey !== "object" || Array.isArray(primaryKey) ||
+      Object.keys(primaryKey).length !== ctx.primaryKeys.length ||
+      !ctx.primaryKeys.every(key => Object.hasOwn(primaryKey, key) &&
+        typeof primaryKey[key] === "string")) {
+    return null;
+  }
+  const mutationEntries = prepared.values ? Object.entries(prepared.values) : [];
+  if ((prepared.method === "PATCH" && mutationEntries.length !== 1) ||
+      (prepared.method === "DELETE" && mutationEntries.length !== 0)) {
+    return null;
+  }
+
+  const fkAliases = foreignKeys.map((_, index) => prefix + "fk_" + index + "_value");
+  const snapshotCountAlias = prefix + "snapshot_count";
+  const keyWhere = ctx.primaryKeys.map(key => quoteIdent(key) + " = ?").join(" AND ");
+  const mutationColumn = mutationEntries[0]?.[0] ?? null;
+  const mutationValue = mutationEntries[0]?.[1] ?? null;
+  const effectiveColumns = foreignKeys.map((fk, index) =>
+    "CASE WHEN m.column_name = ? THEN NULLIF(m.cell_value, '') ELSE s." +
+      quoteIdent(fk.column) + " END AS " + quoteIdent(fkAliases[index]!),
+  );
+  const ctes = [
+    "snapshot AS (SELECT * FROM " + quoteIdent(ctx.def.table) +
+      " WHERE " + keyWhere + " LIMIT 2)",
+    'snapshot_count AS (SELECT COUNT(*) AS "count" FROM snapshot)',
+    "snapshot_one AS (SELECT * FROM snapshot LIMIT 1)",
+    "mutation_input AS (SELECT ? AS column_name, ? AS cell_value)",
+    "effective AS (SELECT s.*, " + effectiveColumns.join(", ") +
+      " FROM snapshot_one s CROSS JOIN mutation_input m)",
+    ...foreignKeys.map((fk, index) => {
+      const alias = quoteIdent(fkAliases[index]!);
+      const referenceColumn = quoteIdent(fk.referencedColumn);
+      return "fk_" + index + " AS (SELECT " + referenceColumn + " AS value FROM " +
+        quoteIdent(fk.referencedTable) + " WHERE " + referenceColumn +
+        " IN (SELECT " + alias + " FROM effective WHERE " + alias +
+        " IS NOT NULL AND " + alias + " <> '') LIMIT 2)";
+    }),
+    "snapshot_projection AS (SELECT * FROM snapshot_one UNION ALL SELECT " +
+      ctx.columns.map(column => "NULL AS " + quoteIdent(column.name)).join(", ") +
+      ' WHERE (SELECT "count" FROM snapshot_count) = 0)',
+  ];
+  const fkSelects = foreignKeys.flatMap((_, index) => {
+    const alias = quoteIdent(fkAliases[index]!);
+    return [
+      "(SELECT " + alias + " FROM effective LIMIT 1) AS " +
+        quoteIdent(prefix + "fk_" + index + "_expected"),
+      '(SELECT COUNT(*) FROM fk_' + index + ") AS " +
+        quoteIdent(prefix + "fk_" + index + "_count"),
+      "(SELECT MAX(value) FROM fk_" + index + ") AS " +
+        quoteIdent(prefix + "fk_" + index + "_found"),
+    ];
+  });
+  const statement = "WITH " + ctes.join(",\n") + "\n" +
+    'SELECT s.*, sc."count" AS ' + quoteIdent(snapshotCountAlias) + ", " +
+    fkSelects.join(", ") +
+    " FROM snapshot_projection s CROSS JOIN snapshot_count sc LIMIT 1";
+  const binds: (string | number | null)[] = [
+    ...ctx.primaryKeys.map(key => primaryKey[key] as string),
+    mutationColumn,
+    mutationValue,
+    ...foreignKeys.map(fk => fk.column),
+  ];
+  if (binds.length > 100) return null;
+  return { statement, binds: Object.freeze(binds) };
+}
+
+/**
+ * Validate the one-read CRUD snapshot/FK receipt. A provider receipt cannot
+ * establish row absence or a domain FK error unless every scalar is intact.
+ */
+export function validateSpreadsheetSnapshotFkLookupReceipt(
+  ctx: SpreadsheetWriteTableContext,
+  foreignKeys: readonly SpreadsheetForeignKey[],
+  prepared: PreparedSpreadsheetCrudMutation,
+  result: { success: boolean; results: unknown[] },
+): Record<string, unknown> {
+  const prefix = "__mig0638_";
+  const snapshotCountAlias = prefix + "snapshot_count";
+  const fkStates: Array<{
+    expected: string | number | null;
+    count: number;
+    found: string | number | null;
+  } | null> = foreignKeys.map(() => null);
+  let snapshotCount: number | null = null;
+  let snapshotValues: Record<string, unknown> | null = null;
+
+  try {
+    if (!result || result.success !== true || !Array.isArray(result.results) ||
+        result.results.length !== 1) {
+      throw new Error("invalid_snapshot");
+    }
+    const candidate = result.results[0];
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+      throw new Error("invalid_snapshot");
+    }
+    const row = candidate as Record<string, unknown>;
+    const required = [
+      ...ctx.columns.map(column => column.name),
+      snapshotCountAlias,
+      ...foreignKeys.flatMap((_, index) => [
+        prefix + "fk_" + index + "_expected",
+        prefix + "fk_" + index + "_count",
+        prefix + "fk_" + index + "_found",
+      ]),
+    ];
+    if (!required.every(key => Object.hasOwn(row, key))) {
+      throw new Error("invalid_snapshot");
+    }
+    const count = row[snapshotCountAlias];
+    if (!Number.isSafeInteger(count) || (count as number) < 0 || (count as number) > 2) {
+      throw new Error("invalid_snapshot");
+    }
+    snapshotCount = count as number;
+
+    const cells: Array<[string, string | number | null]> = [];
+    for (const column of ctx.columns) {
+      const value = row[column.name];
+      if (value !== null && typeof value !== "string" && typeof value !== "number") {
+        throw new Error("invalid_snapshot");
+      }
+      if (typeof value === "number" && !Number.isFinite(value)) {
+        throw new Error("invalid_snapshot");
+      }
+      cells.push([column.name, value]);
+    }
+    if (snapshotCount === 0 && cells.some(([, value]) => value !== null)) {
+      throw new Error("invalid_snapshot");
+    }
+    snapshotValues = Object.fromEntries(cells);
+
+    for (let index = 0; index < foreignKeys.length; index++) {
+      const expected = row[prefix + "fk_" + index + "_expected"];
+      const countValue = row[prefix + "fk_" + index + "_count"];
+      const found = row[prefix + "fk_" + index + "_found"];
+      if ((expected !== null && typeof expected !== "string" && typeof expected !== "number") ||
+          (typeof expected === "number" && !Number.isFinite(expected)) ||
+          !Number.isSafeInteger(countValue) || (countValue as number) < 0 || (countValue as number) > 2 ||
+          (found !== null && typeof found !== "string" && typeof found !== "number") ||
+          (typeof found === "number" && !Number.isFinite(found)) ||
+          ((countValue as number) === 0 && found !== null) ||
+          ((countValue as number) > 0 && found === null)) {
+        throw new Error("invalid_snapshot");
+      }
+      fkStates[index] = {
+        expected: expected as string | number | null,
+        count: countValue as number,
+        found: found as string | number | null,
+      };
+    }
+  } catch {
+    throw new Error("invalid_snapshot");
+  }
+
+  if (snapshotCount === 0) throw new Error("row_not_found");
+  if (snapshotCount !== 1 || !snapshotValues) throw new Error("invalid_snapshot");
+
+  const before = snapshotSpreadsheetRawRow(
+    ctx,
+    prepared.pk as Record<string, string>,
+    snapshotValues,
+  );
+  const effectiveEntries: Array<[string, unknown]> = Object.entries(before);
+  if (prepared.values) {
+    for (const [column, value] of Object.entries(prepared.values)) {
+      const index = effectiveEntries.findIndex(([name]) => name === column);
+      const normalized = value === "" ? null : value;
+      if (index < 0) effectiveEntries.push([column, normalized]);
+      else effectiveEntries[index] = [column, normalized];
+    }
+  }
+  const effectiveRow = Object.fromEntries(effectiveEntries);
+
+  // Validate in catalog order so a real missing FK keeps CURRENT precedence.
+  for (let index = 0; index < foreignKeys.length; index++) {
+    const fk = foreignKeys[index]!;
+    if (!Object.hasOwn(effectiveRow, fk.column)) throw new Error("invalid_snapshot");
+    const raw = effectiveRow[fk.column];
+    let normalized: string | null;
+    if (raw === null || raw === "") normalized = raw as null | "";
+    else if (typeof raw === "string") {
+      if (raw.includes("\0")) throw new Error("invalid_snapshot");
+      normalized = raw;
+    } else if (typeof raw === "number" && Number.isFinite(raw)) {
+      normalized = String(raw);
+    } else {
+      throw new Error("invalid_snapshot");
+    }
+    const state = fkStates[index];
+    if (!state) throw new Error("invalid_snapshot");
+    const expected = state.expected === null ? null :
+      typeof state.expected === "number" ? String(state.expected) : state.expected;
+    if (expected !== normalized) throw new Error("invalid_snapshot");
+
+    const lookups = buildSpreadsheetForeignKeyLookups(
+      [fk],
+      [Object.freeze({ [fk.column]: normalized })],
+    );
+    if (lookups.length === 0) {
+      if (state.count !== 0 || state.found !== null) throw new Error("invalid_snapshot");
+      continue;
+    }
+    if (lookups.length !== 1 || state.count === 2) throw new Error("invalid_snapshot");
+    const rows = state.count === 1 ? [{ value: state.found! }] : [];
+    assertSpreadsheetForeignKeyLookup(lookups[0]!, rows);
+  }
+  return before;
+}
+
 function validateSpreadsheetMemberReleaseLookupRows(
   releaseIds: readonly string[],
   releaseRows: readonly unknown[],
@@ -1650,6 +1890,29 @@ async function handleCrudWrite(
           eventIdsByVideo = loaded.eventIdsByVideo;
           videoReads = loaded.reads;
         }
+      }
+    } else if (!memberMutation &&
+        (crudBody.method === "PATCH" || crudBody.method === "DELETE") &&
+        foreignKeys.length > 0 &&
+        ctx.def.table !== "videos" &&
+        ctx.def.table !== "video_events") {
+      const prepared = prepareSpreadsheetGuardedCrudMutation(ctx, crudBody, user.id);
+      const snapshotLookup = buildSpreadsheetSnapshotFkLookup(ctx, foreignKeys, prepared);
+      if (snapshotLookup) {
+        const receipt = await countedDb.prepare(snapshotLookup.statement)
+          .bind(...snapshotLookup.binds).all<unknown>();
+        const before = validateSpreadsheetSnapshotFkLookupReceipt(
+          ctx, foreignKeys, prepared, receipt,
+        );
+        plan = buildSpreadsheetGuardedCrudPlanFromSnapshot(ctx, prepared, before, user.id);
+        eventIdsByVideo = new Map();
+      } else {
+        plan = await planSpreadsheetGuardedCrud(
+          countedDb, ctx, crudBody, foreignKeys, user.id, SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES,
+        );
+        const loaded = await loadSpreadsheetVideoReleaseEvents(rawDb, [plan.audit]);
+        eventIdsByVideo = loaded.eventIdsByVideo;
+        videoReads = loaded.reads;
       }
     } else {
       plan = await planSpreadsheetGuardedCrud(
