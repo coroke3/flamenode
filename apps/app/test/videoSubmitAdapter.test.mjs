@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { canRestoreDraftField, isSectionDisabled, isFieldDisabled } from "../.test-dist/apps/app/src/components/forms/videoFormDraftFields.js";
 import {
   mapVideoSubmitMode,
   submitVideoForm,
@@ -154,4 +155,42 @@ test("U02b: member adapter exceptions are not swallowed by the port forwarder", 
   const member = videoMemberAdapterProps(ports);
   await assert.rejects(member.searchXUsers("x", 0, new AbortController().signal), (e) => e === sentinel);
   await assert.rejects(member.applyPermissionBatch({ videoId: "v1", notify: true, intents: [] }), (e) => e === sentinel);
+});
+
+test("MIG-0714 part A: draft restoration respects every CURRENT section and field lock", () => {
+  const groups = {
+    submitter: ["display_name", "profile_text", "icon_url", "youtube_channel_url", "other_social_links"],
+    video: ["title", "scheduled_time", "music", "music_reference_url", "credit", "youtube_url", "part"],
+    descriptions: ["intro_comment", "highlights", "production_story", "used_software", "closing_comment", "custom_answers", "stage_permission"],
+    members: ["is_collab", "members", "chapters"],
+  };
+  const entries = Object.entries(groups).flatMap(([section, names]) => names.map((name) => [
+    name, section, name === "members" || name === "chapters" ? name : `${section}.${name}`,
+  ]));
+  entries.push(["event_ids", null, "event_ids"]);
+  for (const [name, section, field] of entries) {
+    assert.equal(canRestoreDraftField(name, undefined, undefined), true, name);
+    for (const disabled of Object.keys(groups)) {
+      assert.equal(canRestoreDraftField(name, [disabled], []), section !== disabled, `${name}: ${disabled}`);
+    }
+    for (const [, , disabled] of entries) {
+      assert.equal(canRestoreDraftField(name, [], [disabled]), field !== disabled, `${name}: ${disabled}`);
+    }
+    assert.equal(canRestoreDraftField(name, Object.keys(groups), [field]), false, name);
+  }
+  // Chapters and membership have separate field locks in CURRENT.
+  assert.equal(canRestoreDraftField("chapters", [], ["members"]), true);
+  assert.equal(canRestoreDraftField("members", [], ["chapters"]), true);
+});
+
+test("MIG-0714 part A: omitted, unrelated and exact lock names keep CURRENT semantics", () => {
+  assert.equal(isSectionDisabled(undefined, "video"), false);
+  assert.equal(isFieldDisabled(undefined, "video.title"), false);
+  assert.equal(isSectionDisabled(["video"], "video"), true);
+  assert.equal(isFieldDisabled(["video.title"], "video.title"), true);
+  assert.equal(isFieldDisabled(["VIDEO.TITLE", "video"], "video.title"), false);
+  assert.equal(canRestoreDraftField("title", ["VIDEO"], ["title"]), true);
+  assert.equal(canRestoreDraftField("event_ids", ["video", "members"], []), true);
+  // The draft parser/caller limits actual restored fields; this helper is not authorization.
+  assert.equal(canRestoreDraftField("unknown_field", ["video"], ["unknown_field"]), true);
 });
