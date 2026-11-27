@@ -133,6 +133,10 @@ const reviewAdapter = (overrides = {}) => ({
   ...overrides,
 });
 
+const queueReceipt = (authorizationEpoch, rows) => ({
+  authorizationEpoch, result: { status: "ok", data: { rows } },
+});
+
 async function withReviewBody(actions, run, rows = [row, { ...row, id: "req/2" }]) {
   const dom = new JSDOM('<div id="root"></div>', {
     url: "https://flamenode.test/manage/x-link-requests", pretendToBeVisual: true,
@@ -152,9 +156,12 @@ async function withReviewBody(actions, run, rows = [row, { ...row, id: "req/2" }
   try {
     const { createRoot } = await import("react-dom/client");
     root = createRoot(node);
-    const draw = (adapter, nextRows = rows) => React.act(async () => root.render(
+    const draw = (adapter, nextRows = rows, receipt = adapter
+      ? queueReceipt(adapter.authorizationEpoch, nextRows) : null) => React.act(async () => root.render(
       h(MemoryRouter, { initialEntries: ["/manage/x-link-requests"] },
-        h(ManageXLinkRequestsBody, { data: { rows: nextRows }, reviewActions: adapter })),
+        h(ManageXLinkRequestsBody, {
+          data: { rows: nextRows }, reviewActions: adapter, authorizedQueue: receipt ?? undefined,
+        })),
     ));
     await draw(actions);
     await run({ node, dom, draw, unmount: async () => {
@@ -177,7 +184,10 @@ const button = (node, label, rowIndex = 0) => [...node.querySelectorAll("tbody t
 test("U03c injected review controls allow only link requests; no default live write", () => {
   const data = { rows: [row, { ...row, id: "merge", request_type: "merge" },
     { ...row, id: "existing", request_type: "existing_link" }] };
-  const doc = new JSDOM(render(h(ManageXLinkRequestsBody, { data, reviewActions: reviewAdapter() }))).window.document;
+  const adapter = reviewAdapter();
+  const doc = new JSDOM(render(h(ManageXLinkRequestsBody, {
+    data, reviewActions: adapter, authorizedQueue: queueReceipt(adapter.authorizationEpoch, data.rows),
+  }))).window.document;
   assert.equal(doc.querySelectorAll("tbody tr")[0].querySelectorAll("button").length, 2);
   assert.equal(doc.querySelectorAll("tbody tr")[1].querySelectorAll("button").length, 0);
   assert.equal(doc.querySelectorAll("tbody tr")[2].querySelectorAll("button").length, 2);
@@ -302,12 +312,23 @@ test("U03c acknowledged success survives refresh failure; network failure remain
   });
 });
 
-test("U03c explicit authority epoch is required for injected mutation controls", () => {
+test("U03c missing or invalid authority/queue receipt hides private rows and mutation controls", () => {
   for (const authorizationEpoch of ["", " ", undefined]) {
     const doc = new JSDOM(render(h(ManageXLinkRequestsBody, {
       data: { rows: [row] }, reviewActions: reviewAdapter({ authorizationEpoch }),
     }))).window.document;
     assert.equal(doc.querySelectorAll("button").length, 0);
+    assert.doesNotMatch(doc.body.textContent, /Discord Staff|account1/);
+  }
+  const adapter = reviewAdapter();
+  for (const authorizedQueue of [undefined, queueReceipt("other", [row]), {
+    authorizationEpoch: adapter.authorizationEpoch, result: { status: "loading" },
+  }]) {
+    const doc = new JSDOM(render(h(ManageXLinkRequestsBody, {
+      data: { rows: [row] }, reviewActions: adapter, authorizedQueue,
+    }))).window.document;
+    assert.equal(doc.querySelectorAll("button").length, 0);
+    assert.doesNotMatch(doc.body.textContent, /Discord Staff|account1/);
   }
 });
 
@@ -333,6 +354,11 @@ test("U03c committed A-B-A and A-absent-A discard old success, 401 and domain fa
         assert.deepEqual(calls, ["req/1"]);
         await draw(intermediate);
         assert.equal(node.querySelector("textarea"), null);
+        await draw(adapter);
+        // The old epoch and even a tagged old snapshot cannot be reused.
+        assert.doesNotMatch(node.textContent, /Discord Staff|account1/);
+        assert.equal(node.querySelectorAll("button").length, 0);
+        adapter.authorizationEpoch = "test-authority-returned";
         await draw(adapter);
         assert.equal(node.querySelector("textarea"), null);
         // Same global queue: do not assume another actor has a disjoint write scope.
@@ -374,6 +400,9 @@ test("U03c a stable adapter with changed epoch invalidates receipt; ordinary que
     assert.equal(node.querySelector("textarea"), null);
     await React.act(async () => button(node, "承認").click());
     adapter.authorizationEpoch = "test-authority-3";
+    await draw(adapter, undefined, queueReceipt("test-authority-1", [row]));
+    assert.doesNotMatch(node.textContent, /Discord Staff|account1/);
+    assert.equal(node.querySelectorAll("button").length, 0);
     await draw(adapter);
     await React.act(async () => receipt.resolve(success));
     assert.equal(refreshes, 0);
@@ -382,7 +411,7 @@ test("U03c a stable adapter with changed epoch invalidates receipt; ordinary que
   });
 });
 
-test("U03c a committed 401 stays hidden until a new explicit authority epoch", async () => {
+test("U03c a committed 401 stays hidden until a new authority and its successful GET", async () => {
   let anonymous = 0;
   const adapter = reviewAdapter({
     approve: async () => ({ status: "anonymous" }), onAnonymous: () => { anonymous++; },
@@ -393,8 +422,55 @@ test("U03c a committed 401 stays hidden until a new explicit authority epoch", a
     await draw(undefined);
     await draw(reviewAdapter());
     assert.doesNotMatch(node.textContent, /Discord Staff|account1/);
-    await draw(reviewAdapter({ authorizationEpoch: "test-authority-4" }));
-    assert.match(node.textContent, /Discord Staff/);
+    const next = reviewAdapter({ authorizationEpoch: "test-authority-4" });
+    const assertHidden = () => {
+      assert.doesNotMatch(node.textContent, /Discord Staff|account1|req\/1/);
+      assert.equal(node.querySelectorAll("button").length, 0);
+    };
+    await draw(next, undefined, null);
+    assertHidden();
+    await draw(next, undefined, queueReceipt("test-authority-1", [row]));
+    assertHidden();
+    for (const status of ["loading", "anonymous", "forbidden", "notFound", "unavailable", "unsupported"]) {
+      await draw(next, undefined, { authorizationEpoch: next.authorizationEpoch, result: { status } });
+      assertHidden();
+    }
+    const fresh = { ...row, id: "fresh/4", discord_name: "New authorized row", requested_by_auth_user_id: "account4" };
+    await draw(next, undefined, queueReceipt(next.authorizationEpoch, [fresh]));
+    assert.match(node.textContent, /New authorized row|account4/);
+    assert.doesNotMatch(node.textContent, /Discord Staff|account1|req\/1/);
     assert.equal(button(node, "承認").disabled, false);
+  });
+});
+
+test("U03c a delayed refresh lease cannot publish into a replacement authority", async () => {
+  const refresh = deferred();
+  const started = [];
+  const accepted = [];
+  const adapter = reviewAdapter({
+    onRefresh: async (epoch, isCurrent) => {
+      started.push(epoch);
+      await refresh.promise;
+      if (isCurrent()) accepted.push(epoch);
+    },
+  });
+  await withReviewBody(adapter, async ({ node, draw }) => {
+    await React.act(async () => button(node, "承認").click());
+    assert.deepEqual(started, ["test-authority-1"]);
+    assert.deepEqual(accepted, []);
+    adapter.authorizationEpoch = "test-authority-2";
+    await draw(adapter, undefined, queueReceipt("test-authority-1", [row]));
+    assert.doesNotMatch(node.textContent, /Discord Staff|account1/);
+    const fresh = { ...row, id: "fresh/2", discord_name: "Fresh queue" };
+    await draw(adapter, undefined, queueReceipt(adapter.authorizationEpoch, [fresh]));
+    assert.match(node.textContent, /Fresh queue/);
+    assert.equal(button(node, "承認").disabled, true);
+    await React.act(async () => refresh.resolve());
+    assert.deepEqual(accepted, []);
+    assert.doesNotMatch(node.textContent, /処理しました|Discord Staff/);
+    assert.equal(button(node, "承認").disabled, false);
+    await React.act(async () => button(node, "承認").click());
+    assert.deepEqual(started, ["test-authority-1", "test-authority-2"]);
+    assert.deepEqual(accepted, ["test-authority-2"]);
   });
 });

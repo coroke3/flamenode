@@ -89,13 +89,20 @@ function Row({ row, children }: { row: ManageXLinkRequest; children?: React.Reac
 }
 
 type ReviewActions = {
-  // Opaque, nonempty host-verified authorization generation. Rotate after
-  // reauthentication, account/capability changes, and authoritative revalidation.
+  // Opaque, nonempty host-verified authorization generation. Never reuse a
+  // retired value after reauthentication, authority change, or adapter absence.
   authorizationEpoch: string;
   approve: (requestId: string) => Promise<OpsWriteResult<XIdLinkReviewResult>>;
   reject: (requestId: string, reason: string) => Promise<OpsWriteResult<XIdLinkReviewResult>>;
-  onRefresh: () => void | Promise<void>;
+  // The host must check the supplied lease before publishing an async refresh.
+  onRefresh: (authorizationEpoch: string, isCurrent: () => boolean) => void | Promise<void>;
   onAnonymous: () => void;
+};
+
+// Host supplies this only from a GET associated with the stated generation.
+type AuthorizedQueue = {
+  authorizationEpoch: string;
+  result: OpsDataState<ManageXLinkRequestsResponse>;
 };
 
 const REVIEW_UNAVAILABLE = "通信または処理中に問題が発生しました。再読み込みしてお試しください。";
@@ -107,16 +114,28 @@ function isLinkRequest(row: ManageXLinkRequest): boolean {
 /**
  * Contract-first candidate: absent reviewActions means read-only.
  * A future authorized host may inject a stable adapter only after MIG-0605.
- * Rotate its authorizationEpoch on verified authority changes, not ordinary
- * queue refresh. The queue is global; do not assume different actors have
- * disjoint write scopes. Server-side permission, CAS and audit are authoritative.
+ * A successful schema-validated GET for the same non-retired epoch is also
+ * required. Ordinary same-authority refresh may retain that authorized snapshot;
+ * a new authority must never inherit it. Server-side permission, CAS and audit
+ * remain authoritative; this is not the live host wiring.
  */
-export function ManageXLinkRequestsBody({ data, reviewActions: proposedActions }: {
-  data: ManageXLinkRequestsResponse; reviewActions?: ReviewActions;
+export function ManageXLinkRequestsBody({ data: readOnlyData, reviewActions: proposedActions, authorizedQueue }: {
+  data: ManageXLinkRequestsResponse;
+  reviewActions?: ReviewActions;
+  authorizedQueue?: AuthorizedQueue;
 }): React.ReactElement {
-  const reviewActions = typeof proposedActions?.authorizationEpoch === "string" &&
+  const reviewModeCommitted = React.useRef(false);
+  const committedEpoch = React.useRef<string | undefined>(undefined);
+  const retiredEpochs = React.useRef(new Set<string>());
+  const reviewMode = reviewModeCommitted.current || proposedActions !== undefined || authorizedQueue !== undefined;
+  const validActions = typeof proposedActions?.authorizationEpoch === "string" &&
     proposedActions.authorizationEpoch.trim() ? proposedActions : undefined;
-  const epoch = reviewActions?.authorizationEpoch;
+  const epoch = validActions?.authorizationEpoch;
+  const queueData = epoch !== undefined && !retiredEpochs.current.has(epoch) &&
+    authorizedQueue && authorizedQueue.authorizationEpoch === epoch &&
+    authorizedQueue.result.status === "ok" ? authorizedQueue.result.data : null;
+  const reviewActions = queueData !== null ? validActions : undefined;
+  const data = queueData ?? readOnlyData;
   const [pending, setPending] = React.useState(false);
   const [message, setMessage] = React.useState<string | null>(null);
   const [rejectingId, setRejectingId] = React.useState<string | null>(null);
@@ -135,6 +154,14 @@ export function ManageXLinkRequestsBody({ data, reviewActions: proposedActions }
   React.useLayoutEffect(() => {
     // A committed adapter/epoch transition invalidates receipts even if the
     // very same adapter object later returns (A -> B -> A or A -> absent -> A).
+    // Retirement is a committed transition, not a render or StrictMode cleanup.
+    // Once review mode has been used, falling back to the untagged read-only
+    // prop would expose stale private rows while the host revalidates.
+    if (reviewMode) reviewModeCommitted.current = true;
+    if (committedEpoch.current !== epoch) {
+      if (committedEpoch.current !== undefined) retiredEpochs.current.add(committedEpoch.current);
+      committedEpoch.current = epoch;
+    }
     const token = {};
     generation.current = token;
     actionsRef.current = reviewActions;
@@ -150,8 +177,8 @@ export function ManageXLinkRequestsBody({ data, reviewActions: proposedActions }
     setMessage(null);
     setRejectingId(null);
     setReason("");
-    if (epoch !== undefined && epoch !== lastAuthorizedEpoch.current) {
-      // Only a new explicit authority generation may clear a prior 401.
+    if (reviewActions && epoch !== undefined && epoch !== lastAuthorizedEpoch.current) {
+      // Only a new authority AND its successful GET may clear a prior 401.
       lastAuthorizedEpoch.current = epoch;
       denied.current = false;
       setAuthLost(false);
@@ -163,7 +190,7 @@ export function ManageXLinkRequestsBody({ data, reviewActions: proposedActions }
       setAcknowledged(new Set());
     }
     return () => { generation.current = null; actionsRef.current = undefined; };
-  }, [reviewActions, epoch]);
+  }, [reviewActions, epoch, reviewMode]);
 
   React.useLayoutEffect(() => {
     if (rejectingId !== null && !data.rows.some(row => row.id === rejectingId && isLinkRequest(row))) {
@@ -189,7 +216,9 @@ export function ManageXLinkRequestsBody({ data, reviewActions: proposedActions }
     inFlight.current = operation;
     setPending(true);
     setMessage(null);
-    const isCurrent = () => generation.current === token && actionsRef.current === adapter;
+    const operationEpoch = adapter.authorizationEpoch;
+    const isCurrent = () => generation.current === token && actionsRef.current === adapter &&
+      adapter.authorizationEpoch === operationEpoch && !denied.current;
     try {
       const result = action === "approve"
         ? await adapter.approve(row.id)
@@ -213,7 +242,7 @@ export function ManageXLinkRequestsBody({ data, reviewActions: proposedActions }
         setAcknowledged(new Set(acknowledgedRef.current));
         closeReject();
         try {
-          await adapter.onRefresh();
+          await adapter.onRefresh(operationEpoch, isCurrent);
         } catch {
           if (isCurrent()) setMessage((current) => (current ?? "処理しました。") + " 一覧の再取得に失敗しました。再読み込みしてください。");
         }
@@ -228,7 +257,9 @@ export function ManageXLinkRequestsBody({ data, reviewActions: proposedActions }
     }
   }
 
-  if (authLost) return <div role="status" aria-busy="true">読み込み中...</div>;
+  if (authLost || (reviewMode && queueData === null)) {
+    return <div role="status" aria-busy="true">読み込み中...</div>;
+  }
 
   return <div className="manage-x-link-requests">
     <ConsolePageHeader title="X ID 申請"
