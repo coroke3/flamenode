@@ -485,6 +485,20 @@ export function AdminSpreadsheetEditableGrid({
       void replay(event.shiftKey ? "redo" : "undo");
       return;
     }
+    if (event.key === "F2") {
+      const historyBusy = inFlight.current !== null && historyInFlight.current === inFlight.current;
+      if (identityChanged || !isCurrent() || displayedPage.current !== data || liveSelection.current !== null ||
+          historyBusy || !rows[rowIndex] || !columns[colIndex]) return;
+      // CURRENT consumes F2 and collapses selection even when the focused column cannot be edited.
+      // The isolated editor retains its stricter live PK/authority/write fence.
+      event.preventDefault();
+      if (!startCellEdit(rowIndex, colIndex)) {
+        const position = { row: rowIndex, col: colIndex };
+        setAnchorCell(position);
+        focusGridCell(position);
+      }
+      return;
+    }
     if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown", "Tab", "Enter"].includes(event.key)) return;
     const historyBusy = inFlight.current !== null && historyInFlight.current === inFlight.current;
     if (identityChanged || !isCurrent() || liveSelection.current !== null || historyBusy ||
@@ -624,7 +638,7 @@ export function AdminSpreadsheetEditableGrid({
           <button type="button" disabled={!canMutate} onClick={() => void addRow()}>追加を保存</button>
         </div>
       ) : null}
-      <p>矢印キーで移動、Shift＋矢印で範囲選択、Ctrl/Cmd＋Aで全体選択、Shift＋Spaceで行選択、Ctrl/Cmd＋Spaceで列選択、Ctrl/Cmd＋CでTSVコピー、Enterで下へ移動、編集ボタンで編集できます。</p>
+      <p>矢印キーで移動、Shift＋矢印で範囲選択、Ctrl/Cmd＋Aで全体選択、Shift＋Spaceで行選択、Ctrl/Cmd＋Spaceで列選択、Ctrl/Cmd＋CでTSVコピー、Enterで下へ移動、F2または編集ボタンで編集できます。</p>
       <p>セルのドラッグで範囲選択できます。見出しのクリックで全体・行・列を選択し、Shift＋行・列見出しで現在の始点から範囲を広げられます。</p>
       <p>編集中はEnterで確定して下へ、Tabで確定して右へ、Shift＋Tabで確定して左へ移動できます。Escapeでキャンセルできます。</p>
       <p>Ctrl/Cmd＋Fで現在のページ内を検索できます。</p>

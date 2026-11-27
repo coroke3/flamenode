@@ -1251,14 +1251,14 @@ test("MIG-0737 U01 navigation: descendant controls retain navigation keys and th
   } finally { await ui.cleanup(); }
 });
 
-test("MIG-0737 U01 navigation: excluded F2 and text keys retain the previous nonediting behavior", async () => {
+test("MIG-0737 U01 navigation: excluded text and other keys retain the previous nonediting behavior", async () => {
   // This checks only the existing uncancelled grid event boundary for excluded keys.
   const ui = await mount({ data: rangeData });
   const scrolls = watchNavigationScroll(ui);
   try {
     await selectCell(ui, "1:1");
     scrolls.length = 0;
-    for (const key of ["F2", "Escape", "x", "Homebrew"]) {
+    for (const key of ["Escape", "x", "Homebrew"]) {
       assert.equal((await press(document.activeElement, key)).defaultPrevented, false, key);
       assertNavigation(ui, "1:1");
       assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 0);
@@ -1609,6 +1609,127 @@ test("MIG-0737 U01 Enter navigation: ordinary pending save permits movement, mat
     await flush();
     assert.equal((await press(cell, "Enter")).defaultPrevented, true);
     assertNavigation(ui, "2:1");
+    assert.equal(requests.length, 2);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 F2: all modifiers open original value and collapse the selection, without writing", async () => {
+  const effects = [];
+  const ui = await mount({ data: rangeData, allowMutations: true,
+    fetchFn: async () => { effects.push("request"); throw Error("F2 must not save"); },
+    onRefresh: () => { effects.push("refresh"); } });
+  try {
+    for (let bits = 0; bits < 16; bits++) {
+      await selectNavigationRange(ui, "0:0", "1:1");
+      const cell = gridCell(ui, "1:1");
+      assert.equal((await press(cell, "F2", { ctrlKey: !!(bits & 1), metaKey: !!(bits & 2),
+        altKey: !!(bits & 4), shiftKey: !!(bits & 8) })).defaultPrevented, true);
+      assert.deepEqual(selectedCells(ui), ["1:1"]);
+      const editor = cell.querySelector('input[type="text"]');
+      assert.ok(editor && document.activeElement === editor);
+      assert.equal(editor.value, "Beta");
+      assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 1);
+      assert.equal((await press(editor, "Escape")).defaultPrevented, true);
+      assertNavigation(ui, "1:1");
+      assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 0);
+    }
+    assert.deepEqual(effects, []);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 F2: denied columns and authorities still collapse selection but never open a draft", async () => {
+  const variants = [
+    { data: rangeData, allowMutations: false, focus: "1:1" },
+    { data: { ...rangeData, def: { ...rangeData.def, mode: "readonly" } }, allowMutations: true, focus: "1:1" },
+    { data: { ...rangeData, primaryKeys: [] }, allowMutations: true, focus: "1:1" },
+    { data: { ...rangeData, rows: [rangeData.rows[0], { ...rangeData.rows[1], id: null }, rangeData.rows[2]] }, allowMutations: true, focus: "1:1" },
+    { data: rangeData, allowMutations: true, focus: "1:0" },
+    { data: rangeData, allowMutations: true, focus: "1:2" },
+    { data: { ...rangeData, columns: [rangeData.columns[0], { ...rangeData.columns[1], generated: true }, rangeData.columns[2]] }, allowMutations: true, focus: "1:1" },
+  ];
+  for (const variant of variants) {
+    const effects = [];
+    const ui = await mount({ data: variant.data, allowMutations: variant.allowMutations,
+      fetchFn: async () => { effects.push("request"); throw Error("F2 must not write"); },
+      onRefresh: () => { effects.push("refresh"); } });
+    const scrolls = watchNavigationScroll(ui);
+    try {
+      await selectNavigationRange(ui, "0:0", variant.focus);
+      scrolls.length = 0;
+      assert.equal((await press(document.activeElement, "F2")).defaultPrevented, true);
+      assertNavigation(ui, variant.focus);
+      assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 0);
+      assert.deepEqual(scrolls, []);
+      assert.deepEqual(effects, []);
+    } finally { await ui.cleanup(); }
+  }
+});
+
+test("MIG-0737 U01 F2: child, repeated same-batch and invalidated drafts retain event ownership", async () => {
+  const effects = [];
+  const ui = await mount({ data: rangeData, allowMutations: true,
+    fetchFn: async () => { effects.push("request"); throw Error("F2 must not save"); },
+    onRefresh: () => { effects.push("refresh"); } });
+  try {
+    const cell = await selectCell(ui, "1:1");
+    const child = cell.querySelector("button");
+    child.focus();
+    assert.equal((await press(child, "F2")).defaultPrevented, false);
+    assert.ok(document.activeElement === child);
+    const first = new dom.window.KeyboardEvent("keydown", { key: "F2", bubbles: true, cancelable: true });
+    const second = new dom.window.KeyboardEvent("keydown", { key: "F2", bubbles: true, cancelable: true });
+    await React.act(async () => { cell.dispatchEvent(first); gridCell(ui, "2:1").dispatchEvent(second); });
+    assert.equal(first.defaultPrevented, true);
+    assert.equal(second.defaultPrevented, false);
+    const editor = cell.querySelector("input");
+    assert.ok(editor && document.activeElement === editor);
+    await React.act(async () => {
+      Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value").set.call(editor, "Unsaved");
+      editor.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    });
+    for (const target of [editor, cell, gridCell(ui, "2:1")]) {
+      assert.equal((await press(target, "F2")).defaultPrevented, false);
+      assert.ok(document.activeElement === editor);
+      assert.equal(editor.value, "Unsaved");
+      assert.deepEqual(selectedCells(ui), ["1:1"]);
+    }
+    await ui.render({ data: { ...rangeData, rows: [rangeData.rows[0], { ...rangeData.rows[1], title: "Server change" }, rangeData.rows[2]] } });
+    assert.match(ui.host.textContent, /編集中の行または列の状態が変更/);
+    assert.equal((await press(gridCell(ui, "2:1"), "F2")).defaultPrevented, false);
+    assert.deepEqual(selectedCells(ui), ["1:1"]);
+    assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 0);
+    assert.deepEqual(effects, []);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 F2: pending ordinary write cannot open a second editor and history blocks the shortcut", async () => {
+  const requests = [];
+  const ui = await mount({ data: rangeData, allowMutations: true,
+    fetchFn: (_, init) => new Promise(resolve => requests.push({ init, resolve })),
+    onRefresh: () => {} });
+  try {
+    await beginTitleSave(ui, "Changed");
+    assert.equal(requests.length, 1);
+    await selectNavigationRange(ui, "0:0", "2:1");
+    assert.equal((await press(document.activeElement, "F2")).defaultPrevented, true);
+    assertNavigation(ui, "2:1");
+    assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 0);
+    await React.act(async () => requests[0].resolve(successfulWrite()));
+    await flush();
+    const cell = await selectCell(ui, "1:1");
+    const following = new dom.window.KeyboardEvent("keydown", { key: "F2", bubbles: true, cancelable: true });
+    await React.act(async () => {
+      cell.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "z", ctrlKey: true, bubbles: true }));
+      cell.dispatchEvent(following);
+    });
+    assert.equal(requests.length, 2);
+    assert.equal(following.defaultPrevented, false);
+    assert.equal((await press(cell, "F2")).defaultPrevented, false);
+    assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 0);
+    await React.act(async () => requests[1].resolve(successfulWrite()));
+    await flush();
+    assert.equal((await press(cell, "F2")).defaultPrevented, true);
+    assert.ok(cell.querySelector("input"));
     assert.equal(requests.length, 2);
   } finally { await ui.cleanup(); }
 });
