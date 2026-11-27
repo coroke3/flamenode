@@ -65,6 +65,11 @@ function normalizeGapSec(gapSec: number): number {
   return Number.isFinite(gapSec) && gapSec >= 0 ? gapSec : 15 * 60;
 }
 
+// Treat malformed provider timestamps as untimed without mutating source rows.
+function finiteStartTime(value: number | null | undefined): number | null {
+  return value != null && Number.isFinite(value) ? value : null;
+}
+
 export function sortSlotsChronologically<
   T extends {
     id?: string | null;
@@ -73,12 +78,21 @@ export function sortSlotsChronologically<
   },
 >(rows: T[]): T[] {
   return [...rows].sort((a, b) => {
-    const aTimed = a.start_time != null;
-    const bTimed = b.start_time != null;
+    // Malformed timestamps must not bypass the order/id tie-breaker via NaN.
+    const aStart = finiteStartTime(a.start_time);
+    const bStart = finiteStartTime(b.start_time);
+    const aTimed = aStart !== null;
+    const bTimed = bStart !== null;
     if (aTimed !== bTimed) return aTimed ? -1 : 1;
-    const startDiff = (a.start_time ?? 0) - (b.start_time ?? 0);
+    const startDiff = (aStart ?? 0) - (bStart ?? 0);
     if (startDiff !== 0) return startDiff;
-    const orderDiff = (a.sort_order ?? 0) - (b.sort_order ?? 0);
+    const aOrder = a.sort_order != null && Number.isSafeInteger(a.sort_order)
+      ? a.sort_order
+      : 0;
+    const bOrder = b.sort_order != null && Number.isSafeInteger(b.sort_order)
+      ? b.sort_order
+      : 0;
+    const orderDiff = aOrder - bOrder;
     return orderDiff || (a.id ?? "").localeCompare(b.id ?? "");
   });
 }
@@ -95,6 +109,8 @@ export function areSlotsInSamePart<
     return (
       prev.sort_order != null &&
       next.sort_order != null &&
+      Number.isSafeInteger(prev.sort_order) &&
+      Number.isSafeInteger(next.sort_order) &&
       next.sort_order === prev.sort_order + 1
     );
   }
@@ -114,9 +130,9 @@ export function buildSlotParts<
       parts.push({
         index: parts.length + 1,
         rows: current,
-        start_time: current[0]?.start_time ?? null,
-        last_start_time: current.at(-1)?.start_time ?? null,
-        is_timeless: current[0]?.start_time == null,
+        start_time: finiteStartTime(current[0]?.start_time),
+        last_start_time: finiteStartTime(current.at(-1)?.start_time),
+        is_timeless: finiteStartTime(current[0]?.start_time) === null,
       });
       current = [];
     }
@@ -126,9 +142,9 @@ export function buildSlotParts<
     parts.push({
       index: parts.length + 1,
       rows: current,
-      start_time: current[0]?.start_time ?? null,
-      last_start_time: current.at(-1)?.start_time ?? null,
-      is_timeless: current[0]?.start_time == null,
+      start_time: finiteStartTime(current[0]?.start_time),
+      last_start_time: finiteStartTime(current.at(-1)?.start_time),
+      is_timeless: finiteStartTime(current[0]?.start_time) === null,
     });
   }
   return parts;

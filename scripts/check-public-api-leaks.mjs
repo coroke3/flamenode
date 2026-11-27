@@ -110,27 +110,33 @@ function fetchWithTimeout(url) {
   });
 }
 
-async function checkEndpoint(url) {
+/** Diagnostic output is best-effort; return the failure verdict even with a broken log sink. */
+function logProbeFailure(message) {
+  try {
+    console.error(message);
+  } catch {
+    // A failed logger must not change the CI probe failure classification.
+  }
+}
+
+export async function checkEndpoint(url, fetchPage = fetchWithTimeout) {
   let response;
   try {
-    response = await fetchWithTimeout(url);
-  } catch (error) {
-    console.error(
-      `[fetch error] ${url}: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    response = await fetchPage(url);
+  } catch {
+    // Provider exceptions can expose credentials or have throwing message getters.
+    logProbeFailure(`[fetch error] ${url}: network_error`);
     return { kind: "fetch_error" };
   }
   if (!response.ok) {
-    console.error(`[HTTP ${response.status}] ${url}`);
+    logProbeFailure(`[HTTP ${response.status}] ${url}`);
     return { kind: "http_error" };
   }
   try {
     const json = await response.json();
     return { kind: "ok", violations: findForbiddenPublicKeys(json) };
-  } catch (error) {
-    console.error(
-      `[invalid json] ${url}: ${error instanceof Error ? error.message : String(error)}`,
-    );
+  } catch {
+    logProbeFailure(`[invalid json] ${url}: malformed_json`);
     return { kind: "invalid_json" };
   }
 }
@@ -144,12 +150,8 @@ export async function discoverVideoDetailEndpoint(baseUrl, fetchPage = fetchWith
   let response;
   try {
     response = await fetchPage(url);
-  } catch (error) {
-    return {
-      kind: "fetch_error",
-      url,
-      message: error instanceof Error ? error.message : String(error),
-    };
+  } catch {
+    return { kind: "fetch_error", url };
   }
   if (!response.ok) {
     return { kind: "http_error", url, status: response.status };
@@ -182,10 +184,11 @@ export async function discoverVideoDetailEndpoint(baseUrl, fetchPage = fetchWith
   };
 }
 
-async function runLiveCheck(baseUrl) {
+export async function runLiveCheck(baseUrl, fetchPage = fetchWithTimeout, onExit = (code) => process.exit(code)) {
   if (!/^https?:\/\//i.test(baseUrl ?? "")) {
-    console.error("Usage: node scripts/check-public-api-leaks.mjs --live <baseUrl>");
-    process.exit(3);
+    logProbeFailure("Usage: node scripts/check-public-api-leaks.mjs --live <baseUrl>");
+    onExit(3);
+    return;
   }
   const normalized = baseUrl.replace(/\/+$/, "");
   const endpoints = [
@@ -194,23 +197,23 @@ async function runLiveCheck(baseUrl) {
     `${normalized}/api/events?limit=5`,
     `${normalized}/api/software/suggestions?limit=5`,
   ];
-  const detail = await discoverVideoDetailEndpoint(normalized);
+  const detail = await discoverVideoDetailEndpoint(normalized, fetchPage);
   let exitCode = 0;
   if (detail.kind === "ok") {
     endpoints.push(detail.endpoint);
   } else if (detail.kind === "fetch_error") {
-    console.error(`[fetch error] ${detail.url}: ${detail.message}`);
+    logProbeFailure(`[fetch error] ${detail.url}: network_error`);
     exitCode = 2;
   } else if (detail.kind === "http_error") {
-    console.error(`[HTTP ${detail.status}] ${detail.url}`);
+    logProbeFailure(`[HTTP ${detail.status}] ${detail.url}`);
     exitCode = 3;
   } else if (detail.kind === "invalid_json") {
-    console.error(`[invalid json] ${detail.url}: expected items array with a valid video id`);
+    logProbeFailure(`[invalid json] ${detail.url}: expected items array with a valid video id`);
     exitCode = 3;
   }
 
   for (const url of endpoints) {
-    const result = await checkEndpoint(url);
+    const result = await checkEndpoint(url, fetchPage);
     if (result.kind === "fetch_error") {
       exitCode = Math.max(exitCode, 2);
       continue;
@@ -222,13 +225,16 @@ async function runLiveCheck(baseUrl) {
     if (result.violations.length > 0) {
       exitCode = Math.max(exitCode, 1);
       for (const violation of result.violations) {
-        console.error(
+        logProbeFailure(
           `[check:public-api-leaks] forbidden key "${violation.key}" at ${violation.path}`,
         );
       }
     }
   }
-  if (exitCode !== 0) process.exit(exitCode);
+  if (exitCode !== 0) {
+    onExit(exitCode);
+    return;
+  }
   console.log(
     "[check:public-api-leaks] OK: live public API responses contain no forbidden keys.",
   );

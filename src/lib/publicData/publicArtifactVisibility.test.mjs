@@ -310,3 +310,31 @@ test("SEC-712: event_slots slot artifacts remain intact, video flags and 500-ite
   ] };
   assert.deepEqual(filterPublicArtifactPayload("event_slots", nonPublic)?.items.map((row) => row.id), ["v-ok"]);
 });
+
+test("SEC-712: visibility filtering cannot repair an invalid complete playlist", () => {
+  const context = buildPublicArtifactVisibilityContext({
+    schema_version: 1, revision: 1, generated_at: 1,
+    entities: [{ entity_type: "video", entity_id: "v-hidden", fence_token: "f", blocked_at: 1 }],
+  });
+  const safe = [
+    { id: "v-a", title: "A", display_name: "Author A" },
+    { id: "v-b", title: "B", display_name: "Author B" },
+  ];
+  const hidden = { id: "v-hidden", title: "Hidden", display_name: "Hidden", status: "private" };
+  const cases = [
+    ["501 rows with a removable final row", [
+      ...Array.from({ length: 500 }, (_, index) => ({ ...safe[0], id: `v-${index}` })), hidden,
+    ]],
+    ["null row", [...safe, null]],
+    ["malformed hidden row", [...safe, { ...hidden, title: "" }]],
+    ["duplicate hidden IDs", [...safe, hidden, { ...hidden }]],
+  ];
+  for (const [name, items] of cases) {
+    const original = { schema_version: 1, event_id: "evt-public", complete: true, items };
+    const before = structuredClone(original);
+    for (const visibility of [context, undefined]) {
+      assert.equal(filterPublicArtifactPayload("event_slots", original, visibility), null, name);
+    }
+    assert.deepEqual(original, before, `${name}: source remains unchanged`);
+  }
+});

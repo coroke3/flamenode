@@ -107,7 +107,14 @@ function normalizeReleaseVideo(value: unknown): StaticEventReleaseVideo | null {
   const row = value as Record<string, unknown>;
   const id = normalizeTrimmedString(row.id);
   const title = normalizeTrimmedString(row.title);
-  if (!id || !title || !isPublicVideoListable(row.visibility_status)) return null;
+  // Public release artifacts normally carry only visibility_status; an
+  // explicitly contradictory legacy status must not re-label a private row.
+  if (
+    !id ||
+    !title ||
+    !isPublicVideoListable(row.visibility_status) ||
+    (row.status != null && !isPublicVideoListable(row.status))
+  ) return null;
   const rawMembers = Array.isArray(row.members) ? row.members : [];
   const members = rawMembers
     .map(normalizeReleaseMember)

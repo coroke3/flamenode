@@ -108,6 +108,29 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.deepEqual(h.reads, [videoKey, playlistKey]);
   });
 
+  test("SEC-712 Hono: filtering cannot conceal an invalid original playlist", async (t) => {
+    const safe = [playlist.items[0], playlist.items[2]];
+    const hidden = playlist.items[1];
+    const cases = [
+      ["501 rows", [
+        ...Array.from({ length: 500 }, (_, index) => ({ ...safe[0], id: `vid-${index}` })), hidden,
+      ]],
+      ["null row", [...safe, null]],
+      ["malformed fenced row", [...safe, { ...hidden, title: "" }]],
+      ["duplicate fenced IDs", [...safe, hidden, { ...hidden }]],
+    ];
+    for (const [name, items] of cases) {
+      const h = harness(t);
+      await seed(h, [fence("video", "vid-revoked")]);
+      await h.storage.put(playlistKey, { ...playlist, items });
+      const { response, body } = await h.request();
+      assert.equal(response.status, 200, name);
+      assertSafe(h, response);
+      assert.deepEqual(JSON.parse(body).playlistItems, [], name);
+      assert.equal(JSON.parse(body).playlistLabel, "再生リスト", name);
+    }
+  });
+
   test("SEC-712 Hono: event fence and malformed manifest fail closed", async (t) => {
     const h = harness(t);
     await seed(h, [fence("event", "evt-1")]);
