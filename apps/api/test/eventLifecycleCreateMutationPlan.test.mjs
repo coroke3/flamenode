@@ -1632,3 +1632,41 @@ test("MIG-0652 U03g: duplicate stage keys fail closed before mutation planning",
     existing: [], next: [makeStageQuestionDiffRow("a"), makeStageQuestionDiffRow("a")], deletedAnswers: [],
   }), { ok: false, reason: "duplicate_next_key" });
 });
+
+test("MIG-0652 U03h: stage UPDATE projection preserves CURRENT CAS and audited snapshot", async () => {
+  const { projectStageQuestionUpdate } = await import("@flamenode/server-core/event/updatePayload");
+  const before = { ...makeStageQuestionDiffRow("stage"), event_id: "ev_1", created_at: 100,
+    updated_at: 150, custom_legacy_field: "retain" };
+  const replacement = { ...makeStageQuestionDiffRow("stage", { label: "new", required: 1,
+    description: null, placeholder: "", updated_at: 180 }), id: "regenerated",
+    event_id: "ev_2", created_at: 175 };
+  const beforeFrozen = structuredClone(before), replacementFrozen = structuredClone(replacement);
+  const { cas, updateValues, after } = projectStageQuestionUpdate(before, replacement);
+  const { id: _id, event_id: _eventId, created_at: _createdAt, ...currentValues } = replacement;
+  assert.deepEqual(cas, { id: "old-stage", updated_at: 150 });
+  assert.deepEqual(updateValues, currentValues);
+  assert.deepEqual(after, { ...before, ...replacement, id: before.id, created_at: before.created_at });
+  assert.equal(Object.hasOwn(updateValues, "id"), false);
+  assert.equal(Object.hasOwn(updateValues, "event_id"), false);
+  assert.equal(Object.hasOwn(updateValues, "created_at"), false);
+  assert.deepEqual(before, beforeFrozen);
+  assert.deepEqual(replacement, replacementFrozen);
+});
+test("MIG-0652 U03h: 256 stage update projections match frozen CURRENT object order and identity", async () => {
+  const { projectStageQuestionUpdate } = await import("@flamenode/server-core/event/updatePayload");
+  for (let i = 0; i < 256; i++) {
+    const before = { ...makeStageQuestionDiffRow("k" + i, { required: i % 2,
+      visibility: i % 3 === 0 ? "review" : "public", updated_at: i + 10 }),
+      event_id: "original", created_at: 1, legacy_extra: "hold" };
+    const replacement = { ...makeStageQuestionDiffRow("k" + i, {
+      required: (i + 1) % 2, label: "value" + i,
+      placeholder: i % 5 === 0 ? null : "", updated_at: i + 20 }),
+      id: "generated-" + i, event_id: "submitted", created_at: 2 };
+    const { id: _id, event_id: _eventId, created_at: _createdAt, ...expectedValues } = replacement;
+    const actual = projectStageQuestionUpdate(before, replacement);
+    assert.deepEqual(actual.cas, { id: before.id, updated_at: before.updated_at }, "CAS " + i);
+    assert.deepEqual(actual.updateValues, expectedValues, "values " + i);
+    assert.deepEqual(Object.keys(actual.updateValues), Object.keys(expectedValues), "order " + i);
+    assert.deepEqual(actual.after, { ...before, ...replacement, id: before.id, created_at: before.created_at }, "snapshot " + i);
+  }
+});

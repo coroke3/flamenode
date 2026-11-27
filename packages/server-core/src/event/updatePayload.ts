@@ -205,3 +205,28 @@ export function planStageQuestionMutationSteps<
   }
   return { ok: true, operations, expectedMutationChanges: operations.map(step => step.expected), obsoleteIds };
 }
+
+/** SA-023 U03h: exact CURRENT stage-question UPDATE projection and CAS identity.
+ * DB adapter must use where(id = cas.id AND updated_at = cas.updated_at),
+ * require one changed row and append the unchanged strict audit after-image. */
+export function projectStageQuestionUpdate<
+  Old extends { id: string; event_id: string; created_at: number; updated_at: number },
+  New extends { id: string; event_id: string; created_at: number; updated_at: number },
+>(before: Old, replacement: New) {
+  const {
+    id: _id,
+    event_id: _eventId,
+    created_at: _createdAt,
+    ...updateValues
+  } = replacement;
+  return {
+    cas: { id: before.id, updated_at: before.updated_at },
+    updateValues,
+    after: {
+      ...before,
+      ...replacement,
+      id: before.id,
+      created_at: before.created_at,
+    },
+  };
+}
