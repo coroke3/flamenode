@@ -1453,3 +1453,26 @@ test("CURRENT preview preflight exposes only deliberate domain validation messag
     hooks.deregister();
   }
 });
+
+test("MIG-0645 CURRENT X-user marker atomicity contract", () => {
+  const source = fs.readFileSync(new URL("./apply.ts", import.meta.url), "utf8");
+  const start = source.indexOf("async function ensureXUserGroup(");
+  const end = source.indexOf("\nfunction plannedSoftwareCatalogRows(", start);
+  assert.ok(start >= 0 && end > start);
+  const group = source.slice(start, end);
+  const mutation = group.indexOf("await mutateWithAudit(db, {");
+  const receipt = group.indexOf("stepMarkerAudit(", mutation);
+  const endBatch = group.indexOf("\n    });", mutation);
+  assert.ok(mutation >= 0 && receipt > mutation && endBatch > receipt,
+    "X-user inserts, queue and replay receipt must share a D1 audit batch");
+  assert.match(group, /options\.marker\(\{ kind: "x_users", created: missing\.length, createdAuthUsers: 0 \}\)/);
+  assert.match(group, /else if \(options\.marker\) \{[\s\S]*?writeStepMarkerOnly\(/,
+    "a zero-insert X-user step still requires its marker-only receipt");
+  const handler = source.indexOf("export async function applyLegacyImportPlanStep(");
+  const stepStart = source.indexOf('    case "x_users": {', handler);
+  const stepEnd = source.indexOf('    case "softwares": {', stepStart);
+  assert.ok(stepStart > handler && stepEnd > stepStart);
+  const step = source.slice(stepStart, stepEnd);
+  assert.equal(step.split("await writeStepMarkerOnly(db, marker(outcome)").length - 1, 1,
+    "only empty-plan branch may write a separate marker; nonempty group owns its marker");
+});

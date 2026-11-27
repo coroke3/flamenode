@@ -677,8 +677,21 @@ async function ensureXUserGroup(
           retention_class: "long_audit",
           restore_strategy: "none",
         },
+        // Data mutation, rebuild queue and replay marker must commit together.
+        ...(options.marker
+          ? [stepMarkerAudit(
+              options.marker({ kind: "x_users", created: missing.length, createdAuthUsers: 0 }),
+              options.actorAuthUserId,
+            )]
+          : []),
       ],
     });
+  } else if (options.marker) {
+    await writeStepMarkerOnly(
+      db,
+      options.marker({ kind: "x_users", created: 0, createdAuthUsers: 0 }),
+      options.actorAuthUserId,
+    );
   }
   return missing.length;
 }
@@ -2591,8 +2604,8 @@ export async function applyLegacyImportPlanStep(
       );
       const created = await ensureXUserGroup(db, rows, options);
       // Discord未ログインの空認証ユーザーは作らない。X名義(x_users)とevent_staff ownerのみ正本。
+      // ensureXUserGroup already committed the replay marker atomically.
       outcome = { kind: "x_users", created, createdAuthUsers: 0 };
-      await writeStepMarkerOnly(db, marker(outcome), options.actorAuthUserId);
       break;
     }
     case "softwares": {
