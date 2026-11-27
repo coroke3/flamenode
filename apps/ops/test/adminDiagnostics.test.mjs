@@ -731,6 +731,55 @@ test("U02c integrity idle/unsupported/denied views show no fabricated check coun
   assert.match(denied, /閲覧権限がありません/);
 });
 
+test("MIG-0736 integrity preserves CURRENT read-only header and failure card without inventing results", () => {
+  const description = "videos / video_events / video_members / slots / 派生行 / audit_logs の参照整合性を読み取り専用で確認します。初期表示では実行せず、必要なときだけ明示的に実行します。";
+  const cases = [
+    { shouldRun: false, data: { status: "ok", data: { ran: false, results: [] } }, message: "DB整合性診断は未実行です", role: null },
+    { shouldRun: true, data: { status: "loading" }, message: "読み込み中…", role: "status" },
+    { shouldRun: true, data: { status: "unavailable" }, message: "診断結果を取得できませんでした。", role: "alert" },
+    { shouldRun: true, data: { status: "unsupported" }, message: "DB整合性診断は現在利用できません。", role: "alert" },
+    { shouldRun: true, data: { status: "anonymous" }, message: "ログインが必要です。", role: "alert" },
+    { shouldRun: true, data: { status: "forbidden" }, message: "閲覧権限がありません。", role: "alert" },
+    { shouldRun: true, data: { status: "notFound" }, message: "閲覧権限がありません。", role: "alert" },
+    { shouldRun: true, data: { status: "ok", data: { ran: false, results: [] } }, message: "診断は実行されませんでした。", role: "status" },
+  ];
+  for (const { shouldRun, data, message, role } of cases) {
+    const html = render(h(AdminIntegrityView, { data, shouldRun, onRefresh: () => {} }), "/admin/health/integrity");
+    const dom = new JSDOM(html);
+    try {
+      const doc = dom.window.document;
+      assert.equal(doc.querySelector(".fn-console-lead")?.textContent, description);
+      assert.match(doc.querySelector(".fn-console-back")?.textContent ?? "", /ヘルスチェックへ/);
+      assert.ok(doc.body.textContent.includes(message));
+      if (role) {
+        assert.ok([...doc.querySelectorAll(`[role="${role}"]`)].some(node => node.textContent.includes(message)), message);
+      }
+      const refresh = [...doc.querySelectorAll("button")].find(node => node.textContent.trim() === "最新状態で再チェック");
+      if (shouldRun) {
+        assert.ok(refresh);
+        assert.equal(refresh.parentElement.style.marginTop, "16px");
+        assert.equal(refresh.style.marginTop, "");
+      } else {
+        assert.equal(refresh, undefined);
+      }
+      const errorCard = doc.querySelector('.fn-card[role="alert"]');
+      if (data.status === "unavailable") {
+        assert.ok(errorCard);
+        assert.equal(errorCard.style.marginTop, "18px");
+        assert.match(errorCard.getAttribute("style") ?? "", /border-color:var\(--accent-danger\)/);
+        assert.equal(errorCard.querySelector("strong")?.textContent, "エラー");
+        assert.equal(errorCard.querySelector("p")?.textContent, message);
+      } else {
+        assert.equal(errorCard, null);
+      }
+      assert.doesNotMatch(doc.body.textContent, /総検出件数|危険チェック|警告チェック|確認チェック|問題なし/);
+      assert.equal(doc.querySelectorAll("article, table, pre").length, 0);
+    } finally {
+      dom.window.close();
+    }
+  }
+});
+
 // CURRENT Next page searchParams represents repeated query keys as arrays.
 test("MIG-0736 diagnostic route query parity: duplicate keys never opt in or select a filter", async () => {
   const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://flamenode.test" });

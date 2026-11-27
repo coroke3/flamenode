@@ -18,7 +18,7 @@ export function AdminIntegrityView({ data, shouldRun, onRefresh }: {
   return (
     <div>
       <ConsolePageHeader title="DB 整合性チェック"
-        description="videos / video_events / video_members / slots / 派生行 / audit_logs の参照整合性を読み取り専用で確認します。"
+        description="videos / video_events / video_members / slots / 派生行 / audit_logs の参照整合性を読み取り専用で確認します。初期表示では実行せず、必要なときだけ明示的に実行します。"
         backHref="/admin/health" backLabel="ヘルスチェックへ" />
       <AdminSectionTabs hub="health" />
       {!shouldRun ? (
@@ -33,9 +33,17 @@ export function AdminIntegrityView({ data, shouldRun, onRefresh }: {
         </section>
       ) : (
         <>
-          <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm"
-            style={{ marginTop: 16 }} onClick={onRefresh}>最新状態で再チェック</button>
-          {data.status === "loading" ? <p role="status">読み込み中…</p> : (
+          <div style={{ marginTop: 16 }}>
+            <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm"
+              onClick={onRefresh}>最新状態で再チェック</button>
+          </div>
+          {data.status === "loading" ? <p role="status">読み込み中…</p>
+            : data.status === "unavailable" ? (
+              <div role="alert" className="fn-card" style={{ marginTop: 18, borderColor: "var(--accent-danger)" }}>
+                <strong style={{ color: "var(--accent-danger)" }}>エラー</strong>
+                <p style={{ marginBottom: 0 }}>診断結果を取得できませんでした。</p>
+              </div>
+            ) : (
             <p role={data.status === "ok" ? "status" : "alert"} style={{ marginTop: 16 }}>
               {data.status === "unsupported" ? "DB整合性診断は現在利用できません。"
                 : data.status === "anonymous" ? "ログインが必要です。"
