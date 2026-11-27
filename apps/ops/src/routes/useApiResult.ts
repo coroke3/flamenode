@@ -33,12 +33,16 @@ export function useApiResult<T>(
         // Only transport/unavailability errors may retain the last successful data.
         // A same-key refresh can lose authentication, permissions, or the resource itself.
         // Never keep private data mounted after an explicit non-transient server response.
-        if (!controller.signal.aborted && (!silent || result.status !== "unavailable")) {
-          setState(result);
+        if (!controller.signal.aborted) {
+          // A replay or refresh can start before the first read has completed.
+          // There is no result to preserve while the current state is loading.
+          setState(previous => silent && result.status === "unavailable" && previous.status !== "loading"
+            ? previous : result);
         }
       } catch {
-        if (!controller.signal.aborted && !silent) {
-          setState({ status: "unavailable" });
+        if (!controller.signal.aborted) {
+          setState(previous => silent && previous.status !== "loading"
+            ? previous : { status: "unavailable" });
         }
       }
     })();
