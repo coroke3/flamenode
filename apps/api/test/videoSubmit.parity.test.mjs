@@ -802,4 +802,84 @@ if (runUnderRootTsx(import.meta.url)) {
       w.sqlite.close();
     }
   });
+
+  test("U03a SA-088: CURRENT slot identity and Active X snapshot precedence, no writes", async () => {
+    const { submitSlotVideo } = await import("../../../src/lib/actions/video/submitSlotVideo.ts");
+    const missing = "枠が見つかりません。";
+    const stale =
+      "投稿画面を開いた後にActive X IDが変更されました。最新の活動名義を確認してからもう一度投稿してください。";
+    const chooseApproved = "承認済みのX IDを選択してください。";
+    const own = { reserved_by_user_id: "u_owner", x_user_id: "x_owner" };
+    const cases = [
+      { name: "guard denial precedes missing ID", slotId: null, deny: true, reads: 0,
+        expected: { ok: false, reason: "unauthenticated", message: "denied" } },
+      { name: "missing slot ID", slotId: null, reads: 0,
+        expected: { ok: false, message: "枠IDがありません。" } },
+      { name: "unknown slot", reads: 1, expected: { ok: false, message: missing } },
+      { name: "different account and X", row: { reserved_by_user_id: "u_notos", x_user_id: "x_notos" },
+        snapshot: "@stale", reads: 1, expected: { ok: false, message: missing } },
+      { name: "same account but different X", row: { ...own, x_user_id: "x_notos" },
+        snapshot: "@stale", reads: 1, expected: { ok: false, message: missing } },
+      { name: "no reserving account even with same X", row: { ...own, reserved_by_user_id: null, status: "available" },
+        snapshot: "@stale", reads: 1, expected: { ok: false, message: missing } },
+      { name: "other account with same approved X reaches snapshot check",
+        row: { ...own, reserved_by_user_id: "u_notos" }, snapshot: "@stale", reads: 1,
+        expected: { ok: false, message: stale } },
+      { name: "own unassigned reservation reaches snapshot check", row: { ...own, x_user_id: null },
+        snapshot: "@stale", reads: 1, expected: { ok: false, message: stale } },
+      { name: "own reservation with stale snapshot", row: own, snapshot: "@stale", reads: 1,
+        expected: { ok: false, message: stale } },
+      { name: "valid snapshot still requires approved-list membership", row: own, approved: [],
+        reads: 1, expected: { ok: false, message: chooseApproved } },
+      { name: "normalized cross-account snapshot reaches approved-list check",
+        row: { ...own, reserved_by_user_id: "u_notos" }, snapshot: " @X_OWNER ", approved: [],
+        reads: 1, expected: { ok: false, message: chooseApproved } },
+    ];
+    const previousGuard = globalThis.__submitGuard;
+    try {
+      for (const scenario of cases) {
+        const w = seedWorld();
+        try {
+          if (scenario.row) {
+            insert(w.sqlite, "slots", {
+              id: "slot_submit", event_id: "ev_closed", status: "reserved",
+              updated_at: 100, version: 1, ...scenario.row,
+            });
+          }
+          const before = snapshotDb(w.sqlite);
+          const beforeSlots = w.sqlite.prepare("SELECT * FROM slots ORDER BY id").all();
+          let guardCalls = 0;
+          globalThis.__submitGuard = async (opts) => {
+            guardCalls++;
+            assert.deepEqual(opts, {
+              requireApprovedActiveXId: true, feature: "post_video_slotted",
+            });
+            if (scenario.deny) return { ok: false, reason: "unauthenticated", message: "denied" };
+            return {
+              ok: true, db: drizzle(w.d1),
+              user: { id: "u_owner", name: "Owner User", role: "user", active_x_user_id: "x_owner" },
+              activeXId: "x_owner", approvedXIds: scenario.approved ?? ["x_owner"],
+              hasPendingXRequest: false,
+            };
+          };
+          const fd = new FormData();
+          if (scenario.slotId !== null) fd.set("slot_id", "slot_submit");
+          fd.set("active_x_snapshot", scenario.snapshot ?? "@x_owner");
+          const actual = await submitSlotVideo(fd);
+          assert.deepEqual(actual, scenario.expected, scenario.name);
+          assert.equal(guardCalls, 1, scenario.name);
+          assert.equal(w.d1.stats.reads, scenario.reads, scenario.name);
+          assert.equal(w.d1.stats.batches, 0, scenario.name);
+          assert.deepEqual(snapshotDb(w.sqlite), before, scenario.name);
+          assert.deepEqual(w.sqlite.prepare("SELECT * FROM slots ORDER BY id").all(), beforeSlots, scenario.name);
+          assert.deepEqual(w.bucket.puts, [], scenario.name);
+          assert.deepEqual(w.bucket.deletes, [], scenario.name);
+        } finally {
+          w.sqlite.close();
+        }
+      }
+    } finally {
+      globalThis.__submitGuard = previousGuard;
+    }
+  });
 }
