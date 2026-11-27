@@ -1,5 +1,9 @@
 /** CURRENT event update composition, shared without changing section or form semantics. */
-import type { events } from "@flamenode/db/schema";
+import { eventCustomQuestions, videoCustomAnswers, type events } from "@flamenode/db/schema";
+import { and, eq, or } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
+import type { ServerCoreDb } from "../db.ts";
+import type { WriteAuditLogInput } from "../audit/types.ts";
 import { MAX_STAGE_PERMISSION_QUESTIONS } from "@flamenode/domain/event/limits";
 import {
   buildVideoFormSettingsJson,
@@ -232,5 +236,93 @@ export function projectStageQuestionUpdate<
       id: before.id,
       created_at: before.created_at,
     },
+  };
+}
+
+/** SA-023 U03n: stage-only Drizzle D1 CAS and strict-audit assembly.
+ * Input rows MUST come from the server's capped, scoped SELECTs and validated
+ * stage-question form parser. Caller must combine this with event CAS, queue
+ * statements and other question families in ONE mutateWithAudit invocation.
+ * This helper is deliberately not a route or DB executor. */
+export function buildStageQuestionD1MutationBatch(input: {
+  db: ServerCoreDb;
+  existing: readonly (typeof eventCustomQuestions.$inferSelect)[];
+  next: readonly (typeof eventCustomQuestions.$inferSelect)[];
+  deletedAnswers: readonly (typeof videoCustomAnswers.$inferSelect)[];
+  actorUserId: string;
+}):
+  | { ok: false; reason: Exclude<StageQuestionMutationPlan<never, never, never>, { ok: true }>["reason"] }
+  | {
+      ok: true;
+      mutationStatements: BatchItem<"sqlite">[];
+      expectedMutationChanges: number[];
+      audits: WriteAuditLogInput[];
+    } {
+  const stage = planStageQuestionMutationSteps(input);
+  if (!stage.ok) return stage;
+  const mutationStatements: BatchItem<"sqlite">[] = [];
+  const audits: WriteAuditLogInput[] = [];
+  for (const step of stage.operations) {
+    if (step.kind === "delete_answers") {
+      mutationStatements.push(input.db.delete(videoCustomAnswers).where(or(
+        ...step.rows.map(row => and(
+          eq(videoCustomAnswers.video_id, row.video_id),
+          eq(videoCustomAnswers.event_id, row.event_id),
+          eq(videoCustomAnswers.question_id, row.question_id),
+          eq(videoCustomAnswers.updated_at, row.updated_at),
+        )),
+      )));
+      audits.push(...step.rows.map(row => ({
+        table_name: "video_custom_answers",
+        target_id: `${row.video_id}:${row.event_id}:${row.question_id}`,
+        operation: "DELETE" as const, before: row, after: null,
+        actor_user_id: input.actorUserId,
+        context: "event-update:removed-stage-question-answer",
+        retention_class: "normal" as const, strict: true,
+      })));
+    } else if (step.kind === "delete_questions") {
+      mutationStatements.push(input.db.delete(eventCustomQuestions).where(or(
+        ...step.rows.map(row => and(
+          eq(eventCustomQuestions.id, row.id),
+          eq(eventCustomQuestions.updated_at, row.updated_at),
+        )),
+      )));
+      audits.push(...step.rows.map(row => ({
+        table_name: "event_custom_questions", target_id: row.id,
+        operation: "DELETE" as const, before: row, after: null,
+        actor_user_id: input.actorUserId,
+        context: "event-update:removed-stage-question",
+        retention_class: "normal" as const, strict: true,
+      })));
+    } else if (step.kind === "update_question") {
+      const projected = projectStageQuestionUpdate(step.before, step.replacement);
+      mutationStatements.push(input.db.update(eventCustomQuestions)
+        .set(projected.updateValues).where(and(
+          eq(eventCustomQuestions.id, projected.cas.id),
+          eq(eventCustomQuestions.updated_at, projected.cas.updated_at),
+        )));
+      audits.push({
+        table_name: "event_custom_questions", target_id: step.before.id,
+        operation: "UPDATE", before: step.before, after: projected.after,
+        actor_user_id: input.actorUserId,
+        context: "event-update:stage-question",
+        retention_class: "normal", strict: true,
+      });
+    } else {
+      mutationStatements.push(input.db.insert(eventCustomQuestions).values(step.rows));
+      audits.push(...step.rows.map(row => ({
+        table_name: "event_custom_questions", target_id: row.id,
+        operation: "CREATE" as const, before: null, after: row,
+        actor_user_id: input.actorUserId,
+        context: "event-update:stage-question",
+        retention_class: "normal" as const, strict: true,
+      })));
+    }
+  }
+  return {
+    ok: true,
+    mutationStatements,
+    expectedMutationChanges: stage.expectedMutationChanges,
+    audits,
   };
 }

@@ -1959,78 +1959,25 @@ async function stageMixedSqliteFixture() {
     question_key: "stage_permission_" + key, label: "Added " + index,
     sort_order: index + 2, created_at: now, updated_at: now,
   }));
-  const { and, eq, or } = await import("drizzle-orm");
-  const { planStageQuestionMutationSteps, projectStageQuestionUpdate } =
+  const { planStageQuestionMutationSteps, buildStageQuestionD1MutationBatch } =
     await import("@flamenode/server-core/event/updatePayload");
+  const existing = [f.before, updatedBefore];
+  const next = [insertedRows[0], updatedNext, insertedRows[1]];
   const stage = planStageQuestionMutationSteps({
-    existing: [f.before, updatedBefore],
-    next: [insertedRows[0], updatedNext, insertedRows[1]],
-    deletedAnswers: f.answers,
+    existing, next, deletedAnswers: f.answers,
   });
   assert.equal(stage.ok, true);
   assert.deepEqual(stage.operations.map(step => step.kind),
     ["delete_answers", "delete_questions", "update_question", "insert_questions"]);
   assert.deepEqual(stage.expectedMutationChanges, [2, 1, 1, 2]);
-  const statements = [];
-  const audits = [];
-  for (const step of stage.operations) {
-    if (step.kind === "delete_answers") {
-      statements.push(f.db.delete(schema.videoCustomAnswers).where(or(
-        ...step.rows.map(row => and(
-          eq(schema.videoCustomAnswers.video_id, row.video_id),
-          eq(schema.videoCustomAnswers.event_id, row.event_id),
-          eq(schema.videoCustomAnswers.question_id, row.question_id),
-          eq(schema.videoCustomAnswers.updated_at, row.updated_at),
-        )),
-      )));
-      audits.push(...step.rows.map(row => ({
-        table_name: "video_custom_answers",
-        target_id: row.video_id + ":" + row.event_id + ":" + row.question_id,
-        operation: "DELETE", before: row, after: null,
-        actor_user_id: "u_admin",
-        context: "event-update:removed-stage-question-answer",
-        retention_class: "normal", strict: true,
-      })));
-    } else if (step.kind === "delete_questions") {
-      statements.push(f.db.delete(schema.eventCustomQuestions).where(or(
-        ...step.rows.map(row => and(
-          eq(schema.eventCustomQuestions.id, row.id),
-          eq(schema.eventCustomQuestions.updated_at, row.updated_at),
-        )),
-      )));
-      audits.push(...step.rows.map(row => ({
-        table_name: "event_custom_questions", target_id: row.id,
-        operation: "DELETE", before: row, after: null,
-        actor_user_id: "u_admin", context: "event-update:removed-stage-question",
-        retention_class: "normal", strict: true,
-      })));
-    } else if (step.kind === "update_question") {
-      const projected = projectStageQuestionUpdate(step.before, step.replacement);
-      statements.push(f.db.update(schema.eventCustomQuestions)
-        .set(projected.updateValues).where(and(
-          eq(schema.eventCustomQuestions.id, projected.cas.id),
-          eq(schema.eventCustomQuestions.updated_at, projected.cas.updated_at),
-        )));
-      audits.push({
-        table_name: "event_custom_questions", target_id: step.before.id,
-        operation: "UPDATE", before: step.before, after: projected.after,
-        actor_user_id: "u_admin", context: "event-update:stage-question",
-        retention_class: "normal", strict: true,
-      });
-    } else {
-      statements.push(f.db.insert(schema.eventCustomQuestions).values(step.rows));
-      audits.push(...step.rows.map(row => ({
-        table_name: "event_custom_questions", target_id: row.id,
-        operation: "CREATE", before: null, after: row,
-        actor_user_id: "u_admin", context: "event-update:stage-question",
-        retention_class: "normal", strict: true,
-      })));
-    }
-  }
-  return { ...f, updatedBefore, insertedRows, stage, mutationPlan: {
-    mutationStatements: statements, expectedMutationChanges: stage.expectedMutationChanges,
-    audits,
-  }};
+  const mutationPlan = buildStageQuestionD1MutationBatch({
+    db: f.db, existing, next, deletedAnswers: f.answers, actorUserId: "u_admin",
+  });
+  assert.equal(mutationPlan.ok, true);
+  assert.deepEqual(mutationPlan.expectedMutationChanges, stage.expectedMutationChanges);
+  assert.deepEqual(mutationPlan.audits.map(audit => audit.operation),
+    ["DELETE", "DELETE", "DELETE", "UPDATE", "CREATE", "CREATE"]);
+  return { ...f, updatedBefore, insertedRows, stage, mutationPlan };
 }
 
 test("MIG-0652 U03l SQLite: mixed answer delete/question delete/update/insert and six audits commit once", async () => {
@@ -2100,4 +2047,22 @@ test("MIG-0652 U03m: stage planner enforces CURRENT four-question cap and reject
   assert.deepEqual(planStageQuestionMutationSteps({
     existing: [], next: rows, deletedAnswers: [],
   }), { ok: false, reason: "stage_limit" });
+});
+
+test("MIG-0652 U03n: shared D1 mutation builder rejects over-cap and foreign answer before SQL", async () => {
+  const { buildStageQuestionD1MutationBatch } = await import("@flamenode/server-core/event/updatePayload");
+  const f = stageUpdateSqliteFixture();
+  const rows = Array.from({ length: 5 }, (_, index) => ({
+    ...f.before, id: "stage_cap_" + index, question_key: "stage_permission_cap_" + index,
+  }));
+  assert.deepEqual(buildStageQuestionD1MutationBatch({
+    db: f.db, existing: [], next: rows, deletedAnswers: [], actorUserId: "u_admin",
+  }), { ok: false, reason: "stage_limit" });
+  assert.deepEqual(buildStageQuestionD1MutationBatch({
+    db: f.db, existing: [f.before], next: [],
+    deletedAnswers: [{ video_id: "foreign", event_id: event.id, question_id: "other",
+      answer_text: "", answer_json: null, created_at: now, updated_at: now }],
+    actorUserId: "u_admin",
+  }), { ok: false, reason: "unrelated_answer" });
+  assert.equal(f.d1.stats.batches, 0);
 });
