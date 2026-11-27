@@ -397,6 +397,7 @@ Phase 5 の各 task は PR で merge 済みだが Work Order の受入を満た�
 | MIG-0666 | build-time R2 API artifact differential publish + integrity check (events/index & release.v1; ex MIG-0627 U04/U05) | DONE | MIG-0509 |
 | MIG-0663 | Manage navigation: add `activeXUserId` / `manageStaffXUserIds` for the sidebar warning (D-17-13) | DONE | MIG-0624 |
 | MIG-0664 | Account summary (RH-001): add `degradedReason` to degraded responses for the Ops guard (D-17-14) | DONE | MIG-0608 |
+| MIG-0689 | shared request-local write admission snapshot (D-19-2; prerequisite for S3 writer lanes) | IN_PROGRESS | MIG-0602, MIG-0638 |
 | MIG-0607 | Phase 6 Gate | BLOCKED | MIG-0606, MIG-0631, MIG-0632, MIG-0634..MIG-0648, MIG-0650..MIG-0664 |
 
 MIG-0519 は DONE（2026-11-01 統合、PR #447）: `/rules` の同意 Island（SA-075、`apps/site/src/components/RulesConsentIsland.ts` / `apps/site/src/lib/terms.ts`）は merge 済みの MIG-0641 契約（`AcceptLatestTermsResponseSchema`）で応答を検証する。merge gate の MIG-0641 は #441 で DONE。最終Head・exact-head CI・独立レビューは PR #447 の work-item `work-items/MIG-0519.md` と PR コメントを正とし、builder（Sonnet）より上位の独立 APPROVE と人間の squash merge 承認を待つ。like/save の文言は CURRENT と意図的に異なる（承認済み活動名義は不要、owner 承認 2026-11-01 の決定）。この task を依存に持つのは MIG-0508（Phase 5 Gate）だけで、MIG-0501..MIG-0507 / MIG-0509..MIG-0518 が未完のため BLOCKED のまま（Gate は承認していない）。新たに READY になる task は無い。
