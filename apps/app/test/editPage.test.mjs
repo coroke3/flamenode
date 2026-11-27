@@ -593,6 +593,62 @@ test("identity, video, mode and client changes hide snapshots and stop stale rea
 });
 
 
+test("MIG-0717 U01c: session A-B-A with both X IDs null rejects late private reads", async (t) => {
+  const calls = [];
+  const api = createVideoEditApi((path, { signal }) =>
+    new Promise((resolve) => calls.push({ path, signal, resolve })));
+  const { container, render } = await mountEdit(t, api, { identityKey: "discord-A:null-x" });
+  const finish = (index, data) => act(async () => calls[index].resolve(json(data)));
+  const privatePage = (owner, name) => editPage({
+    video: { ...editPage().video, title: name },
+    permissionSummary: permissionSummary({ displayNames: owner + " private collaborators" }),
+  });
+  const assertLoading = () => {
+    assert.match(container.textContent, /読み込み中/);
+    assert.equal(overview(container), null);
+    assert.equal(adminMenu(container), null);
+    assert.equal(container.querySelector("#video-collab-perms"), null);
+    assert.doesNotMatch(container.textContent, /PRIVATE-A|PRIVATE-B|private collaborators/);
+  };
+
+  await finish(0, privatePage("A", "PRIVATE-A"));
+  await finish(1, options());
+  assert.match(container.textContent, /PRIVATE-A/);
+  assert.match(container.textContent, /A private collaborators/);
+
+  // A -> B: an unassigned X ID alone is not a sufficiently strong identity key.
+  await render({ identityKey: "discord-B:null-x" }, assertLoading);
+  assert.equal(calls[0].signal.aborted, true);
+  await finish(2, privatePage("B", "PRIVATE-B"));
+  assert.equal(calls.length, 4, "B options must not start before B page is accepted");
+
+  // B -> A before B's options finish; stale B options cannot publish B's private UI.
+  await render({ identityKey: "discord-A:null-x" }, assertLoading);
+  assert.equal(calls[3].signal.aborted, true);
+  await finish(3, options());
+  assertLoading();
+  assert.equal(calls.length, 5, "retired B options cannot continue pagination");
+  await finish(4, privatePage("A", "PRIVATE-A"));
+  await finish(5, options());
+  assert.match(container.textContent, /PRIVATE-A/);
+  assert.match(container.textContent, /A private collaborators/);
+  assert.doesNotMatch(container.textContent, /PRIVATE-B|B private collaborators/);
+
+  // Repeat A -> B -> A with B's page itself arriving after the return to A.
+  await render({ identityKey: "discord-B:null-x" }, assertLoading);
+  await render({ identityKey: "discord-A:null-x" }, assertLoading);
+  assert.equal(calls[6].signal.aborted, true);
+  await finish(6, privatePage("B", "PRIVATE-B"));
+  assert.equal(calls.length, 8, "retired B page cannot start B options");
+  assertLoading();
+  await finish(7, privatePage("A", "PRIVATE-A"));
+  await finish(8, options());
+  assert.match(container.textContent, /PRIVATE-A/);
+  assert.doesNotMatch(container.textContent, /PRIVATE-B|B private collaborators/);
+  assert.equal(adminMenu(container), null);
+  assert.equal(container.querySelector("form"), null);
+});
+
 test("MIG-0717 U02b2b preserves the CURRENT neutral EmptyState structure and spacing for not_found", async (t) => {
   const api = createVideoEditApi(async () => json({ error: "not_found" }, 404));
   const { container } = await mountEdit(t, api);
