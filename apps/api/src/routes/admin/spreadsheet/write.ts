@@ -716,6 +716,7 @@ export function validateSpreadsheetMemberFkReleaseLookupReceipt(
     throw new Error(SPREADSHEET_STATIC_REBUILD_SPLIT_REQUIRED);
   }
   const requested = new Set(plan.releaseIds);
+  const seenReleaseTuples = new Set<string>();
   const eventIdsByVideo = new Map<string, Set<string>>();
   const linkedEventIds = new Set<string>();
   for (const candidate of releaseRows) {
@@ -730,6 +731,11 @@ export function validateSpreadsheetMemberFkReleaseLookupReceipt(
         (row.primaryEventId !== null && typeof row.primaryEventId !== "string")) {
       throw new Error("invalid_snapshot");
     }
+    // Do not let a malformed provider receipt collapse into the event Sets.
+    // Distinct rows may share primaryEventId, but an identical source tuple is invalid.
+    const releaseTuple = JSON.stringify([row.videoId, row.eventId, row.primaryEventId]);
+    if (seenReleaseTuples.has(releaseTuple)) throw new Error("invalid_snapshot");
+    seenReleaseTuples.add(releaseTuple);
     const eventIds = eventIdsByVideo.get(row.videoId) ?? new Set<string>();
     for (const linkedId of [row.eventId, row.primaryEventId]) {
       const normalized = (linkedId as string | null)?.trim();
