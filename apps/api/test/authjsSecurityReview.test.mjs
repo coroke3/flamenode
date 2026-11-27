@@ -51,19 +51,45 @@ if (runTestWithTsx(import.meta.url)) {
   });
 
   test("MIG-0804 U02 T02: spoofed Host headers cannot redirect or set cookies for another origin", async (t) => {
-    const { d1 } = createHarness(t);
-    const app = createUnmountedAuthRoutes(credentials(d1));
-    const res = await app.request(origin + "/api/auth/session", {
-      headers: {
-        cookie: BASELINE_COOKIES.sessionToken.name + "=" + SESSIONS.valid.sessionToken,
-        host: "attacker.invalid",
-        "x-forwarded-host": "attacker.invalid",
-      },
+    async function readSession(extraHeaders = {}) {
+      // Separate identical fixtures keep sliding renewal from changing the baseline.
+      const { d1 } = createHarness(t);
+      const app = createUnmountedAuthRoutes(credentials(d1));
+      const res = await app.request(origin + "/api/auth/session", {
+        headers: {
+          cookie: BASELINE_COOKIES.sessionToken.name + "=" + SESSIONS.valid.sessionToken,
+          ...extraHeaders,
+        },
+      });
+      assert.equal(res.status, 200, "the valid session must actually resolve");
+      const body = await res.json();
+      assert.equal(body?.user?.id, SESSIONS.valid.userId);
+      const redirect = res.headers.get("location");
+      if (redirect) assert.equal(new URL(redirect, origin).origin, origin);
+      const rawCookies = res.headers.getSetCookie().join("\n").toLowerCase();
+      assert.doesNotMatch(rawCookies, /domain\s*=\s*attacker\.invalid/);
+      const cookies = Object.fromEntries(Object.entries(setCookies(res)).map(([name, cookie]) => {
+        const { expires, ...attributes } = cookie.attributes;
+        // CSRF values and expiry timestamps vary; their presence and attributes do not.
+        const value = name === BASELINE_COOKIES.csrfToken.name ? Boolean(cookie.value) : cookie.value;
+        return [name, { value, attributes, hasExpires: expires !== undefined }];
+      }));
+      assert.deepEqual(cookies[BASELINE_COOKIES.sessionToken.name], {
+        value: SESSIONS.valid.sessionToken,
+        ...BASELINE_COOKIES.sessionToken.observedOnRead,
+      });
+      return {
+        body, redirect, cookies,
+        contentType: res.headers.get("content-type"),
+        cacheControl: res.headers.get("cache-control"),
+      };
+    }
+    const baseline = await readSession();
+    const spoofed = await readSession({
+      host: "attacker.invalid",
+      "x-forwarded-host": "attacker.invalid",
     });
-    const redirect = res.headers.get("location");
-    if (redirect) assert.equal(new URL(redirect, origin).origin, origin);
-    const cookie = res.headers.getSetCookie().join("\n").toLowerCase();
-    assert.doesNotMatch(cookie, /domain\s*=\s*attacker\.invalid/);
+    assert.deepEqual(spoofed, baseline, "Host headers must not change the configured-origin contract");
   });
 
   test("MIG-0804 U02 T03: D1 runtime exception fails closed as private 503 (not an empty login)", async (t) => {
