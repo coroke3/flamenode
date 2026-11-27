@@ -905,6 +905,27 @@ if (runUnderRootTsx(import.meta.url)) {
         message: "連続枠に別の作品が紐づいています。" },
       { name: "gap exceeds configured part boundary", sibling: { start_time: 1901 },
         message: "連続していない枠をまとめて提出できません。" },
+      // A missing upload stops after reservation authorization and contiguity, before any mutation.
+      // Reaching that error proves valid legacy group shapes are not rejected earlier.
+      { name: "same X on a different Discord account reaches icon validation",
+        anchor: { reserved_by_user_id: "u_notos" }, sibling: { reserved_by_user_id: "u_notos" },
+        form: { icon_mode: "upload" }, message: "画像ファイルが必要です。" },
+      { name: "20 slots grandfathered despite current event max of one",
+        count: 20, form: { icon_mode: "upload" }, message: "画像ファイルが必要です。" },
+      { name: "exact 900 second part gap reaches icon validation",
+        sibling: { start_time: 1900 }, form: { icon_mode: "upload" },
+        message: "画像ファイルが必要です。" },
+      { name: "JST midnight breaks continuity even with a one-second gap",
+        anchor: { start_time: 53999 }, sibling: { start_time: 54000 },
+        message: "連続していない枠をまとめて提出できません。" },
+      { name: "untimed consecutive sort orders reach icon validation",
+        anchor: { start_time: null }, sibling: { start_time: null },
+        form: { icon_mode: "upload" }, message: "画像ファイルが必要です。" },
+      { name: "untimed nonconsecutive sort orders break continuity",
+        anchor: { start_time: null }, sibling: { start_time: null, sort_order: 3 },
+        message: "連続していない枠をまとめて提出できません。" },
+      { name: "timed and untimed slots cannot share a submission",
+        sibling: { start_time: null }, message: "連続していない枠をまとめて提出できません。" },
       // The same late group denial is deliberately present in each preflight fixture.
       // These cases lock CURRENT ordering without adding a new deadline or receipt policy.
       // 0044/0045 normalize legacy archived rows to private (or voided for duplicates).
