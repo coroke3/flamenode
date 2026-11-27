@@ -408,6 +408,109 @@ export function createStrictD1TraceReplay(trace) {
   });
 }
 
+
+/**
+ * MIG-0610 T00b1: record D1 calls only around a previously seeded job.
+ * This adapter is intentionally NOT wired into the benchmark runner yet.
+ * A trace is usable only after every operation has succeeded and settled.
+ * Dispatch order is reserved before awaiting DB I/O (including parallel calls).
+ */
+export function createStrictD1TraceRecorder(realDb) {
+  if (!realDb || typeof realDb.prepare !== "function" ||
+      typeof realDb.batch !== "function" || typeof realDb.exec !== "function") {
+    throw Error("invalid D1 trace recording database");
+  }
+  const trace = [];
+  const stmtMark = Symbol("D1 trace original statement");
+  let pending = 0;
+  let failed = false;
+  const normalized = value => {
+    if (value === null) return ["null"];
+    if (typeof value === "string") return ["str", value];
+    if (typeof value === "boolean") return ["bool", value];
+    if (typeof value === "number" && Number.isFinite(value)) return ["num", value];
+    if (value instanceof Uint8Array) return ["bytes", [...value]];
+    if (value instanceof ArrayBuffer) return ["bytes", [...new Uint8Array(value)]];
+    throw Error("unsupported D1 replay bind type");
+  };
+  const record = (request, call) => {
+    if (failed || trace.length >= 2000) throw Error("D1 trace recording invalid or exhausted");
+    const entry = { request: structuredClone(request) };
+    trace.push(entry);
+    pending++;
+    let operation;
+    try {
+      operation = call();
+    } catch (error) {
+      failed = true;
+      pending--;
+      throw error;
+    }
+    return Promise.resolve(operation).then(result => {
+      try {
+        entry.result = structuredClone(result);
+        return result;
+      } catch (error) {
+        failed = true;
+        throw error;
+      } finally {
+        pending--;
+      }
+    }, error => {
+      failed = true;
+      pending--;
+      throw error;
+    });
+  };
+  const prepared = (sql, args, original) => {
+    if (typeof sql !== "string" || !sql) throw Error("invalid D1 replay SQL");
+    const descriptor = { sql, binds: args.map(normalized) };
+    const invoke = (method, methodArgs = []) => {
+      if (typeof original[method] !== "function") throw Error("unsupported D1 trace method " + method);
+      return record({ op: method, ...descriptor, args: methodArgs },
+        () => original[method](...methodArgs));
+    };
+    return Object.freeze({
+      [stmtMark]: { descriptor, original },
+      bind(...values) {
+        const next = values.map(normalized); // reject unsupported values before real DB I/O
+        void next;
+        return prepared(sql, values, original.bind(...values));
+      },
+      first(column) { return invoke("first", column === undefined ? [] : [column]); },
+      all() { return invoke("all"); },
+      run() { return invoke("run"); },
+      raw(options) { return invoke("raw", options === undefined ? [] : [options]); },
+    });
+  };
+  const db = Object.freeze({
+    prepare(sql) {
+      if (typeof sql !== "string" || !sql) throw Error("invalid D1 replay SQL");
+      return prepared(sql, [], realDb.prepare(sql));
+    },
+    batch(statements) {
+      if (!Array.isArray(statements) || statements.length === 0 ||
+          statements.some(s => !s?.[stmtMark])) throw Error("invalid D1 trace batch");
+      const wrapped = statements.map(s => s[stmtMark]);
+      return record({ op: "batch", statements: wrapped.map(s => s.descriptor) },
+        () => realDb.batch(wrapped.map(s => s.original)));
+    },
+    exec(sql) {
+      if (typeof sql !== "string" || !sql) throw Error("invalid D1 replay exec SQL");
+      return record({ op: "exec", sql }, () => realDb.exec(sql));
+    },
+  });
+  return Object.freeze({
+    db,
+    snapshot() {
+      if (failed || pending !== 0 || trace.some(t => !Object.hasOwn(t, "result"))) {
+        throw Error("incomplete or failed D1 trace recording");
+      }
+      return structuredClone(trace);
+    },
+  });
+}
+
 export function parseArgs(args) {
   const opts = { dryRun: false, run: false, samples: MIN_SAMPLES, coldSamples: MIN_SAMPLES,
     warmup: 10, port: 8789, inspectorPort: 9240, out: null, probe: false, only: null };
