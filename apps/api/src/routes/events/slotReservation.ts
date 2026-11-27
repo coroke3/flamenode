@@ -64,7 +64,7 @@ const SLOT_GATE_NUMERIC_FIELDS = [
   'settings."audit_max_payload_bytes"',
   'settings."audit_compact_after_days"',
 ] as const;
-const SLOT_GATE_ALLOWED_FEATURE_SQL = WRITE_FEATURE_KEYS.map((key) => `'${key}'`).join(", ");
+const SLOT_GATE_ALLOWED_FEATURE_SQL = WRITE_FEATURE_KEYS.map((key) => `CAST('${key}' AS BLOB)`).join(", ");
 
 function invalidGateTextSql(column: string, maxBytes: number): string {
   return `(${column} IS NOT NULL AND
@@ -85,20 +85,23 @@ function boundedGateNumberSql(column: string): string {
  * feature, or 1 when it contains this feature. The 101-row cap proves the
  * same <=100 string-array contract as parseWriteFeatureList; duplicates,
  * escaped strings and legal whitespace retain JSON.parse semantics.
+ * SQLite json_valid accepts a valid prefix followed by a raw NUL; reject
+ * those strings and compare decoded feature bytes exactly, including NUL.
  */
 function featureListStateSql(column: string, feature: WriteFeatureKey): string {
   return `CASE
-    WHEN ${column} IS NULL OR ${column} = '' THEN 0
-    WHEN typeof(${column}) <> 'text' THEN -1
+    WHEN ${column} IS NULL OR (typeof(${column}) = 'text'
+      AND length(CAST(${column} AS BLOB)) = 0) THEN 0
+    WHEN typeof(${column}) <> 'text' OR instr(CAST(${column} AS BLOB), X'00') > 0 THEN -1
     WHEN json_valid(${column}) <> 1 THEN -1
     WHEN json_type(${column}) <> 'array' THEN -1
     ELSE (
       SELECT CASE
         WHEN COUNT(*) > 100 THEN -1
         WHEN SUM(CASE WHEN item.type <> 'text'
-                           OR item.value NOT IN (${SLOT_GATE_ALLOWED_FEATURE_SQL})
+                           OR CAST(item.value AS BLOB) NOT IN (${SLOT_GATE_ALLOWED_FEATURE_SQL})
                       THEN 1 ELSE 0 END) > 0 THEN -1
-        WHEN SUM(CASE WHEN item.type = 'text' AND item.value = '${feature}'
+        WHEN SUM(CASE WHEN item.type = 'text' AND CAST(item.value AS BLOB) = CAST('${feature}' AS BLOB)
                       THEN 1 ELSE 0 END) > 0 THEN 1
         ELSE 0
       END

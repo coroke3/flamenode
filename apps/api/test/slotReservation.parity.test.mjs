@@ -2055,6 +2055,23 @@ if (runUnderRootTsx(import.meta.url)) {
         exceptionUntil: null, exception: null, status: 503, reason: "cost_guard_blocked",
       },
       {
+        label: "raw NUL after live exception must not bypass maintenance",
+        mode: "maintenance", disabled: "[]", exceptionUntil: NOW_SEC + 60,
+        exception: '["reserve_slot"]' + String.fromCharCode(0) + "garbage",
+        status: 503, reason: "cost_guard_blocked",
+      },
+      {
+        label: "raw NUL after unrelated disabled list fails closed",
+        mode: "normal", disabled: '["edit_video"]' + String.fromCharCode(0) + "garbage",
+        exceptionUntil: null, exception: null, status: 503, reason: "cost_guard_blocked",
+      },
+      {
+        label: "escaped NUL in exception feature is not a known key",
+        mode: "maintenance", disabled: "[]", exceptionUntil: NOW_SEC + 60,
+        exception: '["reserve_slot\\u0000"]',
+        status: 503, reason: "cost_guard_blocked",
+      },
+      {
         label: "malformed exception is rejected before maintenance mode",
         mode: "maintenance", disabled: "[]", exceptionUntil: NOW_SEC + 60,
         exception: '{"not":"an array"}', status: 503, reason: "cost_guard_blocked",
