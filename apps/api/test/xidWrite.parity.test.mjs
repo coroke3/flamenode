@@ -543,6 +543,15 @@ if (runUnderRootTsx(import.meta.url)) {
     ]) {
       const w = world();
       mutate(w);
+      // Keep the oversized actor rejection on an actual mutation, where the
+      // complete audit snapshot is required. Other invalid fields are still
+      // rejected even for an exact no-op.
+      let requested = "x_owner";
+      if (label === "active x icon") {
+        requested = "x_new_owner_target";
+        insert(w.sqlite, "x_users", { id: requested, x_name: "New target", approval_status: "approved" });
+        insert(w.sqlite, "x_user_account_links", { auth_user_id: "u_owner", x_user_id: requested, link_role: "manager" });
+      }
       const before = snapshot(w);
       const beforeBatches = w.d1.stats.batches;
       const beforeReads = w.d1.stats.reads;
@@ -574,7 +583,7 @@ if (runUnderRootTsx(import.meta.url)) {
         return stmt;
       };
       const response = await runHono(w, "u_owner", "POST", "/api/xid/active", {
-        x_user_id: "x_owner",
+        x_user_id: requested,
       });
       assert.equal(inspected, 1, label);
       assert.equal(response.status, 503, label);
@@ -583,6 +592,84 @@ if (runUnderRootTsx(import.meta.url)) {
         label + " session + one bounded identity first row, no extra reads");
       assert.equal(w.d1.stats.batches, beforeBatches, label + " no update/audit batch");
       assert.deepEqual(snapshot(w), before, label + " no stored state change");
+    }
+  });
+
+  test("SEC-726: direct no-op can omit only the oversized TEXT audit icon, never authorization or mutation data", async () => {
+    const longUrl = "https://cdn.example/" + "x".repeat(2100);
+    const hugeControls = "\u0001".repeat(180_000);
+    const cases = [
+      { label: "ordinary exact", icon: "https://cdn.example/icon", omitted: 0, invalid: 0, status: 200, current: true },
+      { label: "valid long exact", icon: longUrl, omitted: 1, invalid: 0, status: 200, current: true },
+      { label: "oversized controls exact no-op", icon: hugeControls, omitted: 1, invalid: 0, status: 200, current: true },
+      { label: "BLOB still invalid", icon: Buffer.alloc(8, 120), omitted: 0, invalid: 1, status: 503, reason: "db_unavailable" },
+      { label: "TOS still denied", icon: longUrl, omitted: 1, invalid: 0, status: 403, reason: "tos_required",
+        change: w => w.sqlite.exec('UPDATE "user" SET is_tos_accepted = 0 WHERE id = \'u_owner\'') },
+      { label: "CostGuard still denied", icon: longUrl, omitted: 1, invalid: 0, status: 503, reason: "cost_guard_blocked",
+        change: w => w.sqlite.prepare("UPDATE system_settings SET disabled_features_json = ? WHERE id = 'default'").run(JSON.stringify(["xid_links"])) },
+      { label: "link still required", icon: longUrl, omitted: 1, invalid: 0, status: 403,
+        change: w => w.sqlite.exec("DELETE FROM x_user_account_links WHERE auth_user_id = 'u_owner' AND x_user_id = 'x_owner'") },
+      { label: "approval still required", icon: longUrl, omitted: 1, invalid: 0, status: 403,
+        change: w => w.sqlite.exec("UPDATE x_users SET approval_status = 'pending' WHERE id = 'x_owner'") },
+      { label: "other audit field still invalid", icon: longUrl, omitted: 1, invalid: 1, status: 503, reason: "db_unavailable",
+        change: w => w.sqlite.prepare('UPDATE "user" SET email = ? WHERE id = ?').run("e".repeat(513), "u_owner") },
+      { label: "alias-only not exempt", icon: longUrl, omitted: 0, invalid: 1, status: 503, reason: "db_unavailable", requested: "x_owner_alias",
+        change: w => insert(w.sqlite, "x_user_aliases", { alias_x_id: "x_owner_alias", x_user_id: "x_owner" }) },
+    ];
+    for (const fixture of cases) {
+      const w = world();
+      try {
+        w.sqlite.prepare("UPDATE x_users SET icon_url = ? WHERE id = ?").run(fixture.icon, "x_owner");
+        fixture.change?.(w);
+        const before = snapshot(w);
+        let receipt;
+        const prepare = w.d1.prepare.bind(w.d1);
+        w.d1.prepare = (statement) => {
+          const stmt = prepare(statement);
+          if (!statement.includes("AS actor_icon_omitted")) return stmt;
+          const bind = stmt.bind.bind(stmt);
+          stmt.bind = (...args) => {
+            const bound = bind(...args);
+            const first = bound.first.bind(bound);
+            bound.first = async () => {
+              const row = await first();
+              receipt = row;
+              return row;
+            };
+            return bound;
+          };
+          return stmt;
+        };
+        const reads = w.d1.stats.reads;
+        const batches = w.d1.stats.batches;
+        const response = await runHono(w, "u_owner", "POST", "/api/xid/active", {
+          x_user_id: fixture.requested ?? "x_owner",
+        });
+        assert.equal(response.status, fixture.status, fixture.label);
+        assert.equal(receipt?.actor_icon_omitted, fixture.omitted, fixture.label);
+        assert.equal(receipt?.invalid_gate_snapshot, fixture.invalid, fixture.label);
+        if (fixture.omitted || fixture.invalid) assert.equal(receipt.actor_x_icon_url, null, fixture.label);
+        else assert.equal(receipt.actor_x_icon_url, fixture.icon, fixture.label);
+        assert.ok(Buffer.byteLength(JSON.stringify(receipt)) < 64 * 1024, fixture.label);
+        if (fixture.status === 200) {
+          assert.deepEqual(response.result, { ok: true, message: "すでにこの X ID がアクティブです。" }, fixture.label);
+        } else {
+          assert.equal(response.result.ok, false, fixture.label);
+          if (fixture.reason) assert.equal(response.result.reason, fixture.reason, fixture.label);
+        }
+        assert.equal(w.d1.stats.reads - reads, 2, fixture.label);
+        assert.equal(w.d1.stats.batches - batches, 0, fixture.label);
+        assert.deepEqual(snapshot(w), before, fixture.label);
+        assert.equal(w.bucket.ops.puts.length + w.bucket.ops.deletes.length, 0, fixture.label);
+        if (fixture.current) {
+          const legacy = await runCurrent(w, "u_owner", current.setActiveXId, [["x_user_id", "x_owner"]]);
+          assert.deepEqual(legacy.result, response.result, fixture.label);
+          assert.equal(legacy.wakes, 0, fixture.label);
+          assert.deepEqual(snapshot(w), before, fixture.label);
+        }
+      } finally {
+        w.sqlite.close();
+      }
     }
   });
 

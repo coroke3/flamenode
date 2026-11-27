@@ -59,7 +59,8 @@ function isSessionSafeSelectedXId(value: string): boolean {
  * stay strictly under D1's 64KiB (65,536B) first-row limit.
  *
  * A malformed/oversized legacy value is projected as NULL AND flagged for
- * private HTTP 503. Never truncate a value and then mutate/audit a different
+ * private HTTP 503, except the exact direct no-op-only icon receipt below.
+ * Never truncate a value and then mutate/audit a different
  * identity. Each user column is explicitly mapped to avoid SELECT u.* leaks.
  */
 const XID_USER_TEXT_COLUMNS = [
@@ -131,13 +132,25 @@ const XID_USER_SQL_PROJECTION = XID_USER_COLUMN_ORDER.map((name) => {
     ? guardedTextExpr(column, text[1])
     : guardedNumericExpr(column)} AS "${name}"`;
 }).join(',\n      ');
+// Only an exact direct no-op can omit an oversized TEXT audit-only icon.
+// Byte equality avoids conflating SQLite and JS normalization. Alias-only,
+// missing, wrong-type and different IDs retain the full fail-closed path.
+// The same marker is checked again against the decoded identity in JS.
+const XID_ACTOR_ICON_OMITTED_SQL = `CASE WHEN typeof(active_x."icon_url") = 'text'
+  AND length(CAST(active_x."icon_url" AS BLOB)) > ${EXTRA_TEXT_CAPS.actorXIconUrl}
+  AND typeof(u."active_x_user_id") = 'text'
+  AND CAST(u."active_x_user_id" AS BLOB) = CAST((SELECT canonical_id FROM bounded_resolved) AS BLOB)
+  AND CAST((SELECT direct_id FROM facts) AS BLOB) = CAST((SELECT canonical_id FROM bounded_resolved) AS BLOB)
+  THEN 1 ELSE 0 END`;
 const XID_INVALID_SNAPSHOT_SQL = [
   ...XID_USER_TEXT_COLUMNS.map(([name, bytes]) =>
     unsafeTextExpr('u."' + name + '"', bytes)),
   ...XID_USER_NUMBER_COLUMNS.map((name) =>
     unsafeNumericExpr('u."' + name + '"')),
   ...XID_EXTRA_TEXT_COLUMNS.map(([column, bytes]) =>
-    unsafeTextExpr(column, bytes)),
+    column === 'active_x."icon_url"'
+      ? `(${unsafeTextExpr(column, bytes)} AND (${XID_ACTOR_ICON_OMITTED_SQL}) = 0)`
+      : unsafeTextExpr(column, bytes)),
   ...XID_EXTRA_NUMBER_COLUMNS.map(unsafeNumericExpr),
 ].join(' OR ');
 
@@ -145,6 +158,7 @@ type RawUserRow = Record<string, string | number | null> & {
   id: string;
   active_x_user_id: string | null;
   invalid_gate_snapshot: number;
+  actor_icon_omitted: number;
   linked_approval_status?: string | null;
   resolved_x_user_id?: string | null;
   derived_terms_reaccept_required?: number | null;
@@ -184,7 +198,7 @@ async function loadSelectedIdentity(
   linkedApproval: string | null;
   canonicalXId: string | null;
   tos: { is_tos_accepted: number; terms_reaccept_required: number };
-  actorSnapshotJson: string;
+  actorSnapshotJson: string | null;
   costGuardSettings: XidCostGuardSettings | null;
 } | null> {
   // Identical fail-closed alias/direct collision policy to
@@ -242,6 +256,7 @@ async function loadSelectedIdentity(
     )
     SELECT
       CASE WHEN ${XID_INVALID_SNAPSHOT_SQL} THEN 1 ELSE 0 END AS invalid_gate_snapshot,
+      ${XID_ACTOR_ICON_OMITTED_SQL} AS actor_icon_omitted,
       ${XID_USER_SQL_PROJECTION},
       ${TERMS_REACCEPT_REQUIRED_CASE_SQL} AS derived_terms_reaccept_required,
       ${guardedTextExpr('active_x."x_name"', EXTRA_TEXT_CAPS.actorXName)} AS actor_x_name,
@@ -272,7 +287,7 @@ async function loadSelectedIdentity(
 
   if (!row) return null;
   const {
-    invalid_gate_snapshot,
+    invalid_gate_snapshot, actor_icon_omitted,
     linked_approval_status, resolved_x_user_id, derived_terms_reaccept_required,
     actor_x_name, actor_x_icon_url,
     cg_settings_id, cg_operation_mode, cg_disabled_features_json,
@@ -284,6 +299,19 @@ async function loadSelectedIdentity(
   if (invalid_gate_snapshot !== 0) {
     // The outer route maps this fixed, PII-free failure to private HTTP 503.
     throw new Error("invalid_sa098_first_row_projection");
+  }
+  if (actor_icon_omitted !== 0 && actor_icon_omitted !== 1) {
+    throw new Error("invalid_sa098_actor_receipt");
+  }
+  if (actor_icon_omitted === 1 && (
+    actor_x_icon_url !== null ||
+    typeof user.active_x_user_id !== "string" ||
+    user.active_x_user_id !== requestedXId ||
+    user.active_x_user_id !== resolved_x_user_id ||
+    !isSessionSafeSelectedXId(user.active_x_user_id) ||
+    normalizeXId(user.active_x_user_id) !== resolved_x_user_id
+  )) {
+    throw new Error("invalid_sa098_actor_receipt");
   }
   // Drizzle timestamp_ms columns are Date objects in CURRENT select().
   if (typeof user.emailVerified === "number") {
@@ -311,7 +339,7 @@ async function loadSelectedIdentity(
       is_tos_accepted: user.is_tos_accepted === 1 ? 1 : 0,
       terms_reaccept_required: derived_terms_reaccept_required === 1 ? 1 : 0,
     },
-    actorSnapshotJson: JSON.stringify(actorSnapshotFromRow({
+    actorSnapshotJson: actor_icon_omitted === 1 ? null : JSON.stringify(actorSnapshotFromRow({
       discord_id: typeof user.discord_id === "string" ? user.discord_id : null,
       discord_name: typeof user.name === "string" ? user.name : null,
       active_x_user_id: typeof user.active_x_user_id === "string" ? user.active_x_user_id : null,
@@ -411,7 +439,10 @@ activeXRoutes.post("/", limitXIdActionBody("SA-098"), async (c, next) => {
     return c.json({ ok: false, message: LINK_NOT_FOUND }, 403);
   }
 
-  c.set("actorSnapshotJsonById", { [sessionUser.id]: selected.actorSnapshotJson });
+  // An omitted audit-only icon has an explicit no-mutation receipt. Never
+  // synthesize a truncated actor snapshot for a possible update.
+  c.set("actorSnapshotJsonById", selected.actorSnapshotJson === null
+    ? {} : { [sessionUser.id]: selected.actorSnapshotJson });
   c.set("xidSelected", { before: selected.user, canonicalXId: selected.canonicalXId });
   await next();
 }, dbMiddleware, async (c) => {
@@ -431,6 +462,11 @@ activeXRoutes.post("/", limitXIdActionBody("SA-098"), async (c, next) => {
     return c.json({ ok: true, message: "すでにこの X ID がアクティブです。" });
   }
 
+  // Defense in depth: the no-op-only receipt cannot enter the mutation
+  // path, even if the earlier identity checks and this branch ever disagree.
+  if (!Object.hasOwn(c.get("actorSnapshotJsonById") ?? {}, userId)) {
+    return writeGuardDenyResponse(c, "db_unavailable", 503);
+  }
   const after = { ...before, active_x_user_id: canonicalXId };
   try {
     await mutateWithAudit(c.get("db"), {
