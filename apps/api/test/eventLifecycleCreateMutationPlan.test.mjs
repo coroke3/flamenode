@@ -1971,7 +1971,7 @@ async function stageMixedSqliteFixture() {
     ["delete_answers", "delete_questions", "update_question", "insert_questions"]);
   assert.deepEqual(stage.expectedMutationChanges, [2, 1, 1, 2]);
   const mutationPlan = buildStageQuestionD1MutationBatch({
-    db: f.db, eventId: event.id, existing, next, deletedAnswers: f.answers, actorUserId: "u_admin",
+    db: f.db, eventId: event.id, callerQueryCount: 18, existing, next, deletedAnswers: f.answers, actorUserId: "u_admin",
   });
   assert.equal(mutationPlan.ok, true);
   assert.deepEqual(mutationPlan.expectedMutationChanges, stage.expectedMutationChanges);
@@ -2056,10 +2056,10 @@ test("MIG-0652 U03n: shared D1 mutation builder rejects over-cap and foreign ans
     ...f.before, id: "stage_cap_" + index, question_key: "stage_permission_cap_" + index,
   }));
   assert.deepEqual(buildStageQuestionD1MutationBatch({
-    db: f.db, eventId: event.id, existing: [], next: rows, deletedAnswers: [], actorUserId: "u_admin",
+    db: f.db, eventId: event.id, callerQueryCount: 18, existing: [], next: rows, deletedAnswers: [], actorUserId: "u_admin",
   }), { ok: false, reason: "stage_limit" });
   assert.deepEqual(buildStageQuestionD1MutationBatch({
-    db: f.db, eventId: event.id, existing: [f.before], next: [],
+    db: f.db, eventId: event.id, callerQueryCount: 18, existing: [f.before], next: [],
     deletedAnswers: [{ video_id: "foreign", event_id: event.id, question_id: "other",
       answer_text: "", answer_json: null, created_at: now, updated_at: now }],
     actorUserId: "u_admin",
@@ -2072,7 +2072,7 @@ test("MIG-0652 U03o: shared stage builder rejects foreign event snapshots before
   const f = stageUpdateSqliteFixture();
   const answer = { video_id: "v1", event_id: event.id, question_id: f.before.id,
     answer_text: "old", answer_json: null, created_at: now, updated_at: now };
-  const base = { db: f.db, eventId: event.id, actorUserId: "u_admin",
+  const base = { db: f.db, eventId: event.id, callerQueryCount: 18, actorUserId: "u_admin",
     existing: [f.before], next: [], deletedAnswers: [answer] };
   const reject = value => assert.deepEqual(buildStageQuestionD1MutationBatch(value),
     { ok: false, reason: "event_scope" });
@@ -2084,5 +2084,24 @@ test("MIG-0652 U03o: shared stage builder rejects foreign event snapshots before
   const good = buildStageQuestionD1MutationBatch(base);
   assert.equal(good.ok, true);
   assert.deepEqual(good.expectedMutationChanges, [1, 1]);
+  assert.equal(f.d1.stats.batches, 0);
+});
+
+test("MIG-0652 U03p: shared stage D1 budget rejects missing, invalid and exhausted caller queries", async () => {
+  const { buildStageQuestionD1MutationBatch } = await import("@flamenode/server-core/event/updatePayload");
+  const f = stageUpdateSqliteFixture();
+  const row = { ...f.before, id: "new_budget_question", question_key: "stage_permission_budget" };
+  const base = { db: f.db, eventId: event.id, existing: [], next: [row],
+    deletedAnswers: [], actorUserId: "u_admin" };
+  for (const bad of [undefined, -1, 1.5, NaN, Infinity, 51]) {
+    assert.deepEqual(buildStageQuestionD1MutationBatch({ ...base, callerQueryCount: bad }),
+      { ok: false, reason: "query_budget" });
+  }
+  const good = buildStageQuestionD1MutationBatch({ ...base, callerQueryCount: 18 });
+  assert.equal(good.ok, true);
+  assert.equal(good.budget.withinLimit, true);
+  assert.equal(good.budget.callerQueryCount, 18);
+  assert.equal(good.budget.mutationStatementCount, good.mutationStatements.length);
+  assert.equal(good.budget.mutationAssertionCount, good.expectedMutationChanges.length);
   assert.equal(f.d1.stats.batches, 0);
 });

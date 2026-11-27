@@ -4,6 +4,7 @@ import { and, eq, or } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { ServerCoreDb } from "../db.ts";
 import type { WriteAuditLogInput } from "../audit/types.ts";
+import { planAtomicAuditMutationBudget } from "../audit/mutate.ts";
 import { MAX_STAGE_PERMISSION_QUESTIONS } from "@flamenode/domain/event/limits";
 import {
   buildVideoFormSettingsJson,
@@ -251,14 +252,20 @@ export function buildStageQuestionD1MutationBatch(input: {
   next: readonly (typeof eventCustomQuestions.$inferSelect)[];
   deletedAnswers: readonly (typeof videoCustomAnswers.$inferSelect)[];
   actorUserId: string;
+  /** Actual logical queries already spent in this request before mutateWithAudit. */
+  callerQueryCount: number;
 }):
-  | { ok: false; reason: Exclude<StageQuestionMutationPlan<never, never, never>, { ok: true }>["reason"] | "event_scope" }
+  | { ok: false; reason: Exclude<StageQuestionMutationPlan<never, never, never>, { ok: true }>["reason"] | "event_scope" | "query_budget" }
   | {
       ok: true;
       mutationStatements: BatchItem<"sqlite">[];
       expectedMutationChanges: number[];
       audits: WriteAuditLogInput[];
+      budget: ReturnType<typeof planAtomicAuditMutationBudget>;
     } {
+  if (!Number.isSafeInteger(input.callerQueryCount) || input.callerQueryCount < 0) {
+    return { ok: false, reason: "query_budget" };
+  }
   // Fail closed on foreign-event snapshots *before* generating any SQL.
   // The caller must still SELECT by event, enforce the 18/20 read caps and
   // authenticate; this is a second defense against accidentally mixed rows.
@@ -329,10 +336,18 @@ export function buildStageQuestionD1MutationBatch(input: {
       })));
     }
   }
+  const budget = planAtomicAuditMutationBudget({
+    mutationStatements,
+    expectedMutationChanges: stage.expectedMutationChanges,
+    audits,
+    callerQueryCount: input.callerQueryCount,
+  });
+  if (!budget.withinLimit) return { ok: false, reason: "query_budget" };
   return {
     ok: true,
     mutationStatements,
     expectedMutationChanges: stage.expectedMutationChanges,
     audits,
+    budget,
   };
 }
