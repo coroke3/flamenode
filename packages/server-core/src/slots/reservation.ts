@@ -320,10 +320,17 @@ function slotJsonObjectSql(alias: string): string {
 // MATERIALIZED CTE. Large or corrupted groups are replaced with a sentinel
 // BEFORE json_group_array/json(...) executes, never silently truncated.
 const MAX_SLOT_GROUP_JSON_BYTES = 20 * 1024;
-function boundedSlotArraySql(rowsSql: string, alias: string): string {
+function boundedSlotArraySql(rowsSql: string, alias: string, anchorIdSql?: string): string {
+  // Extend already carries its anchor row in a separate field from this same
+  // statement. Reference it in the transported group, but still validate and
+  // charge every complete row against the existing 20 KiB group limit.
+  const anchorRef = anchorIdSql === undefined ? "" :
+    `, CASE WHEN ${alias}."id" = ${anchorIdSql} THEN 1 ELSE 0 END AS anchor_ref`;
+  const transportedItem = anchorIdSql === undefined ? '"item"' :
+    `CASE WHEN anchor_ref = 1 THEN '{"__anchor_reference":1}' ELSE "item" END`;
   return `(WITH raw_slot_rows AS MATERIALIZED (${rowsSql}),
     slot_json_rows AS MATERIALIZED (
-      SELECT ${slotJsonObjectSql(alias)} AS "item"
+      SELECT ${slotJsonObjectSql(alias)} AS "item"${anchorRef}
       FROM raw_slot_rows ${alias}
     )
     SELECT CASE
@@ -333,7 +340,7 @@ function boundedSlotArraySql(rowsSql: string, alias: string): string {
       WHEN (SELECT COALESCE(SUM(length(CAST("item" AS BLOB)) + 1), 0) + 2
             FROM slot_json_rows) > ${MAX_SLOT_GROUP_JSON_BYTES}
         THEN json_array(json_object('__invalid_projection', 1))
-      ELSE (SELECT json_group_array(json("item")) FROM slot_json_rows)
+      ELSE (SELECT json_group_array(json(${transportedItem})) FROM slot_json_rows)
     END)`;
 }
 
@@ -1097,7 +1104,7 @@ export async function extendSlotGroupCore(
       (SELECT ${slotJsonObjectSql("a")} FROM anchor a) AS anchor_json,
       ${approvedXJsonSql("?")} AS approved_x_json,
       ${staffRowsJsonSql()} AS staff_json,
-      ${boundedSlotArraySql("SELECT * FROM group_rows", "g")} AS group_json,
+      ${boundedSlotArraySql("SELECT * FROM group_rows", "g", '(SELECT "id" FROM anchor)')} AS group_json,
       (SELECT CASE
         WHEN ${invalidSqlText('"id"', MAX_LEGACY_RECORD_ID_BYTES)}
           THEN '{"__invalid_projection":1}'
@@ -1205,7 +1212,8 @@ export async function extendSlotGroupCore(
   try {
     groupRows = resolveBoundedGroupFromSnapshot(
       anchor,
-      parseJsonOrThrow<SlotRow[]>(snapshot.group_json, []),
+      parseJsonOrThrow<(SlotRow | { __anchor_reference: 1 })[]>(snapshot.group_json, [])
+        .map((row) => "__anchor_reference" in row ? anchor : row),
     );
     identity = resolveBoundedGroupIdentity(groupRows, ctx.authUserId, ctx.activeXId);
   } catch (error) {

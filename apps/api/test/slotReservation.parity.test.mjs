@@ -1608,23 +1608,35 @@ if (runUnderRootTsx(import.meta.url)) {
 
   test("S3 #725: tied legacy group edges preserve CURRENT neighbor and three reads", async () => {
     for (const direction of ["forward", "backward"]) {
-      for (const availableBetween of [true, false]) {
+      for (const [availableBetween, wide] of [[true, false], [false, false], [true, true]]) {
         const a = world();
         const b = world();
         for (const w of [a, b]) {
+          if (wide) {
+            w.sqlite.prepare("UPDATE events SET title = ? WHERE id = 'ev1'").run("\\".repeat(4096));
+            // Force a full-size SQL-order neighbor on either side, with the
+            // CURRENT JS locale-ordered edge still choosing tie_Z.
+            for (const id of ["tie_0", "tie_z"]) {
+              insert(w.sqlite, "slots", {
+                id, event_id: "ev1", start_time: NOW_SEC + 1100,
+                sort_order: 0, status: "available", slot_label: "\\".repeat(2048),
+                updated_at: 100, version: 1,
+              });
+            }
+          }
           const group = {
             event_id: "ev1", start_time: NOW_SEC + 1100, sort_order: 0,
             status: "reserved", reserved_by_user_id: "u_owner", x_user_id: "x_owner",
             reserved_x_id_snapshot: "x_owner", reservation_group_id: "legacy_tied_group",
-            display_name: "Legacy", updated_at: 100, version: 1,
+            display_name: wide ? "\\".repeat(512) : "Legacy", updated_at: 100, version: 1,
           };
           for (const id of ["tie_A", "tie_a"]) {
-            insert(w.sqlite, "slots", { ...group, id, slot_label: id });
+            insert(w.sqlite, "slots", { ...group, id, slot_label: wide ? "\\".repeat(1565) : id });
           }
           if (availableBetween) {
             insert(w.sqlite, "slots", {
               id: "tie_Z", event_id: "ev1", start_time: NOW_SEC + 1100,
-              sort_order: 0, status: "available", slot_label: "Between",
+              sort_order: 0, status: "available", slot_label: wide ? "\\".repeat(2048) : "Between",
               updated_at: 100, version: 1,
             });
           }
@@ -1640,6 +1652,34 @@ if (runUnderRootTsx(import.meta.url)) {
           expected = await runCurrent(a, "u_owner", "extend", args);
         } finally {
           thawA();
+        }
+        let wideSnapshots = 0;
+        if (wide) {
+          const prepare = b.d1.prepare.bind(b.d1);
+          b.d1.prepare = sql => {
+            const stmt = prepare(sql);
+            if (!sql.includes("alternate_neighbors AS MATERIALIZED")) return stmt;
+            const bind = stmt.bind.bind(stmt);
+            stmt.bind = (...values) => {
+              assert.equal(values.length, 6);
+              const bound = bind(...values);
+              const first = bound.first.bind(bound);
+              bound.first = async () => {
+                const row = await first();
+                wideSnapshots++;
+                assert.equal(row.invalid_snapshot, 0);
+                assert.ok(Buffer.byteLength(JSON.stringify(row), "utf8") < 64 * 1024);
+                assert.equal(JSON.parse(row.group_json).filter(item => item.__anchor_reference === 1).length, 1);
+                const edgeId = direction === "forward" ? "tie_A" : "tie_a";
+                const alternate = JSON.parse(row.alternate_neighbors_json).find(entry => entry.edge_id === edgeId);
+                assert.equal(alternate.neighbor.id, "tie_Z", "valid alternate must fit without a fourth read");
+                assert.equal(alternate.neighbor.slot_label, "\\".repeat(2048));
+                return row;
+              };
+              return bound;
+            };
+            return stmt;
+          };
         }
         const reads = b.d1.stats.reads;
         const batches = b.d1.stats.batches;
@@ -1661,6 +1701,7 @@ if (runUnderRootTsx(import.meta.url)) {
           assert.deepEqual(result, expected.result, direction + " result parity");
           assert.deepEqual(state(b), state(a), direction + " atomic state parity");
           assert.equal(b.d1.stats.reads - reads, 3, direction + " tied-edge S3 read budget");
+          assert.equal(wideSnapshots, wide ? 1 : 0);
           assert.equal(b.d1.stats.batches - batches, availableBetween ? 1 : 0);
         } finally {
           thawB();
