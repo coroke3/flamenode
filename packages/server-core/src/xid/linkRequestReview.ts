@@ -1,9 +1,10 @@
 import { and, eq, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
-import { xIdentityRequests } from "@flamenode/db/schema";
+import { xIdentityRequests, xUsers } from "@flamenode/db/schema";
 import { buildXIdentityDecisionFields } from "@flamenode/domain/xid";
 import type { ServerCoreDb } from "../db.ts";
 import type { AtomicAuditMutationInput } from "../audit/mutate.ts";
+import { expectedRowCondition } from "../audit/expectedRowCondition.ts";
 
 /**
  * SA-091 rejection: the CURRENT pending-status CAS and strict atomic audit
@@ -114,5 +115,75 @@ export function planXIdAliasApproval(
       context: "x-identity-request",
       retention_class: "long_audit",
     } satisfies AtomicAuditMutationInput["audits"][number],
+  };
+}
+
+/**
+ * SA-090 canonical X user approval: plan a new row or re-approve the
+ * exact previously read row. An already approved row needs no mutation.
+ * Hosts retain canonical resolution, link/request CAS and batch execution.
+ */
+export function planXIdCanonicalApproval(
+  db: ServerCoreDb,
+  input: {
+    effectiveXUserId: string;
+    xUser: typeof xUsers.$inferSelect | null;
+    actorUserId: string;
+    actorXUserId: string | null;
+  },
+): {
+  statement: BatchItem<"sqlite">;
+  expectedChanges: 1;
+  audit: AtomicAuditMutationInput["audits"][number];
+} | null {
+  const { effectiveXUserId, xUser, actorUserId, actorXUserId } = input;
+  if (!xUser) {
+    const newXUser = {
+      id: effectiveXUserId,
+      x_name: `@${effectiveXUserId}`,
+      icon_url: null,
+      profile_text: null,
+      portfolio_contact: null,
+      youtube_channel_url: null,
+      other_social_links: null,
+      creative_start_date: null,
+      approval_status: "approved" as const,
+    };
+    return {
+      statement: db.insert(xUsers).values(newXUser),
+      expectedChanges: 1,
+      audit: {
+        table_name: "x_users",
+        target_id: effectiveXUserId,
+        operation: "CREATE",
+        before: null,
+        after: newXUser,
+        actor_user_id: actorUserId,
+        actor_x_user_id: actorXUserId,
+        reason: "新規X名義申請を承認",
+        context: "x-identity-request",
+        retention_class: "long_audit",
+      },
+    };
+  }
+  if (xUser.approval_status === "approved") return null;
+  return {
+    statement: db
+      .update(xUsers)
+      .set({ approval_status: "approved" })
+      .where(expectedRowCondition({ expectedCurrent: xUser })),
+    expectedChanges: 1,
+    audit: {
+      table_name: "x_users",
+      target_id: effectiveXUserId,
+      operation: "UPDATE",
+      before: { ...xUser },
+      after: { ...xUser, approval_status: "approved" },
+      actor_user_id: actorUserId,
+      actor_x_user_id: actorXUserId,
+      reason: "既存X名義の連携申請を承認",
+      context: "x-identity-request",
+      retention_class: "long_audit",
+    },
   };
 }

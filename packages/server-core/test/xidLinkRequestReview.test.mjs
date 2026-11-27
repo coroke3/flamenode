@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { drizzle } from "drizzle-orm/d1";
-import { planXIdAliasApproval, planXIdLinkRejection } from "../src/xid/linkRequestReview.ts";
+import { planXIdAliasApproval, planXIdCanonicalApproval, planXIdLinkRejection } from "../src/xid/linkRequestReview.ts";
 import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
 import { assertChanges } from "../src/audit/mutate.ts";
+import { xUsers } from "@flamenode/db/schema";
+import { expectedRowCondition } from "../src/audit/expectedRowCondition.ts";
 
 // No D1 methods should run during planning; only the generated UPDATE is
 // compiled. The SQLite fixture below tests its actual pending-status CAS.
@@ -157,6 +159,87 @@ test("SA-090 alias conditional INSERT loses races and rolls back preceding mutat
         assert.deepEqual(sqlite.prepare("SELECT * FROM x_user_aliases ORDER BY alias_x_id").all(), before, label);
       }
       assert.equal(sqlite.prepare("SELECT x_user_id FROM x_user_aliases WHERE alias_x_id='unrelated'").get().x_user_id, "other");
+    } finally { sqlite.close(); }
+  }
+});
+
+const canonicalPlan = (xUser, actorXUserId = null) => planXIdCanonicalApproval(db, {
+  effectiveXUserId: "candidate", xUser, actorUserId: "reviewer", actorXUserId,
+});
+
+test("SA-090 canonical approval preserves CURRENT insert/update/no-op and exact audit", () => {
+  const created = {
+    id: "candidate", x_name: "@candidate", icon_url: null, profile_text: null,
+    portfolio_contact: null, youtube_channel_url: null, other_social_links: null,
+    creative_start_date: null, approval_status: "approved",
+  };
+  const create = canonicalPlan(null);
+  assert.equal(create.expectedChanges, 1);
+  assert.deepEqual(create.statement.toSQL(), db.insert(xUsers).values(created).toSQL());
+  assert.deepEqual(create.audit, {
+    table_name: "x_users", target_id: "candidate", operation: "CREATE",
+    before: null, after: created, actor_user_id: "reviewer", actor_x_user_id: null,
+    reason: "新規X名義申請を承認", context: "x-identity-request",
+    retention_class: "long_audit",
+  });
+  for (const status of ["pending", "rejected", "imported", "approved"]) {
+    const row = { ...created, x_name: "Existing", profile_text: "keep", approval_status: status };
+    const before = { ...row };
+    const plan = canonicalPlan(row, "reviewer-x");
+    if (status === "approved") {
+      assert.equal(plan, null);
+    } else {
+      assert.equal(plan.expectedChanges, 1);
+      assert.deepEqual(plan.statement.toSQL(), db.update(xUsers).set({ approval_status: "approved" })
+        .where(expectedRowCondition({ expectedCurrent: row })).toSQL());
+      assert.deepEqual(plan.audit, {
+        table_name: "x_users", target_id: "candidate", operation: "UPDATE",
+        before, after: { ...before, approval_status: "approved" },
+        actor_user_id: "reviewer", actor_x_user_id: "reviewer-x",
+        reason: "既存X名義の連携申請を承認", context: "x-identity-request",
+        retention_class: "long_audit",
+      });
+      assert.notStrictEqual(plan.audit.before, row);
+    }
+    assert.deepEqual(row, before);
+  }
+});
+
+test("SA-090 canonical approval CAS preserves newer rows and rolls back preceding mutation", () => {
+  const row = { id: "candidate", x_name: "Original", approval_status: "rejected", profile_text: null };
+  const plan = canonicalPlan(row);
+  const q = plan.statement.toSQL();
+  const check = new SQLiteSyncDialect().sqlToQuery(assertChanges(plan.expectedChanges));
+  for (const [label, race, expected] of [
+    ["stable", null, 1],
+    ["newer name", "UPDATE x_users SET x_name='Newer' WHERE id='candidate'", 0],
+    ["newer profile", "UPDATE x_users SET profile_text='Newer' WHERE id='candidate'", 0],
+    ["concurrent approval", "UPDATE x_users SET approval_status='approved' WHERE id='candidate'", 0],
+    ["deleted", "DELETE FROM x_users WHERE id='candidate'", 0],
+  ]) {
+    const sqlite = new DatabaseSync(":memory:");
+    try {
+      sqlite.exec(`CREATE TABLE x_users (id TEXT PRIMARY KEY, x_name TEXT, approval_status TEXT, profile_text TEXT);
+        CREATE TABLE marker (n INTEGER NOT NULL);
+        INSERT INTO x_users VALUES ('candidate','Original','rejected',NULL), ('other','Original','rejected',NULL);
+        INSERT INTO marker VALUES (0);`);
+      if (race) sqlite.exec(race);
+      const before = sqlite.prepare("SELECT * FROM x_users ORDER BY id").all();
+      sqlite.exec("BEGIN");
+      sqlite.exec("UPDATE marker SET n=1");
+      assert.equal(Number(sqlite.prepare(q.sql).run(...q.params).changes), expected, label);
+      if (expected === 1) {
+        assert.doesNotThrow(() => sqlite.prepare(check.sql).get(...check.params), label);
+        sqlite.exec("COMMIT");
+        assert.equal(sqlite.prepare("SELECT approval_status FROM x_users WHERE id='candidate'").get().approval_status, "approved");
+        assert.equal(Number(sqlite.prepare(q.sql).run(...q.params).changes), 0, "stale replay must not update");
+      } else {
+        assert.throws(() => sqlite.prepare(check.sql).get(...check.params), label);
+        sqlite.exec("ROLLBACK");
+        assert.deepEqual(sqlite.prepare("SELECT * FROM x_users ORDER BY id").all(), before, label);
+        assert.equal(sqlite.prepare("SELECT n FROM marker").get().n, 0, label);
+      }
+      assert.equal(sqlite.prepare("SELECT approval_status FROM x_users WHERE id='other'").get().approval_status, "rejected");
     } finally { sqlite.close(); }
   }
 });

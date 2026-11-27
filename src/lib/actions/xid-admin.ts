@@ -14,7 +14,7 @@ import {
   or,
   sql,
 } from "drizzle-orm";
-import { planXIdAliasApproval, planXIdLinkRejection } from "@flamenode/server-core/xid/linkRequestReview";
+import { planXIdAliasApproval, planXIdCanonicalApproval, planXIdLinkRejection } from "@flamenode/server-core/xid/linkRequestReview";
 import { canManageXIdLinkRequests } from "@/lib/auth/ownership";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import type { DB } from "@/lib/db/client";
@@ -859,55 +859,17 @@ async function approveXIdLinkRequestOnce(
         )
         .limit(1)
     )[0];
-    if (!xUser) {
-      const newXUser = {
-        id: effectiveXUserId,
-        x_name: `@${effectiveXUserId}`,
-        icon_url: null,
-        profile_text: null,
-        portfolio_contact: null,
-        youtube_channel_url: null,
-        other_social_links: null,
-        creative_start_date: null,
-        approval_status: "approved" as const,
-      };
-      statements.push(db.insert(xUsers).values(newXUser));
-      expected.push(1);
+    const xUserPlan = planXIdCanonicalApproval(db, {
+      effectiveXUserId,
+      xUser,
+      actorUserId: operatorAuthUserId,
+      actorXUserId: operatorActorXUserId,
+    });
+    if (xUserPlan) {
+      statements.push(xUserPlan.statement);
+      expected.push(xUserPlan.expectedChanges);
       publicVisibilityChanged = true;
-      audits.push({
-        table_name: "x_users",
-        target_id: effectiveXUserId,
-        operation: "CREATE",
-        before: null,
-        after: newXUser,
-        actor_user_id: operatorAuthUserId,
-        actor_x_user_id: operatorActorXUserId,
-        reason: "新規X名義申請を承認",
-        context: "x-identity-request",
-        retention_class: "long_audit",
-      });
-    } else if (xUser.approval_status !== "approved") {
-      const afterXUser = { ...xUser, approval_status: "approved" as const };
-      statements.push(
-        db
-          .update(xUsers)
-          .set({ approval_status: "approved" })
-          .where(expectedRowCondition({ expectedCurrent: xUser })),
-      );
-      expected.push(1);
-      publicVisibilityChanged = true;
-      audits.push({
-        table_name: "x_users",
-        target_id: effectiveXUserId,
-        operation: "UPDATE",
-        before: { ...xUser },
-        after: afterXUser,
-        actor_user_id: operatorAuthUserId,
-        actor_x_user_id: operatorActorXUserId,
-        reason: "既存X名義の連携申請を承認",
-        context: "x-identity-request",
-        retention_class: "long_audit",
-      });
+      audits.push(xUserPlan.audit);
     }
 
     if (!duplicateLink) {
