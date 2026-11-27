@@ -233,7 +233,7 @@ function realGuardFixture({
     body: JSON.stringify(body),
   }, requestEnv);
   const count = table => sqlite.prepare('SELECT COUNT(*) AS n FROM "' + table + '"').get().n;
-  return { sqlite, d1, send, count };
+  return { sqlite, d1, send, count, sendRaw: request => app.fetch(request, requestEnv) };
 }
 
 test("MIG-0650 U03bq authentic guard stack uses one per-request metered D1 facade and closes after 501", async () => {
@@ -2272,4 +2272,84 @@ test("MIG-0650 U03cw CURRENT parity: related-event overflow precedes member vali
     ok: false, message: "関連イベント数が処理上限を超えています。",
   });
   assert.deepEqual(overflow.stats(), { invoked: 1, prematureDb: 0 });
+});
+
+test("MIG-0650 U03 SA-085 refuses a disturbed unlocked body even when its unread suffix is valid JSON", async () => {
+  const payloads = [
+    { is_collab: ["false"], members_json: "[]" },
+    valid(),
+    { is_collab: ["true"], members_json: "[]" },
+  ];
+  const encoder = new TextEncoder();
+  const request = chunks => new Request(SITE + "/api/videos/v_two/members", {
+    method: "PUT",
+    headers: { origin: SITE, "content-type": "application/json" },
+    body: new ReadableStream({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
+        controller.close();
+      },
+    }),
+    duplex: "half",
+  });
+  for (const payload of payloads) {
+    const json = JSON.stringify(payload);
+    for (const prefix of ["not-json\n", "{}", " "]) {
+      const disturbed = request([prefix, json]);
+      const owner = disturbed.body.getReader();
+      try {
+        const first = await owner.read();
+        assert.equal(first.done, false);
+        assert.equal(new TextDecoder().decode(first.value), prefix);
+      } finally { owner.releaseLock(); }
+      assert.equal(disturbed.bodyUsed, true);
+      assert.equal(disturbed.body.locked, false);
+      assert.deepEqual(await readAdminVideoMembersJsonBody(disturbed), { kind: "invalid" });
+      assert.equal(disturbed.body.locked, false, "do not acquire a second reader");
+    }
+    assert.deepEqual(await readAdminVideoMembersJsonBody(request([json])), { kind: "ok", value: payload });
+    assert.deepEqual(await readAdminVideoMembersJsonBody(request([" ", json])), { kind: "ok", value: payload });
+    assert.deepEqual(await readAdminVideoMembersJsonBody(request(["not-json\n", json])), { kind: "invalid" });
+  }
+});
+
+test("MIG-0650 U03 SA-085 rejects a partially consumed request before target lookup or atomic write", async () => {
+  for (const prefix of ["not-json\n", "{}", " "]) {
+    const s = realGuardFixture({
+      enableAtomicCandidateWrite: true,
+      beforeAtomicBatch: () => assert.fail("disturbed body reached atomic write"),
+    });
+    try {
+      const tables = ["video_members", "video_chapters", "audit_logs", "static_rebuild_queue"];
+      const before = tables.map(s.count);
+      const payload = JSON.stringify({ is_collab: ["true"], members_json: JSON.stringify([member(0)]) });
+      const request = new Request(SITE + "/api/videos/v_two/members", {
+        method: "PUT",
+        headers: { origin: SITE, "content-type": "application/json" },
+        body: new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(prefix));
+            controller.enqueue(new TextEncoder().encode(payload));
+            controller.close();
+          },
+        }),
+        duplex: "half",
+      });
+      const owner = request.body.getReader();
+      try {
+        const first = await owner.read();
+        assert.equal(first.done, false);
+        assert.equal(new TextDecoder().decode(first.value), prefix);
+      } finally { owner.releaseLock(); }
+      assert.equal(request.bodyUsed, true);
+      assert.equal(request.body.locked, false);
+      const response = await s.sendRaw(request);
+      assert.equal(response.status, 400, await response.clone().text());
+      assert.equal(response.headers.get("cache-control"), "private, no-store");
+      assert.deepEqual(await response.json(), { ok: false, message: "入力エラー" });
+      assert.equal(s.d1.stats.reads, 2, "only guard actor/TOS and CostGuard may read D1");
+      assert.equal(s.d1.stats.batches, 0);
+      assert.deepEqual(tables.map(s.count), before);
+    } finally { s.sqlite.close(); }
+  }
 });

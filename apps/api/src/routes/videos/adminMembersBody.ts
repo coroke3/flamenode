@@ -25,7 +25,7 @@ export async function readAdminVideoMembersJsonBody(request: Request): Promise<A
       return { kind: "too_large" };
     }
   }
-  if (request.signal.aborted || !request.body) return { kind: "invalid" };
+  if (request.signal.aborted || request.bodyUsed || !request.body) return { kind: "invalid" };
 
   // If a middleware already owns or disturbed the request body, getReader()
   // may throw synchronously. Fail closed as invalid input rather than leaking
