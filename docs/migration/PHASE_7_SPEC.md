@@ -775,7 +775,7 @@ PR を revert（まだどの route からも使われない）。
 
 ### MIG-0714: Personal SPA の投稿 form その C: `VideoForm` と `UnslottedPostForm` の移植（MIG-0703）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — 依存 MIG-0712・MIG-0713・MIG-0738 は DONE。Nov 27 決定により #696 Part A の直列partial merge後、下記 Part B01 と B02 は Lead が同じ未統合 Draft #903 で直列実施可能。各PR3000行以内、親READY維持、共有CSS登録は #464/#683 と調整する。submit は props の adapter にして API を待たない
+- **Readiness:** NEEDS_REFINEMENT — 親全体は未完。依存 MIG-0712・MIG-0713・MIG-0738 と Part A #696、B01/B02 #903 は main に統合済み。2026-11-27 Lead が下記 B03 の4 section を実コードから限定refineした。B03 は fresh owner scan後に直列実施可。各PR3000行以内、親READY維持、B04実controllerとB05共有CSS/全form browserは各開始前に具体化する。submit は props の adapter にして API を待たない
 - **Recipe:** R-UI
 - **Runtime:** N
 - **Depends on:** MIG-0712, MIG-0713, MIG-0738 / **Decisions:** D-16-4, D-16-11, D-19-5
@@ -788,6 +788,7 @@ PR を revert（まだどの route からも使われない）。
   - MIG-0738: `ErrorCallout`, `PublicReflectionDelayNotice`, `youtubeId`, `publicReflectionNotice`, `videoTypes`, `videoFormSettings`, `requiredVideoFields`, `permissionUnlockHint`, `videoFormDraft`, `guardRedirect`, `activeXSwitchEvents`, `submitFormCompat`, `useFormDraft`, `draftFileStore`
   - `@flamenode/domain/video/atomicLimits`, `@flamenode/domain`（`normalizeXId` 等）
 #### Owned paths
+- 新規（B03限定）: `+apps/app/src/components/forms/VideoFormSubmitterSection.tsx`, `+apps/app/src/components/forms/VideoFormBasicsSection.tsx`, `+apps/app/src/components/forms/VideoFormDescriptionsSection.tsx`, `+apps/app/src/components/forms/VideoFormMembersSection.tsx`, `+apps/app/src/components/forms/videoFormFieldContracts.ts`。既存 `apps/app/test/videoSubmitAdapter.test.mjs`、own checkpoint、このWork Order節、対応matrix行のみ更新。共有CSS/mainと他MIG部品は所有しない。
 - 新規（B01/B02 の限定追加）: `+apps/app/src/components/forms/EditSubmitterField.tsx`, `+apps/app/src/components/forms/VideoFormFeedback.tsx`。既存 `apps/app/test/videoSubmitAdapter.test.mjs` と `docs/migration/work-items/MIG-0714.md`、このWork Order節、該当matrix行を更新。B01/B02 は未mountの部品だけで共有CSS登録を変更しない。
 - 新規（後続の全form）: `+apps/app/src/components/forms/VideoForm.tsx`, `+apps/app/src/components/forms/UnslottedPostForm.tsx`, `+apps/app/src/styles/video-form.css`（`MODULES` に `["vform", "src/components/forms/VideoForm.module.css", "apps/app/src/styles/video-form.css"]`）, `+apps/app/test/videoForm.test.mjs`
 - 変更: `apps/app/scripts/portCssModule.mjs`, `apps/app/src/main.tsx`, `docs/migration/FILE_MIGRATION_MATRIX.md`
@@ -797,6 +798,8 @@ PR を revert（まだどの route からも使われない）。
 - **Serial Part B01（#903）**: CURRENT `VideoForm.tsx` の独立した約192行の `EditSubmitterField` と `XIdOption` を `apps/app/src/components/forms/EditSubmitterField.tsx` へ未mountで移植する。React・`@flamenode/domain/xid`・既存 `Icon` のみ、fn-* class/inline styleを保持し共有CSS登録を触らない。既存 `videoSubmitAdapter.test.mjs` でreadonly/解錠不可、管理者の解錠→X変更→profile keep/copy_default→取消→再解錠と実FormDataをCURRENT対照で検証する。追加所有は同file・既存suite・MIG-0714 checkpoint・該当matrix行のみ。#696 merge後に最新main/全open PRの所有を再確認して直列claimする。権限意味変更やhost authority切替の新仕様が必要ならSTOP。親READY/0716・0717 BLOCKED、実form結線/#703/full browserはB/Cに残す。
 - **Serial Part B02（#903 内の次の直列単位; 2026-11-27 Lead refinement）**: CURRENT `VideoForm.tsx` 3289–3348 の result/error/success/pending/blocked/permission feedback だけを `apps/app/src/components/forms/VideoFormFeedback.tsx` に移す。明示propsは `mode`、`result`、`submitBlockedReason`、`noEditableFormSections`、`permissionSubmitBlockedHint` の5つ。既存 `VideoActionResult`、`Icon`、`ErrorCallout`、`PublicReflectionDelayNotice`、`videoPageHref` を使い、`next/link` だけ承認済みのnative `<a>`へ置換。6つのmodule classは既定 `vform-` prefixへ機械的に対応させ、CSS導出/登録は後続に残す。既存adapter suiteでCURRENT JSX断片とのSSR/DOM対照、空/denied/success/pending、free/slot/edit別CTA、unsafe public-video fallback、blocked優先、ARIAとFormData無変更を検証する。CURRENT、controller、navigation/API、認可、routes、CSS/mainを編集しない。B01独立source review後、まだDraftの同一owner PRで続け、合算3000行以下・最終HEAD独立review/CI・親READY/0716/0717 BLOCKEDを維持する。B02部分成功はfull-form acceptanceではない。
 - **U01 lib**: MIG-0738 へ分離済み（D-19-5）。
+- **Serial Part B03（2026-11-27 Lead refinement）**: main `9556ea2c2feeb1cd5c3b9bde43f002ae0e751fdb` のCURRENTから提出者 section（1816–2081）、作品基本情報/所属イベント/部（2092–2575）、概要欄previewと説明/質問（2577–2894）、合作メンバー（2897–3036）を上記4つのnamed sectionへ移す。`videoFormFieldContracts.ts` はCURRENTの初期値/profile/event/wizard-error型と共有field-policy/helperだけを持つ。状態・権限判定・draft・wizard panelのhidden保持・submitは親が所有し、sectionは明示domain propsと同じcallback参照を受ける。既存 `VideoMemberAdapters` の2 portを必須注入し、member `onChange` は参照をそのまま渡す。既存suiteでactual CURRENT JSXをAST抽出しDOM/FormData、readonly/disabled、permission ARIA、active X/admin profile、slot固定event/上限/part、stage/custom回答キーとfilter、実member追加/削除/並べ替え通知を対照検証する。承認済みnative anchorと `vform-` class対応以外のCURRENT意味変更、Next/network/storage/route/CSS登録は含めない。390/1440 Chromiumは導出CURRENT CSSを用いたsection確認に限定する。source約1650–1950、既存tests350–500、docs120–180行を目安に実差分3000行以下を検証。独立最終HEAD review/CI後のpartial mergeのみ、親READY/0716・0717 BLOCKEDを維持。
+- **B03後の直列到達点**: B04で残る実 `VideoForm` と薄い `UnslottedPostForm`、注入submit/member ports、native/controlled draft restore、trusted host/refresh境界を具体化する。#703は実フォームの保留submit→実member変更→旧成功でもinner/shell双方の新draft保持→現在成功で対応draft消去を既存suiteで検証するまで未完。B05で `vform` CSS導出/登録と全form390/1440を扱う。共有 `portCssModule.mjs` / `main.tsx` / CSS-order期待値は #464/#683 の実head差分と所有行を調整してから変更する。後続予算のためにB03で巨大contextや別権限ロジックを作らない。
 - **U02 adapter**: `VideoForm` の props に `submit(mode: "free" | "slot" | "update", fd: FormData): Promise<VideoActionResult>` を足し、`createFreeVideo` / `submitSlotVideo` / `updateVideo` の直呼びを置き換える。`VideoMembersField` の 2 adapter（MIG-0713）は `VideoForm` の props から渡す。
 - **U03 移植**: `VideoForm.tsx` と `UnslottedPostForm.tsx` と `video-form.css` を移植（wizard の手順・必須 field の検査・下書き・文言を変えない）。`next/link` は `<a>`、`useRouter` は `useNavigate`。
 - **U04 test**: CURRENT の `src/components/forms/*.contract.test.mjs` と同じ入力で、adapter に渡る FormData の key と値が同じことを確かめる。
@@ -805,6 +808,7 @@ PR を revert（まだどの route からも使われない）。
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
 | B02 | resultなし/失敗/成功/公開反映待ち、free/slot/edit、blockedと権限案内 | CURRENTと同じtext/link/role、vform class対応、FormDataにfieldを足さない。全form/T01〜T04とは別の未mount部品検証 |
+| B03 | 4 section の権限別入力、固定/選択event・part、質問、実member操作 | actual CURRENTとDOM/FormData/ARIA/通知が一致し、必須member portsを参照透過で渡す。wizard/controller/#703/全formは後続 |
 | T01 | 不正な YouTube URL・重複 | submit を呼ばず CURRENT と同じエラー |
 | T02 | 正しい入力で submit | adapter の FormData が CURRENT の契約 test と同じ key / 値 |
 | T03 | 下書きの保存・復元 | CURRENT と同じ storage key（`buildFormDraftStorageKey`） |
