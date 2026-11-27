@@ -673,6 +673,108 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+  test("MIG-0644 SA-097 paired receipt rejects incomplete or forged rows before side effects", async () => {
+    const side = createSide();
+    const now = Math.floor(Date.now() / 1000);
+    const base = { requested_by_auth_user_id: "u_root", requested_at: now, updated_at: now };
+    insert(side.sqlite, "x_identity_requests", {
+      ...base, id: "receipt-parent", request_type: "merge", status: "done",
+      source_x_user_id: "alice_x", target_x_user_id: "orph_x",
+    });
+    insert(side.sqlite, "x_identity_requests", {
+      ...base, id: "receipt-child", request_type: "revert_merge", status: "pending",
+      parent_request_id: "receipt-parent", revert_deadline_at: now + 3600,
+    });
+    const originalPrepare = side.d1.prepare;
+    let getterCalls = 0;
+    const faults = [
+      (r) => ({ ...r, success: false }),
+      (r) => ({ ...r, success: 1 }),
+      (r) => ({ results: r.results }),
+      (r) => ({ ...r, results: null }),
+      (r, child, parent) => ({ ...r, results: [child, parent, child] }),
+      (r, child) => ({ ...r, results: [child, child] }),
+      (r, child, parent) => ({ ...r, results: [parent] }),
+      (r, child, parent) => ({ ...r, results: [{ ...child, id: "other" }, parent] }),
+      (r, child, parent) => ({ ...r, results: [child, { ...parent, id: "other" }] }),
+      (r, child, parent) => {
+        const { restore_snapshot_json, ...partial } = parent;
+        return { ...r, results: [child, partial] };
+      },
+      (r, child, parent) => ({ ...r, results: [Object.create(child), parent] }),
+      (r, child, parent) => ({
+        ...r, results: [child, Object.defineProperty({ ...parent }, "restore_snapshot_json", {
+          get() { getterCalls += 1; throw new Error("PAIR_CANARY"); },
+        })],
+      }),
+      (r, child, parent) => ({
+        ...r, results: [Object.defineProperty({ ...child }, "row_kind", {
+          get() { getterCalls += 1; throw new Error("PAIR_CANARY"); },
+        }), parent],
+      }),
+      (r, child, parent) => ({ ...r, results: [{ ...child, status: { invalid: true } }, parent] }),
+      (r, child, parent) => ({ ...r, results: [child, new Proxy(parent, {
+        getOwnPropertyDescriptor() { throw new Error("PAIR_CANARY"); },
+      })] }),
+    ];
+    const state = () => ({
+      requests: side.sqlite.prepare("SELECT * FROM x_identity_requests ORDER BY id").all(),
+      audits: side.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n,
+      bucket: [...side.bucket.store.entries()],
+      wakes: [...side.queueWakes],
+      writes: side.d1.stats.writes,
+      batches: side.d1.stats.batches,
+    });
+    const before = state();
+    try {
+      for (const fault of faults) {
+        let attempts = 0;
+        side.d1.prepare = sqlText => {
+          const prepared = originalPrepare(sqlText);
+          if (!sqlText.startsWith("WITH requested_revert AS")) return prepared;
+          return {
+            ...prepared,
+            bind(...params) {
+              assert.equal(params.length, 3);
+              const bound = prepared.bind(...params);
+              return {
+                ...bound,
+                async all() {
+                  const result = await bound.all();
+                  attempts += 1;
+                  assert.equal(result.results.length, 2);
+                  const child = result.results.find(row => row.row_kind === "request");
+                  const parent = result.results.find(row => row.row_kind === "parent");
+                  assert.ok(child && parent);
+                  return fault(result, child, parent);
+                },
+              };
+            },
+          };
+        };
+        const reads = side.d1.stats.reads;
+        const response = await callHono(side, "/reverts/receipt-child/approve", { confirm: "REVERT" });
+        assert.equal(attempts, 1);
+        assert.equal(response.status, 503);
+        assert.equal(response.headers.get("cache-control"), "private, no-store");
+        assert.deepEqual(response.body, {
+          ok: false, message: "管理操作を処理できませんでした。再度お試しください。",
+        });
+        assert.equal(side.d1.stats.reads - reads, 4, "guard + one paired query");
+        assert.deepEqual(state(), before);
+      }
+      assert.equal(getterCalls, 0, "row accessors must not run");
+      side.d1.prepare = originalPrepare;
+      const healthy = await callHono(side, "/reverts/receipt-child/approve", { confirm: "REVERT" });
+      assert.equal(healthy.status, 400);
+      assert.equal(healthy.body.message, "親統合申請に差し戻し用snapshotがありません。");
+      assert.deepEqual(state(), before);
+    } finally {
+      side.d1.prepare = originalPrepare;
+      side.sqlite.close();
+    }
+  });
+
   test("MIG-0644 SA-097 backwards clock correction retains eligible parent lookup", async () => {
     const side = createSide();
     const NOW = Math.floor(Date.now() / 1000);

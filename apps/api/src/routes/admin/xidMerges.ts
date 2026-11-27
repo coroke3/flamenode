@@ -238,6 +238,48 @@ LIMIT 2`;
 
 type RevertRequestPairRow = MergeRequestRow & { row_kind: "request" | "parent" };
 
+function snapshotRevertRequestPair(
+  result: { success: boolean; results: unknown[] },
+  id: string,
+): { request: MergeRequestRow | null; parentRequest: MergeRequestRow | null } {
+  const unavailable = () => new Error("revert_request_pair_unavailable");
+  if (!result || result.success !== true) throw unavailable();
+  const rows = result.results;
+  if (!Array.isArray(rows) || rows.length > 2) throw unavailable();
+
+  // SQL projects exactly these columns. Copy only own scalar data values,
+  // never invoke row getters or let extra adapter properties enter audit/CAS.
+  // Preserve legacy scalar values as-is; CURRENT's domain checks still decide
+  // request shape, deadline, status and snapshot semantics.
+  let request: MergeRequestRow | null = null;
+  let parentRequest: MergeRequestRow | null = null;
+  for (const candidate of rows) {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+      throw unavailable();
+    }
+    const kind = Object.getOwnPropertyDescriptor(candidate, "row_kind");
+    if (!kind || !Object.hasOwn(kind, "value")) throw unavailable();
+    const entries = X_IDENTITY_REQUEST_COLUMNS.map((column) => {
+      const field = Object.getOwnPropertyDescriptor(candidate, column);
+      if (!field || !Object.hasOwn(field, "value")) throw unavailable();
+      const value: unknown = field.value;
+      if (value !== null && typeof value !== "string" && typeof value !== "number") {
+        throw unavailable();
+      }
+      return [column, value] as const;
+    });
+    const row = Object.fromEntries(entries) as MergeRequestRow;
+    if (typeof row.id !== "string") throw unavailable();
+    if (kind.value === "request" && request === null && row.id === id) request = row;
+    else if (kind.value === "parent" && parentRequest === null) parentRequest = row;
+    else throw unavailable();
+  }
+  if (parentRequest && (!request || parentRequest.id !== request.parent_request_id)) {
+    throw unavailable();
+  }
+  return { request, parentRequest };
+}
+
 async function loadRevertRequestPair(
   rawDb: D1Database,
   id: string,
@@ -248,20 +290,7 @@ async function loadRevertRequestPair(
   const result = await rawDb.prepare(REVERT_REQUEST_PAIR_SQL)
     .bind(id, REVERT_PARENT_TRIM_CHARS, lookupStartedAt)
     .all<RevertRequestPairRow>();
-  if (!result.success || !Array.isArray(result.results) || result.results.length > 2) {
-    throw new Error("revert_request_pair_unavailable");
-  }
-  let request: MergeRequestRow | null = null;
-  let parentRequest: MergeRequestRow | null = null;
-  for (const { row_kind, ...row } of result.results) {
-    if (row_kind === "request" && request === null && row.id === id) request = row;
-    else if (row_kind === "parent" && parentRequest === null) parentRequest = row;
-    else throw new Error("revert_request_pair_unavailable");
-  }
-  if (parentRequest && (!request || parentRequest.id !== request.parent_request_id)) {
-    throw new Error("revert_request_pair_unavailable");
-  }
-  return { request, parentRequest };
+  return snapshotRevertRequestPair(result, id);
 }
 
 async function loadXIdentityRequest(
