@@ -60,15 +60,22 @@ END`;
 
 // The domain uses exceptionUntil only in a numeric relational comparison.
 // Oversized legacy TEXT may contain padding around a JS numeric string
-// (e.g. hexadecimal); SQLite CAST would change that decision. Strip only
-// ASCII ECMAScript whitespace at the edges, and retain embedded-NUL and
-// non-TEXT values exactly. This is a lossless decision optimization, NOT
-// a universal scalar or admission-row size bound.
+// (e.g. hexadecimal); SQLite CAST would change that decision. A subset of
+// ASCII characters cannot occur anywhere in an ECMAScript numeric string,
+// and x/X/o/O can occur at most once (as a radix prefix). Map only those
+// provably nonnumeric strings to a fixed nonnumeric marker. Otherwise strip
+// ASCII edge whitespace, retaining NUL-containing and non-TEXT values.
+// This preserves numeric comparison decisions, NOT a universal row bound.
 export const COMPACT_COST_GUARD_EXCEPTION_UNTIL_SQL = `CASE
   WHEN typeof(s."cost_guard_exception_until") = 'text'
     AND length(CAST(s."cost_guard_exception_until" AS BLOB)) > 8192
     AND instr(CAST(s."cost_guard_exception_until" AS BLOB), X'00') = 0
-  THEN trim(s."cost_guard_exception_until", char(9,10,11,12,13,32))
+  THEN CASE
+    WHEN s."cost_guard_exception_until" GLOB '*[GHJKLMNPQRSTUVWYZghjklmpqrsuvwz_:@!?;,/(){}=]*'
+      OR s."cost_guard_exception_until" GLOB '*[xXoO]*[xXoO]*'
+    THEN '!'
+    ELSE trim(s."cost_guard_exception_until", char(9,10,11,12,13,32))
+  END
   ELSE s."cost_guard_exception_until"
 END`;
 
