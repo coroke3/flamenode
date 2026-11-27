@@ -9,6 +9,9 @@ import { AdminEvents } from "./admin/AdminEvents.js";
 import { AdminNotifications } from "./admin/AdminNotifications.js";
 import { AdminCompatRedirect } from "./admin/AdminRedirects.js";
 import { AdminTop } from "./admin/AdminTop.js";
+import { AdminUsers } from "./admin/AdminUsers.js";
+import { AdminUserDetail } from "./admin/AdminUserDetail.js";
+import { AdminUserEdit } from "./admin/AdminUserEdit.js";
 import { AnnouncementCreatePage, AnnouncementEditPage } from "./admin/AnnouncementEditor.js";
 import { AnnouncementsPage } from "./admin/Announcements.js";
 import { EventGroupCreatePage, EventGroupEditPage } from "./admin/EventGroupEdit.js";
@@ -96,6 +99,9 @@ export function OpsRoutes({ api }: { api: OpsApi }): React.ReactElement {
             <Route path="/manage/*" element={manage} />
             <Route path="/admin" element={adminFrame}>
               <Route index element={<AdminTop />} />
+              <Route path="users" element={<AdminUsers />} />
+              <Route path="users/:id" element={<AdminUserDetail />} />
+              <Route path="users/:id/edit" element={<AdminUserEdit />} />
               <Route path="permissions/simulator" element={<PermissionSimulator />} />
               <Route path="announcements" element={<AnnouncementsPage />} />
               <Route path="announcements/new" element={<AnnouncementCreatePage />} />
