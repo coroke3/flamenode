@@ -70,3 +70,45 @@ test("normalizeHttpUrl caps the serialized URL, not only the raw character count
   assert.equal(normalizeHttpUrl(noSlash, { maxLength: noSlash.length }), null);
   assert.equal(normalizeHttpUrl(noSlash), "https://example.com/");
 });
+
+test("SEC-872: CURRENT, SPA and Ops reject raw controls and backslashes before URL normalization", () => {
+  for (const normalize of [normalizeHttpUrl, normalizeSpaHttpUrl, normalizeOpsHttpUrl]) {
+    for (const char of [...Array.from({ length: 32 }, (_, n) => String.fromCharCode(n)), "\x7f", "\\"]) {
+      for (const raw of [`${char}https://example.com/`, `https://exa${char}mple.com/`, `https://example.com/${char}`]) {
+        assert.equal(normalize(raw), null, JSON.stringify(raw));
+      }
+    }
+    assert.equal(normalize("  https://example.com/path  "), "https://example.com/path");
+    assert.equal(normalize("http://example.com/"), "http://example.com/");
+    assert.equal(normalize("https://example.com/%09%0A%5C"), "https://example.com/%09%0A%5C");
+    assert.equal(normalize("https://user:secret@example.com/"), null);
+    assert.equal(normalize("javascript:alert(1)"), null);
+  }
+});
+
+test("SEC-872: all three URL helpers enforce raw and serialized safe-integer limits", () => {
+  for (const normalize of [normalizeHttpUrl, normalizeSpaHttpUrl, normalizeOpsHttpUrl]) {
+    for (const maxLength of [NaN, Infinity, -Infinity, -1, 500.5, Number.MAX_SAFE_INTEGER + 1, 0]) {
+      assert.equal(normalize("https://example.com/", { maxLength }), null, String(maxLength));
+    }
+    const prefix = "https://example.com/";
+    const unicode = `${prefix}${"雪".repeat(53)}`;
+    const encoded = new URL(unicode).toString();
+    assert.ok(unicode.length < 500);
+    assert.equal(encoded.length, 497);
+    const exact = unicode + "abc";
+    assert.equal(new URL(exact).toString().length, 500);
+    assert.equal(normalize(exact), new URL(exact).toString());
+    assert.equal(normalize(exact + "d"), null);
+    assert.equal(normalize(`${prefix}${"雪".repeat(55)}`), null);
+    assert.equal(normalize(unicode, { maxLength: encoded.length - 1 }), null);
+    assert.equal(normalize(unicode, { maxLength: encoded.length }), encoded);
+    const noSlash = "https://example.com";
+    assert.equal(normalize(noSlash, { maxLength: noSlash.length }), null);
+    assert.equal(normalize(noSlash, { maxLength: noSlash.length + 1 }), prefix);
+    const rawLonger = `https://example.com/${"a/../".repeat(10)}`;
+    assert.equal(new URL(rawLonger).toString(), prefix);
+    assert.equal(normalize(rawLonger, { maxLength: prefix.length }), null);
+    assert.equal(normalize(prefix, { maxLength: Number.MAX_SAFE_INTEGER }), prefix);
+  }
+});
