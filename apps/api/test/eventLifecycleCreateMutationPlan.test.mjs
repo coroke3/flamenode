@@ -2135,3 +2135,36 @@ test("MIG-0652 U03q: shared stage D1 builder rejects truncated/duplicate server 
   assert.deepEqual(accepted.expectedMutationChanges, [1, 1]);
   assert.equal(f.d1.stats.batches, 0);
 });
+
+test("MIG-0652 U03r: stage insert IDs must be fresh and unique, retained updates preserve existing IDs", async () => {
+  const { buildStageQuestionD1MutationBatch } =
+    await import("@flamenode/server-core/event/updatePayload");
+  const f = stageUpdateSqliteFixture();
+  const newRow = (key, id) => ({
+    ...f.before, id, question_key: key, label: "New " + key,
+    updated_at: now,
+  });
+  const base = {
+    db: f.db, eventId: event.id, actorUserId: "u_admin",
+    callerQueryCount: 18, existing: [f.before], deletedAnswers: [],
+  };
+  const reject = next => assert.deepEqual(buildStageQuestionD1MutationBatch({ ...base, next }),
+    { ok: false, reason: "duplicate_identity" });
+  reject([newRow("stage_permission_fresh", "")]);
+  reject([newRow("stage_permission_fresh", f.before.id)]);
+  reject([newRow("stage_permission_one", "same_generated_id"),
+    newRow("stage_permission_two", "same_generated_id")]);
+  // Updating an existing question retains its durable ID; generated replacement
+  // IDs are projected away by projectStageQuestionUpdate.
+  const accepted = buildStageQuestionD1MutationBatch({ ...base, next: [
+    { ...f.before, id: "replacement_ignored", label: "Edited stage",
+      updated_at: now },
+    newRow("stage_permission_new", "fresh_generated_id"),
+  ] });
+  assert.equal(accepted.ok, true);
+  assert.deepEqual(accepted.expectedMutationChanges, [1, 1]);
+  assert.deepEqual(accepted.audits.map(audit => [audit.operation, audit.target_id]), [
+    ["UPDATE", f.before.id], ["CREATE", "fresh_generated_id"],
+  ]);
+  assert.equal(f.d1.stats.batches, 0);
+});

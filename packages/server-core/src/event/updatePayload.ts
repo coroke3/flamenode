@@ -296,6 +296,19 @@ export function buildStageQuestionD1MutationBatch(input: {
   }
   const stage = planStageQuestionMutationSteps(input);
   if (!stage.ok) return stage;
+  // New rows must receive fresh IDs. A reused deleted ID can make unrelated
+  // DELETE + CREATE audit snapshots look like one continuous entity; a
+  // duplicate generated ID cannot satisfy an atomic multi-row INSERT.
+  const newIds = new Set<string>();
+  for (const step of stage.operations) {
+    if (step.kind !== "insert_questions") continue;
+    for (const row of step.rows) {
+      if (!row.id || oldIds.has(row.id) || newIds.has(row.id)) {
+        return { ok: false, reason: "duplicate_identity" };
+      }
+      newIds.add(row.id);
+    }
+  }
   const mutationStatements: BatchItem<"sqlite">[] = [];
   const audits: WriteAuditLogInput[] = [];
   for (const step of stage.operations) {
