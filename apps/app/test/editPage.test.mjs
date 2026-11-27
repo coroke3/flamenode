@@ -52,6 +52,7 @@ const offsetOf = (path) => Number(new URLSearchParams(path.split("?", 2)[1]).get
 const href = (container, label) => [...container.querySelectorAll("a")]
   .find((a) => a.textContent.trim() === label)?.getAttribute("href");
 const overview = (container) => container.querySelector(".vedit-overview-panel");
+const adminMenu = (container) => container.querySelector('nav[aria-label="作品管理メニュー"]');
 const editApi = (pageAccess, over = {}) => createVideoEditApi(async (path) =>
   json(isOptions(path) ? options() : editPage({ access: pageAccess, ...over })));
 
@@ -233,6 +234,7 @@ test("repeat privilege queries fall back to normal and denied reads expose only 
   assert.equal(href(container, "公開ページを見る"), "/video-1");
   assert.equal(container.querySelector("header, form"), null);
   assert.equal(overview(container), null);
+  assert.equal(adminMenu(container), null);
 });
 
 test("switch-only uses the resolved privilege mode, CURRENT header links and notice without requesting options", async (t) => {
@@ -253,6 +255,7 @@ test("switch-only uses the resolved privilege mode, CURRENT header links and not
   assert.equal(href(container, "FlameNode で見る"), "/abcdefghijk");
   assert.equal(href(container, "YouTube で確認"), "https://www.youtube.com/watch?v=abcdefghijk");
   assert.equal(container.querySelector("form"), null);
+  assert.equal(adminMenu(container), null);
   const panel = overview(container);
   assert.ok(panel.classList.contains("vedit-overview-normal"), "use the resolved normal mode");
   assert.equal(container.querySelector("header").nextElementSibling, panel);
@@ -317,10 +320,12 @@ test("a failing options continuation suppresses private data and preserves disti
   const calls = [];
   const make = (reply) => createVideoEditApi(async (path) => {
     calls.push(path);
-    if (!isOptions(path)) return json(editPage({ permissionSummary: permissionSummary() }));
+    if (!isOptions(path)) return json(editPage({
+      user: user({ role: "admin" }), access: access({ privilegeMode: "admin" }), permissionSummary: permissionSummary(),
+    }));
     return offsetOf(path) === 0 ? json(options({ truncated: true, nextOffset: 1 })) : reply();
   });
-  const { container, render } = await mountEdit(t, make(cases[0][0]), { search: "?privileged=event" });
+  const { container, render } = await mountEdit(t, make(cases[0][0]), { search: "?privileged=admin" });
   assert.equal(href(container, "Discord でログイン"), "/entry?next=%2Fdashboard%2Fedit%2Fvideo-1");
   for (const [reply, notice] of cases) {
     calls.length = 0;
@@ -330,6 +335,7 @@ test("a failing options continuation suppresses private data and preserves disti
     assert.doesNotMatch(container.textContent, /既存作品/);
     assert.equal(container.querySelector("form, #video-collab-perms"), null);
     assert.equal(overview(container), null);
+    assert.equal(adminMenu(container), null);
   }
 });
 
@@ -432,6 +438,71 @@ test("admin overview appears between the page header and management card with th
   assert.equal(panel.querySelector(".vedit-overview-lead").textContent, "提出主体や所属イベントなど、通常では変更できない項目も編集できます。");
   assert.equal(panel.querySelector(".vedit-overview-auditNote").textContent, "管理者権限での変更は監査ログに記録されます。必要な操作のみ行ってください。");
   assert.equal(panel.querySelector("ul, h3, .vedit-overview-eventName"), null);
+});
+
+test("admin edit renders the six CURRENT destinations as native links with one active tab", async (t) => {
+  const videoId = "v/#?+%";
+  const expectedId = "v%2F%23%3F%2B%25";
+  const admin = user({ role: "admin" });
+  const make = (id, youtubeId) => editApi(access({ privilegeMode: "admin" }), {
+    user: admin, video: { ...editPage().video, id, youtube_video_id: youtubeId },
+  });
+  const { container, render } = await mountEdit(t, make(videoId, "abcdefghijk"), { videoId, search: "?privileged=admin" });
+  const menu = adminMenu(container);
+  assert.equal(menu.className, "fn-console-resource-tabs");
+  assert.equal(container.querySelector("header").nextElementSibling, menu);
+  assert.equal(menu.nextElementSibling, overview(container));
+  const links = [...menu.querySelectorAll("a")];
+  assert.deepEqual(links.map((link) => [link.textContent, link.getAttribute("href")]), [
+    ["管理詳細", `/admin/videos/${expectedId}`], ["メンバー", `/admin/videos/${expectedId}/members`],
+    ["内容編集", `/dashboard/edit/${expectedId}?privileged=admin`],
+    ["編集権限", `/dashboard/edit/${expectedId}/permissions?privileged=admin`],
+    ["公開ページ", "/abcdefghijk"], ["監査ログ", `/admin/audit?table=videos&record=${expectedId}`],
+  ]);
+  assert.deepEqual(links.filter((link) => link.hasAttribute("aria-current")), [links[2]]);
+  assert.equal(links[2].getAttribute("aria-current"), "page");
+  let intercepted;
+  container.addEventListener("click", (event) => {
+    intercepted = event.defaultPrevented;
+    event.preventDefault(); // Let the test inspect the dispatch without navigating jsdom.
+  });
+  await act(async () => {
+    for (const [index, link] of links.entries()) {
+      assert.equal(link.className, `fn-btn fn-btn-sm ${index === 2 ? "fn-btn-primary" : "fn-btn-ghost"}`);
+      assert.equal(link.querySelector("svg[aria-hidden=true]").getAttribute("width"), "11");
+      intercepted = undefined;
+      link.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, cancelable: true }));
+      assert.equal(intercepted, false, link.getAttribute("href"));
+    }
+  });
+
+  await render({ api: make(videoId, "//outside.test") });
+  assert.equal(href(adminMenu(container), "公開ページ"), "/list");
+  await render({ videoId: "video-1", api: make("video-1", "//outside.test") });
+  assert.equal(href(adminMenu(container), "公開ページ"), "/video-1");
+  await render({ api: createVideoEditApi(() => new Promise(() => {})) }, () => {
+    assert.match(container.textContent, /読み込み中/);
+    assert.equal(adminMenu(container), null);
+  });
+});
+
+test("admin navigation requires edit kind and both resolved admin mode and server user role", async (t) => {
+  const admin = user({ role: "admin" });
+  const adminAccess = access({ privilegeMode: "admin" });
+  const { container, render } = await mountEdit(t, editApi(access(), { user: admin }), { search: "?privileged=admin" });
+  assert.ok(overview(container));
+  assert.equal(adminMenu(container), null, "requesting admin mode alone does not show the menu");
+  for (const [api, search] of [
+    [editApi(access({ privilegeMode: "event" }), { user: admin }), "?privileged=event"],
+    [editApi(adminAccess), "?privileged=admin"],
+    [createVideoEditApi(async () => json({
+      kind: "switch_only", user: admin, video: header(), access: adminAccess, message: "switch_event", events: [],
+    })), "?privileged=admin"],
+  ]) {
+    await render({ api, search });
+    assert.ok(overview(container));
+    assert.equal(adminMenu(container), null);
+  }
 });
 
 test("the default edit client renders complete permission counts, names and warnings with a safe resolved-mode link", async (t) => {

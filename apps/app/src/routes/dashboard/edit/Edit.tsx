@@ -116,6 +116,9 @@ function EditReadBoundary({ api, videoId, mode }: {
   return (
     <div className="fn-public-container fn-page fn-page--video-edit">
       <EditHeader page={page} videoId={videoId} />
+      {page.kind === "edit" && page.access.privilegeMode === "admin" && page.user.role === "admin" ? (
+        <AdminVideoTabs video={page.video} />
+      ) : null}
       <VideoEditPermissionOverview access={page.access} />
       {notice ? (
         <div className="fn-status-panel fn-status-panel--warn" role="status">
@@ -129,6 +132,38 @@ function EditReadBoundary({ api, videoId, mode }: {
         <AppLink href="/dashboard" className="fn-btn fn-btn-ghost">ダッシュボードへ戻る</AppLink>
       </div>
     </div>
+  );
+}
+
+function AdminVideoTabs({ video }: { video: EditPageWithHeader["video"] }): React.ReactElement {
+  const id = encodeURIComponent(video.id);
+  const editPath = `/dashboard/edit/${id}`;
+  const tabs = [
+    { key: "detail", href: `/admin/videos/${id}`, label: "管理詳細", icon: "info" },
+    { key: "members", href: `/admin/videos/${id}/members`, label: "メンバー", icon: "users" },
+    { key: "edit", href: `${editPath}?privileged=admin`, label: "内容編集", icon: "edit" },
+    { key: "permissions", href: `${editPath}/permissions?privileged=admin`, label: "編集権限", icon: "settings" },
+    { key: "public", href: videoPageHref(video), label: "公開ページ", icon: "external" },
+    { key: "audit", href: `/admin/audit?table=videos&record=${id}`, label: "監査ログ", icon: "clock" },
+  ] as const;
+
+  return (
+    <nav className="fn-console-resource-tabs" aria-label="作品管理メニュー">
+      {tabs.map((tab) => {
+        const isActive = tab.key === "edit";
+        return (
+          <AppLink
+            key={tab.key}
+            href={tab.href}
+            className={`fn-btn fn-btn-sm ${isActive ? "fn-btn-primary" : "fn-btn-ghost"}`}
+            aria-current={isActive ? "page" : undefined}
+          >
+            <Icon name={tab.icon} size={11} aria-hidden />
+            {tab.label}
+          </AppLink>
+        );
+      })}
+    </nav>
   );
 }
 
