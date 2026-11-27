@@ -775,7 +775,7 @@ PR を revert（まだどの route からも使われない）。
 
 ### MIG-0714: Personal SPA の投稿 form その C: `VideoForm` と `UnslottedPostForm` の移植（MIG-0703）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — 親全体は未完。依存 MIG-0712・MIG-0713・MIG-0738 と Part A #696、B01/B02 #903 は main に統合済み。2026-11-27 Lead が下記 B03 の4 section を実コードから限定refineした。B03 は fresh owner scan後に直列実施可。各PR3000行以内、親READY維持、B04実controllerとB05共有CSS/全form browserは各開始前に具体化する。submit は props の adapter にして API を待たない
+- **Readiness:** NEEDS_REFINEMENT — 親全体は未完。依存 MIG-0712・MIG-0713・MIG-0738 と Part A #696、B01/B02 #903 は main に統合済み。2026-11-27 Lead が下記 B03/B03R を実コードから限定refineし、Draft #906 のsource/section受入と独立reviewを完了。最終HEAD CI/re-attestation後のpartial landingだけを許可し、実merge後にfresh owner scanしてB04を具体化する。各PR3000行以内、親READY維持、B04実controllerとB05共有CSS/全form browserは各開始前に具体化する。submit は props の adapter にして API を待たない
 - **Recipe:** R-UI
 - **Runtime:** N
 - **Depends on:** MIG-0712, MIG-0713, MIG-0738 / **Decisions:** D-16-4, D-16-11, D-19-5
