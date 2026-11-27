@@ -24,8 +24,8 @@ export function AdminIntegrityView({ data, shouldRun, onRefresh }: {
       {!shouldRun ? (
         <section className="fn-card" style={{ marginTop: 18 }}>
           <strong>DB整合性診断は未実行です</strong>
-          <p className="fn-muted" style={{ margin: "6px 0 12px", fontSize: 12 }}>
-            全件走査を含む診断です。必要なときだけ実行してください。
+          <p className="fn-muted" style={{ margin: "6px 0 12px", fontSize: 12, lineHeight: 1.6 }}>
+            全件走査を含む読み取り専用診断です。必要なときだけ実行してください。
           </p>
           <OpsLink href="/admin/health/integrity?run=1" className="fn-btn fn-btn-primary">
             DB整合性診断を実行

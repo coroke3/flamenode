@@ -605,6 +605,26 @@ test("U02c integrity idle/unsupported/denied views show no fabricated check coun
   }), "/admin/health/integrity");
   assert.match(idle, /DB整合性診断は未実行です/);
   assert.match(idle, /href="\/admin\/health\/integrity\?run=1"/);
+  // T03: preserve CURRENT read-only warning and exact idle action; no result cards.
+  const idleDom = new JSDOM(idle);
+  try {
+    const doc = idleDom.window.document;
+    const card = [...doc.querySelectorAll("section.fn-card")].find(node =>
+      node.querySelector("strong")?.textContent === "DB整合性診断は未実行です");
+    assert.ok(card);
+    const warning = card.querySelector("p.fn-muted");
+    assert.equal(warning?.textContent.trim(),
+      "全件走査を含む読み取り専用診断です。必要なときだけ実行してください。");
+    assert.equal(warning.style.lineHeight, "1.6");
+    assert.equal(warning.style.fontSize, "12px");
+    assert.equal(card.querySelectorAll("a").length, 1);
+    const action = card.querySelector("a");
+    assert.equal(action?.getAttribute("href"), "/admin/health/integrity?run=1");
+    assert.equal(action?.textContent.trim(), "DB整合性診断を実行");
+    assert.equal(card.querySelectorAll("button, article").length, 0);
+  } finally {
+    idleDom.window.close();
+  }
   assert.doesNotMatch(idle, /総検出件数|危険チェック/);
   const unavailable = render(h(AdminIntegrityView, {
     data: { status: "unsupported" }, shouldRun: true, onRefresh: () => {},
