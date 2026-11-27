@@ -73,3 +73,49 @@ export function copySpreadsheetSelection(
   }
   return output.join("\n");
 }
+
+type PasteColumn = { name: string; pk: number; editable: boolean; generated?: boolean };
+type PasteCell = { rowIndex: number; column: string; value: string | null };
+
+/**
+ * Plan tabular clipboard cells using CURRENT buildGridPasteCellsFromGrid semantics.
+ * A recognized header takes precedence over the positional origin. This is a
+ * pure preview, not write authorization: resolve live PKs and check authority
+ * again before any future mutation. Keep generated columns fenced in Ops.
+ */
+export function planSpreadsheetGridPaste(
+  grid: ReadonlyArray<ReadonlyArray<string>>,
+  columns: ReadonlyArray<PasteColumn>,
+  focus: GridCell,
+  rowCount: number,
+  tableEditable: boolean,
+): PasteCell[] {
+  if (!tableEditable || grid.length === 0 || columns.length === 0 ||
+      !Number.isSafeInteger(rowCount) || rowCount < 1 ||
+      !Number.isSafeInteger(focus.row) || !Number.isSafeInteger(focus.col)) return [];
+  const startRow = Math.min(Math.max(0, focus.row), rowCount - 1);
+  const startCol = Math.min(Math.max(0, focus.col), columns.length - 1);
+  const header = grid[0] ?? [];
+  const headerColumns = header.map(cell => {
+    const name = String(cell ?? "").trim().toLowerCase();
+    return name ? columns.find(column => column.name.toLowerCase() === name) : undefined;
+  });
+  const hasHeader = headerColumns.some(column => column !== undefined);
+  const firstDataRow = hasHeader ? 1 : 0;
+  const cells: PasteCell[] = [];
+  for (let r = firstDataRow; r < grid.length; r++) {
+    const rowIndex = startRow + r - firstDataRow;
+    if (rowIndex >= rowCount) break;
+    const line = grid[r] ?? [];
+    const width = Math.min(line.length, hasHeader ? headerColumns.length : columns.length - startCol);
+    for (let c = 0; c < width; c++) {
+      const column = hasHeader ? headerColumns[c] : columns[startCol + c];
+      if (!column || !column.editable || column.pk !== 0 || column.generated) continue;
+      const source = String(line[c] ?? "");
+      const trimmed = source.trim();
+      cells.push({ rowIndex, column: column.name,
+        value: trimmed === "" || trimmed.toUpperCase() === "NULL" ? null : source });
+    }
+  }
+  return cells;
+}

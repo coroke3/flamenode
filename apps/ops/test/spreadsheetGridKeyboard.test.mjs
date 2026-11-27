@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   moveSpreadsheetFocus,
   copySpreadsheetSelection,
+  planSpreadsheetGridPaste,
 } from "../.test-dist/apps/ops/src/routes/admin/spreadsheetGridKeyboard.js";
 
 test("MIG-0737 U01: arrow/home/end navigation clamps to visible grid", () => {
@@ -169,4 +170,58 @@ test("MIG-0737 U01 Enter navigation pure: invalid dimensions retain the input", 
   for (const [rows, columns] of [[0, 4], [4, 0], [-1, 4], [NaN, 4], [Infinity, 4], [4, 1.5]]) {
     assert.equal(moveSpreadsheetFocus(from, "Enter", rows, columns), from);
   }
+});
+
+const pasteColumns = [
+  { name: "id", pk: 1, editable: true },
+  { name: "title", pk: 0, editable: true },
+  { name: "note", pk: 0, editable: true },
+  { name: "locked", pk: 0, editable: false },
+  { name: "derived", pk: 0, editable: true, generated: true },
+];
+
+test("MIG-0737 U01 paste plan: positional cells preserve whitespace and NULL, skip immutable columns and clip to visible bounds", () => {
+  const grid = Object.freeze([Object.freeze(["a", "  Alpha  ", " null ", "ignored", "generated", "overflow"]),
+    Object.freeze(["b", "", "x\ny", "ignored", "generated"]), Object.freeze(["c", "outside"])]);
+  assert.deepEqual(planSpreadsheetGridPaste(grid, pasteColumns, { row: 1, col: 0 }, 3, true), [
+    { rowIndex: 1, column: "title", value: "  Alpha  " }, { rowIndex: 1, column: "note", value: null },
+    { rowIndex: 2, column: "title", value: null }, { rowIndex: 2, column: "note", value: "x\ny" },
+  ]);
+  assert.deepEqual(planSpreadsheetGridPaste([["one", "two", "three"]], pasteColumns, { row: -5, col: 2 }, 1, true),
+    [{ rowIndex: 0, column: "note", value: "one" }]);
+  assert.deepEqual(planSpreadsheetGridPaste([["x"]], pasteColumns, { row: 100, col: 100 }, 1, true), []);
+});
+
+test("MIG-0737 U01 paste plan: named headers match case/whitespace independent of focus; unknown and immutable destinations stay omitted", () => {
+  const header = [" NOTE ", "Id", "unknown", "TITLE", "locked", "derived", "title"];
+  const row = ["  note ", "id", "unknown", "first", "locked", "derived", "second", "extra"];
+  assert.deepEqual(planSpreadsheetGridPaste([header, row, ["\t", "id", "unknown", "NULL"]], pasteColumns,
+    { row: 1, col: 4 }, 3, true), [
+    { rowIndex: 1, column: "note", value: "  note " }, { rowIndex: 1, column: "title", value: "first" },
+    { rowIndex: 1, column: "title", value: "second" }, { rowIndex: 2, column: "note", value: null },
+    { rowIndex: 2, column: "title", value: null },
+  ]);
+  // Even an immutable recognized header consumes the first row, not data.
+  assert.deepEqual(planSpreadsheetGridPaste([["id", "not-a-column"], ["x", "y"]], pasteColumns,
+    { row: 0, col: 1 }, 2, true), []);
+  assert.deepEqual(planSpreadsheetGridPaste([["title"]], pasteColumns, { row: 0, col: 1 }, 2, true), []);
+});
+
+test("MIG-0737 U01 paste plan: empty/readonly/invalid coordinates produce no plan and never mutate inputs", () => {
+  const columns = Object.freeze(pasteColumns.map(column => Object.freeze({ ...column })));
+  const grid = Object.freeze([Object.freeze([" TITLE "]), Object.freeze(["  untouched  "])]);
+  const focus = Object.freeze({ row: 0, col: 0 });
+  const before = JSON.stringify([columns, grid, focus]);
+  for (const rowCount of [0, -1, NaN, Infinity, 1.5]) {
+    assert.deepEqual(planSpreadsheetGridPaste(grid, columns, focus, rowCount, true), []);
+  }
+  for (const pos of [{ row: NaN, col: 0 }, { row: 0, col: Infinity }, { row: 1.5, col: 0 }]) {
+    assert.deepEqual(planSpreadsheetGridPaste(grid, columns, pos, 2, true), []);
+  }
+  assert.deepEqual(planSpreadsheetGridPaste(grid, columns, focus, 2, false), []);
+  assert.deepEqual(planSpreadsheetGridPaste([], columns, focus, 2, true), []);
+  assert.deepEqual(planSpreadsheetGridPaste(grid, [], focus, 2, true), []);
+  assert.deepEqual(planSpreadsheetGridPaste(grid, columns, focus, 2, true),
+    [{ rowIndex: 0, column: "title", value: "  untouched  " }]);
+  assert.equal(JSON.stringify([columns, grid, focus]), before);
 });
