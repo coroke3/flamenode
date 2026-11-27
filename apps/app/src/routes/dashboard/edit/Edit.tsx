@@ -44,13 +44,9 @@ async function readEdit({ api, videoId, mode, signal }: {
   if (page.kind !== "edit") return result;
   if (page.membersTruncated || page.collabTruncated) return UNAVAILABLE;
 
+  // The unregistered shell uses completed options traversal as a read gate.
   const optionsResult = await api.getFormOptions(videoId, mode, signal);
-  if (optionsResult.status !== "ok") return optionsResult;
-  const options = optionsResult.data;
-  // Authorization may have changed between the reads. A cut snapshot also cannot establish form inputs.
-  if (options.kind !== "ready") return UNAVAILABLE;
-  if (options.customAnswersTruncated || options.truncated || options.nextOffset !== null) return UNAVAILABLE;
-  return result;
+  return optionsResult.status === "ok" ? result : optionsResult;
 }
 
 /** Read boundary for the future trusted route host. Neither read grants write authority. */
@@ -69,7 +65,8 @@ function EditReadBoundary({ api, videoId, mode }: {
   mode: PrivilegeMode;
 }): React.ReactElement {
   const [snapshot, setSnapshot] = React.useState<{ api: VideoEditApi; state: ReadState } | null>(null);
-  React.useEffect(() => {
+  // Abort during scope commits so a former scope cannot start another options request before passive effects.
+  React.useLayoutEffect(() => {
     setSnapshot(null);
     const controller = new AbortController();
     const publish = (state: ReadState) => {

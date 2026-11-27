@@ -33,6 +33,10 @@ const options = (over = {}) => ({
   customAnswersTruncated: false, stagePermissionAnswers: null, softwareSuggestions: [], iconCandidates: [],
   channelCandidates: [], ...over,
 });
+const eventOption = (id) => ({
+  id, title: `イベント ${id}`, parts_json: null, youtube_description_template: null,
+  required_video_fields_json: null, custom_questions: [], video_form_settings_json: null,
+});
 const permissionSummary = (over = {}) => ({
   editorCount: 3, unlinkedEditorCount: 1, notifiableEditorCount: 2, displayNames: "参加者 A、参加者 B、参加者 C",
   warnings: [{ tone: "warning", title: "連携待ち", detail: "連携後に通知できます。" },
@@ -43,6 +47,7 @@ const json = (body, status = 200) => new Response(JSON.stringify(body), {
   status, headers: { "content-type": "application/json; charset=utf-8" },
 });
 const isOptions = (path) => path.split("?", 1)[0].endsWith("/form-options");
+const offsetOf = (path) => Number(new URLSearchParams(path.split("?", 2)[1]).get("offset") ?? 0);
 const href = (container, label) => [...container.querySelectorAll("a")]
   .find((a) => a.textContent.trim() === label)?.getAttribute("href");
 
@@ -50,12 +55,15 @@ async function mountEdit(t, api, over = {}) {
   const container = dom.window.document.createElement("div");
   const root = createRoot(container);
   t.after(() => act(async () => root.unmount()));
+  function ObserveCommit({ props, onCommit }) {
+    React.useLayoutEffect(() => onCommit(), [props, onCommit]);
+    return React.createElement(MemoryRouter, null, React.createElement(Edit, props));
+  }
   let props = { api, videoId: "video-1", search: "", identityKey: "session-1:x-1", ...over };
   const render = async (changes = {}, onCommit = () => {}) => {
     props = { ...props, ...changes };
     await act(async () => {
-      flushSync(() => root.render(React.createElement(MemoryRouter, null, React.createElement(Edit, props))));
-      onCommit();
+      flushSync(() => root.render(React.createElement(ObserveCommit, { props, onCommit })));
     });
   };
   await render();
@@ -108,6 +116,106 @@ test("canonical edit statuses, MIME and schemas govern both read results", async
   }
 });
 
+test("options aggregate cursors 0, 1 and 101 in order, including an empty page and page-zero provenance", async () => {
+  const pages = new Map([
+    [0, options({
+      eventOptions: [eventOption("z")], truncated: true, nextOffset: 1,
+      customAnswers: { "z:text": "same", "z:choices": ["a", "b"], constructor: "first own answer" },
+      iconCandidates: ["first icon"],
+    })],
+    [1, options({
+      truncated: true, nextOffset: 101, customAnswers: { "z:text": "same", toString: ["own answer"] },
+      stagePermissionAnswers: "later stage value", softwareSuggestions: ["later software"],
+      iconCandidates: ["later icon"], channelCandidates: ["later channel"],
+    })],
+    [101, options({
+      eventOptions: [eventOption("b"), eventOption("a")],
+      customAnswers: { "b:answer": "new", "z:choices": ["a", "b"], constructor: "first own answer" },
+    })],
+  ]);
+  const calls = [];
+  const api = createVideoEditApi(async (path, init) => {
+    calls.push([path, init.signal]);
+    const page = pages.get(offsetOf(path));
+    assert.ok(page);
+    return json(page);
+  });
+  const signal = new AbortController().signal;
+  assert.deepEqual(await api.getFormOptions("video-1", "event", signal), {
+    status: "ok",
+    data: options({
+      eventOptions: [eventOption("z"), eventOption("b"), eventOption("a")],
+      customAnswers: {
+        "z:text": "same", "z:choices": ["a", "b"], constructor: "first own answer",
+        toString: ["own answer"], "b:answer": "new",
+      },
+      iconCandidates: ["first icon"],
+    }),
+  });
+  assert.deepEqual(calls, [
+    ["/api/personal/edit/video-1/form-options?privileged=event", signal],
+    ["/api/personal/edit/video-1/form-options?privileged=event&offset=1", signal],
+    ["/api/personal/edit/video-1/form-options?privileged=event&offset=101", signal],
+  ]);
+});
+
+test("all 901 successive options offsets can be traversed and offset 900 still requires completion", async () => {
+  const signal = new AbortController().signal;
+  for (const [step, finalPage, expected] of [
+    [1, options({ eventOptions: [eventOption("last")] }), "ok"],
+    [100, options({ truncated: true }), "unavailable"],
+    [100, options({ truncated: true, nextOffset: 901 }), "unavailable"],
+  ]) {
+    const offsets = [];
+    const api = createVideoEditApi(async (path) => {
+      const offset = offsetOf(path);
+      offsets.push(offset);
+      return json(offset === 900 ? finalPage : options({ truncated: true, nextOffset: offset + step }));
+    });
+    const result = await api.getFormOptions("video-1", "normal", signal);
+    assert.equal(result.status, expected);
+    if (result.status === "ok") assert.deepEqual(result.data.eventOptions, [eventOption("last")]);
+    assert.deepEqual(offsets, Array.from({ length: 900 / step + 1 }, (_, index) => index * step));
+  }
+});
+
+test("invalid and non-forward options cursors fail without more requests", async () => {
+  const cases = [
+    [0, options({ truncated: true })], [0, options({ nextOffset: 1 })],
+    ...[-1, 0, 0.5, "1", 101, Number.MAX_SAFE_INTEGER + 1].map((nextOffset) => [0, options({ truncated: true, nextOffset })]),
+    [1, options({ truncated: true, nextOffset: 1 })], [1, options({ truncated: true, nextOffset: 0 })],
+  ];
+  for (const [offset, invalid] of cases) {
+    const offsets = [];
+    const api = createVideoEditApi(async (path) => {
+      const readOffset = offsetOf(path);
+      offsets.push(readOffset);
+      return json(readOffset === offset ? invalid : options({ truncated: true, nextOffset: offset }));
+    });
+    assert.deepEqual(await api.getFormOptions("video-1", "normal", new AbortController().signal), { status: "unavailable" });
+    assert.deepEqual(offsets, offset === 0 ? [0] : [0, offset]);
+  }
+});
+
+test("duplicate event IDs and conflicting answer values fail closed on any page", async () => {
+  const cases = [
+    [options({ eventOptions: [eventOption("e"), eventOption("e")] })],
+    [options({ eventOptions: [eventOption("e")] }), options({ eventOptions: [eventOption("e")] })],
+    ...[["one", "two"], ["a", ["a"]], [["a", "b"], ["b", "a"]], [["a"], ["a", "b"]]]
+      .map(([first, second]) => [options({ customAnswers: { "e:q": first } }), options({ customAnswers: { "e:q": second } })]),
+  ];
+  for (const [first, second] of cases) {
+    const offsets = [];
+    const api = createVideoEditApi(async (path) => {
+      const offset = offsetOf(path);
+      offsets.push(offset);
+      return json(offset === 0 && second ? { ...first, truncated: true, nextOffset: 1 } : second ?? first);
+    });
+    assert.deepEqual(await api.getFormOptions("video-1", "normal", new AbortController().signal), { status: "unavailable" });
+    assert.deepEqual(offsets, second ? [0, 1] : [0]);
+  }
+});
+
 test("repeat privilege queries fall back to normal and denied reads expose only the safe CURRENT links", async (t) => {
   const calls = [];
   const api = createVideoEditApi(async (path) => {
@@ -142,22 +250,24 @@ test("switch-only uses the resolved privilege mode, CURRENT header links and not
   assert.equal(container.querySelector("form"), null);
 });
 
-test("edit pages read options once with the same requested mode before showing the read shell", async (t) => {
+test("edit pages keep the same requested mode through options continuation before showing the read shell", async (t) => {
   const calls = [];
   const api = createVideoEditApi(async (path, { signal }) => {
     calls.push([path, signal]);
-    return json(isOptions(path) ? options() : editPage({ access: access({ privilegeMode: "event" }) }));
+    if (!isOptions(path)) return json(editPage({ access: access({ privilegeMode: "event" }) }));
+    return json(offsetOf(path) === 0 ? options({ truncated: true, nextOffset: 100 }) : options());
   });
   const { container, render } = await mountEdit(t, api, { search: "?privileged=event&ignored=1" });
   assert.deepEqual(calls.map(([path]) => path), [
     "/api/personal/edit/video-1?privileged=event", "/api/personal/edit/video-1/form-options?privileged=event",
+    "/api/personal/edit/video-1/form-options?privileged=event&offset=100",
   ]);
-  assert.equal(calls[0][1], calls[1][1]);
+  assert.ok(calls.every(([, signal]) => signal === calls[0][1]));
   assert.equal(container.querySelector("h1").textContent, "既存作品");
   assert.equal(href(container, "通常モードへ戻る"), "/dashboard/edit/video-1");
   assert.equal(container.querySelector("[role=status], form"), null);
   await render({ search: "?privileged=event&ignored=2" });
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 3);
 });
 
 test("permissions-only and incomplete snapshots cannot enable a form", async (t) => {
@@ -185,19 +295,27 @@ test("permissions-only and incomplete snapshots cannot enable a form", async (t)
   }
 });
 
-test("lost form-options access suppresses the earlier private page and preserves distinct failure views", async (t) => {
+test("a failing options continuation suppresses private data and preserves distinct failure views", async (t) => {
   const cases = [
     [() => json({}, 401), /ログインが必要です/], [() => json({}, 403), /利用が停止されています/],
     [() => json({ error: "not_found" }, 404), /ページが見つかりません/],
     [() => json({}, 404), /画面の表示中に問題が発生しました/],
     [() => json({ kind: "no_access" }), /画面の表示中に問題が発生しました/],
+    [() => json({ error: "unavailable" }, 503), /画面の表示中に問題が発生しました/],
+    [() => json(options({ customAnswersTruncated: true, truncated: true, nextOffset: 2 })), /画面の表示中に問題が発生しました/],
   ];
-  const make = (reply) => createVideoEditApi(async (path) => isOptions(path) ? reply() :
-    json(editPage({ permissionSummary: permissionSummary() })));
+  const calls = [];
+  const make = (reply) => createVideoEditApi(async (path) => {
+    calls.push(path);
+    if (!isOptions(path)) return json(editPage({ permissionSummary: permissionSummary() }));
+    return offsetOf(path) === 0 ? json(options({ truncated: true, nextOffset: 1 })) : reply();
+  });
   const { container, render } = await mountEdit(t, make(cases[0][0]), { search: "?privileged=event" });
   assert.equal(href(container, "Discord でログイン"), "/entry?next=%2Fdashboard%2Fedit%2Fvideo-1");
   for (const [reply, notice] of cases) {
+    calls.length = 0;
     await render({ api: make(reply) });
+    assert.deepEqual(calls.filter(isOptions).map(offsetOf), [0, 1]);
     assert.match(container.textContent, notice);
     assert.doesNotMatch(container.textContent, /既存作品/);
     assert.equal(container.querySelector("form, #video-collab-perms"), null);
@@ -248,9 +366,10 @@ test("a permission-only page can show the empty summary, using the resolved norm
   assert.equal(container.querySelector("form"), null);
 });
 
-test("identity, video, mode and client changes hide snapshots immediately and abort stale reads", async (t) => {
+test("identity, video, mode and client changes hide snapshots and stop stale reads and continuation", async (t) => {
   const calls = [];
-  const api = createVideoEditApi((path, { signal }) => new Promise((resolve) => calls.push({ path, signal, resolve })));
+  const fetch = (path, { signal }) => new Promise((resolve) => calls.push({ path, signal, resolve }));
+  const api = createVideoEditApi(fetch);
   const { container, render } = await mountEdit(t, api);
   const resolve = (index, payload) => act(async () => calls[index].resolve(json(payload)));
   await resolve(0, editPage());
@@ -271,14 +390,31 @@ test("identity, video, mode and client changes hide snapshots immediately and ab
   const second = editPage();
   second.video.id = "video-2";
   await resolve(3, second);
-  await render({ search: "?privileged=event" }, loading);
-  assert.equal(calls[4].signal.aborted, true);
-  await resolve(4, options());
+  assert.equal(calls.length, 5, "the next options request waits for the first response");
+  await resolve(4, options({ truncated: true, nextOffset: 1 }));
   loading();
-  await resolve(5, second);
-  await resolve(6, options());
+  assert.equal(calls[5].path, "/api/personal/edit/video-2/form-options?offset=1");
+  await render({ search: "?privileged=event" }, () => {
+    loading();
+    assert.equal(calls[5].signal.aborted, true, "abort before the mode commit's passive effects");
+  });
+  await resolve(5, options({ truncated: true, nextOffset: 2 }));
+  assert.equal(calls.length, 7, "a stale options response cannot start another request");
+  loading();
+  await resolve(6, second);
+  await resolve(7, options());
   assert.match(container.textContent, /既存作品/);
 
-  await render({ api: createVideoEditApi(() => new Promise(() => {})) }, loading);
-  assert.equal(calls[6].signal.aborted, true);
+  await render({ api: createVideoEditApi(fetch) }, loading);
+  assert.equal(calls[7].signal.aborted, true);
+  await resolve(8, second);
+  await resolve(9, options({ truncated: true, nextOffset: 1 }));
+  assert.equal(calls[10].path, "/api/personal/edit/video-2/form-options?privileged=event&offset=1");
+  await render({ api: createVideoEditApi(() => new Promise(() => {})) }, () => {
+    loading();
+    assert.equal(calls[10].signal.aborted, true, "abort before the client commit's passive effects");
+  });
+  await resolve(10, options({ truncated: true, nextOffset: 2 }));
+  assert.equal(calls.length, 11, "replacing the client also stops pagination");
+  loading();
 });
