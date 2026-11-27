@@ -907,8 +907,10 @@ if (runUnderRootTsx(import.meta.url)) {
         message: "連続していない枠をまとめて提出できません。" },
       // The same late group denial is deliberately present in each preflight fixture.
       // These cases lock CURRENT ordering without adding a new deadline or receipt policy.
-      { name: "archived duplicate precedes invalid member JSON and group denial",
-        duplicateStatus: "archived", youtubeUrl: "https://youtu.be/dQw4w9WgXcQ",
+      // 0044/0045 normalize legacy archived rows to private (or voided for duplicates).
+      // The migrated schema rejects archived inserts; private is still a non-voided duplicate.
+      { name: "private duplicate precedes invalid member JSON and group denial",
+        duplicateStatus: "private", youtubeUrl: "https://youtu.be/dQw4w9WgXcQ",
         form: { is_collab: "true", members_json: "not-json" },
         sibling: { reserved_by_user_id: "u_notos" },
         message: "このYouTube動画は既に登録されています。" },
