@@ -204,6 +204,48 @@ test("PR commit check: old main commit and base fail, branch commit passes",()=>
  fs.rmSync(dir,{recursive:true,force:true});
 });
 
+test("changedFileInputs preserves an oversized UTF-8 base ledger and PR history checks",()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),"file-progress-large-base-"));
+ try{
+  const env={...process.env,GIT_DIR:path.join(dir,".git"),GIT_WORK_TREE:dir};
+  const options={cwd:dir,env,encoding:"utf8"};
+  for(const args of [["init","-q"],["config","user.name","Ledger test"],["config","user.email","ledger@example.invalid"],["config","commit.gpgsign","false"],["config","core.hooksPath","/dev/null"]])execFileSync("git",args,options);
+  fs.mkdirSync(path.join(dir,"docs/migration"),{recursive:true});
+  fs.mkdirSync(path.join(dir,"src/lib"),{recursive:true});
+  const largeMatrix=matrix+"\n<!-- "+"移行証跡🙂".repeat(80_000)+" -->\n";
+  assert.ok(largeMatrix.length<1024*1024);
+  assert.ok(Buffer.byteLength(largeMatrix,"utf8")>1024*1024);
+  fs.writeFileSync(path.join(dir,"docs/migration/FILE_MIGRATION_MATRIX.md"),largeMatrix);
+  fs.writeFileSync(path.join(dir,"src/lib/example.ts"),"export const value=1;\n");
+  execFileSync("git",["add","."],options);
+  execFileSync("git",["commit","-q","-m","base ledger"],options);
+  const baseSha=execFileSync("git",["rev-parse","HEAD"],options).trim();
+  fs.writeFileSync(path.join(dir,"docs/migration/FILE_MIGRATION_MATRIX.md"),matrix);
+  fs.writeFileSync(path.join(dir,"src/lib/example.ts"),"export const value=2;\n");
+  execFileSync("git",["add","."],options);
+  execFileSync("git",["commit","-q","-m","branch change"],options);
+  const headSha=execFileSync("git",["rev-parse","HEAD"],options).trim();
+  // Keep the real checker/ROOT and fixture assertions together; only child Git environments select this repo.
+  const script=`import assert from "node:assert/strict";
+import fs from "node:fs";
+import {changedFileInputs} from ${JSON.stringify(new URL("./check-migration-file-progress.mjs",import.meta.url).href)};
+const expected=fs.readFileSync(0,"utf8");
+const actual=changedFileInputs(process.env.LEDGER_TEST_BASE);
+assert.equal(actual.baseMatrix,expected);
+assert.deepEqual(actual.changedPaths,["docs/migration/FILE_MIGRATION_MATRIX.md","src/lib/example.ts"]);
+assert.equal(actual.isPrCommit(process.env.LEDGER_TEST_BASE),false);
+assert.equal(actual.isPrCommit(process.env.LEDGER_TEST_HEAD),true);
+assert.equal(actual.isPrCommit("0".repeat(40)),false);
+assert.throws(()=>changedFileInputs("0".repeat(40)),/Command failed: git diff/);
+assert.throws(()=>changedFileInputs("invalid"),/must be 40 hex/);`;
+  const result=spawnSync(process.execPath,["--input-type=module","-e",script],{
+   env:{...env,LEDGER_TEST_BASE:baseSha,LEDGER_TEST_HEAD:headSha},input:largeMatrix,encoding:"utf8",
+  });
+  assert.equal(result.error,undefined);
+  assert.equal(result.status,0,result.stderr);
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
+
 test("CLI fails closed in CI without MIGRATION_FILE_BASE_SHA",()=>{
  const script=fileURLToPath(new URL("./check-migration-file-progress.mjs",import.meta.url));
  const env={...process.env,CI:"true"};delete env.MIGRATION_FILE_BASE_SHA;
