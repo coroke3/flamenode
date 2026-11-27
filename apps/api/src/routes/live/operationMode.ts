@@ -110,6 +110,10 @@ function scanOversizedKvMirror(raw: string): ParsedOperationModeKvMirror | null 
     i = numberPattern.lastIndex;
     return [start, i];
   };
+  // Skip batches of short scalar array entries only when each is followed by
+  // a comma. Longer tokens, strings and containers use the full scanner.
+  // The next state still requires a value, so a trailing comma is invalid.
+  const scalarArrayRun = /(?:(?:true|false|null|-?(?:0|[1-9][0-9]{0,15})(?:\.[0-9]{1,16})?(?:[eE][+-]?[0-9]{1,6})?)[ \t\r\n]{0,16},[ \t\r\n]{0,16}){2,256}/y;
   // One byte per open container; only the root needs a decoded property key.
   // Grow with actual nesting rather than allocating one object per frame.
   const OBJECT_FIRST_KEY = 0, OBJECT_KEY = 1, OBJECT_COLON = 2,
@@ -198,10 +202,19 @@ function scanOversizedKvMirror(raw: string): ParsedOperationModeKvMirror | null 
           stack[top] = ARRAY_AFTER;
           value(null);
           break;
-        case ARRAY_VALUE:
+        case ARRAY_VALUE: {
+          const c = raw[i];
+          if (c === "t" || c === "f" || c === "n" || c === "-" || (c >= "0" && c <= "9")) {
+            scalarArrayRun.lastIndex = i;
+            if (scalarArrayRun.test(raw)) {
+              i = scalarArrayRun.lastIndex;
+              break;
+            }
+          }
           stack[top] = ARRAY_AFTER;
           value(null);
           break;
+        }
         case ARRAY_AFTER:
           if (raw[i] === ",") { i++; stack[top] = ARRAY_VALUE; break; }
           if (raw[i] === "]") { i++; depth--; break; }

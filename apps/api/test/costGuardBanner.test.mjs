@@ -693,3 +693,40 @@ test("MIG-0661 T09 / #916: compact nesting stack preserves root identity and gra
     assert.equal(d1.count, 0);
   }
 });
+
+test("MIG-0661 T09 / #916: scalar array batches preserve grammar at batch and fallback boundaries", async () => {
+  const pad = "X".repeat(70 * 1024);
+  const prefix = '{"mode":"normal","updated_at":1,"reason":"' + pad + '","extra":';
+  const suffix = ',"mode":"maintenance"}';
+  const dense = "0,-1.2e+4,true,false,null,".repeat(3000);
+  const cases = [
+    ...[0, 1, 2, 3, 255, 256, 257, 258, 511, 512, 513].map((n) =>
+      ["[0," + "1,".repeat(n) + "2]", true]),
+    ["[0," + dense + "0]", true],
+    ["[0," + dense + '[],{},[1,2],"text",{"mode":"static_only"}]', true],
+    ["[0,1,2," + "9".repeat(70000) + ",0,1]", true],
+    ["[0,1,2,0.12345678901234567,1e+1234567,-0,1]", true],
+    ["[0,1,2," + " ".repeat(17) + "3,4]", true],
+    ["[0,1,2,\t\r\n3,4]", true],
+    ...["01","-01","1.","1e+","truex","nullx","0x1","0\u00a0","0\u2028","", "0,"].map((tail) =>
+      ["[0," + dense + tail + "]", false]),
+    ["[0," + dense + "0]x", false],
+  ];
+  for (const [array, valid] of cases) {
+    const raw = prefix + array + suffix;
+    assert.ok(Buffer.byteLength(raw, "utf8") > 64 * 1024);
+    if (valid) assert.equal(JSON.parse(raw).mode, "maintenance");
+    else assert.throws(() => JSON.parse(raw), SyntaxError);
+    resetOperationModeCachesForTests();
+    const d1 = { count: 0 }, kv = { count: 0 };
+    const binding = kvResponse(raw, kv);
+    const env = { DB: unavailableD1(d1), KV: binding };
+    const expectedMode = valid ? "maintenance" : "normal";
+    assert.equal(await resolvePublicOperationMode(env, { allowD1: false }), expectedMode);
+    assert.deepEqual(await readOperationModeKvMirror(binding), valid
+      ? { mode: "maintenance", updated_at: 1, reason: null } : null);
+    assert.deepEqual(await requestWith(env), { mode: expectedMode, reason: null });
+    assert.equal(kv.count, 1);
+    assert.equal(d1.count, 0);
+  }
+});
