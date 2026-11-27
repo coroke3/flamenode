@@ -410,3 +410,72 @@ test("MIG-0714 B01: submitter field preserves CURRENT readonly, unlock and profi
     }
   }
 });
+
+test("MIG-0714 B02: feedback matches CURRENT result, CTA and blocked-state rendering", async () => {
+  const React = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { JSDOM } = await import("jsdom");
+  const ts = await import("typescript");
+  const { VideoFormFeedback } = await import("../.test-dist/apps/app/src/components/forms/VideoFormFeedback.js");
+  const { Icon } = await import("../.test-dist/apps/app/src/routes/ui/Icon.js");
+  const { ErrorCallout } = await import("../.test-dist/apps/app/src/components/ui/ErrorCallout.js");
+  const { PublicReflectionDelayNotice } = await import("../.test-dist/apps/app/src/components/ui/PublicReflectionDelayNotice.js");
+  const { PUBLIC_REFLECTION_DELAY_MESSAGE } = await import("../.test-dist/apps/app/src/lib/publicReflectionNotice.js");
+  const { videoPageHref } = await import("../.test-dist/apps/app/src/lib/youtubeId.js");
+  const legacy = readFileSync(new URL("../../../src/components/forms/VideoForm.tsx", import.meta.url), "utf8");
+  const start = legacy.indexOf("      {result && !result.ok ? (");
+  const end = legacy.indexOf("      </div>\n\n      <aside", start);
+  assert.ok(start !== -1 && end > start, "the actual CURRENT feedback block must still exist");
+  const fragment = legacy.slice(start, end);
+  const css = readFileSync(new URL("../../../src/components/forms/VideoForm.module.css", import.meta.url), "utf8");
+  const names = [...new Set([...fragment.matchAll(/styles\.(\w+)/g)].map((match) => match[1]))];
+  assert.equal(names.length, 6, "only the six feedback styles belong to this port");
+  for (const name of names) assert.match(css, new RegExp(`\\.${name}\\b`));
+  const compiled = ts.transpileModule(`function CurrentFeedback({mode,result,submitBlockedReason,noEditableFormSections,permissionSubmitBlockedHint}) { return <>\n${fragment}</>; }`, {
+    compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None },
+  }).outputText;
+  // Next Link becomes the approved native anchor; child components already have MIG-0738 parity coverage.
+  const Link = (props) => React.createElement("a", props);
+  const CurrentFeedback = new Function("React", "Link", "Icon", "ErrorCallout", "PublicReflectionDelayNotice", "videoPageHref", "styles", `${compiled}\nreturn CurrentFeedback;`)(
+    React, Link, Icon, ErrorCallout, PublicReflectionDelayNotice, videoPageHref,
+    Object.fromEntries(names.map((name) => [name, `vform-${name}`])),
+  );
+  const cases = [
+    { name: "empty", props: {}, text: "", links: [], roles: [] },
+    { name: "default failure", props: { result: { ok: false } }, text: "提出に失敗しました。", links: [], roles: ["alert"] },
+    { name: "explicit empty failure message", props: { result: { ok: false, message: "" } }, text: "", links: [], roles: [] },
+    { name: "terms denial", props: { result: { ok: false, reason: "tos_required", message: "規約の再確認" } }, text: "規約の再確認", links: ["/onboarding?next=%2F"], roles: ["alert"] },
+    { name: "free success", props: { result: { ok: true, videoId: "video-a", youtubeVideoId: "dQw4w9WgXcQ", eventId: "event-a", pendingPublicReflection: true } }, text: "提出が完了しました。", links: ["/dQw4w9WgXcQ", "/event/event-a", "/dashboard/edit/video-a"], roles: ["status"], pending: true },
+    { name: "slot success without YouTube", props: { mode: "slot", result: { ok: true, videoId: "video-a", eventId: "event-a" } }, text: "YouTube URLが未設定でも作品情報は公開できます。", links: ["/video-a", "/event/event-a", "/dashboard/edit/video-a"], roles: ["status"] },
+    { name: "edit success", props: { mode: "edit", result: { ok: true, videoId: "video-a", eventId: "event-a", pendingPublicReflection: true } }, text: "保存しました。", links: ["/video-a", "/event/event-a"], roles: ["status"], pending: true },
+    { name: "success without IDs", props: { result: { ok: true } }, text: "提出が完了しました。", links: [], roles: ["status"] },
+    { name: "invalid YouTube falls back to internal ID", props: { mode: "edit", result: { ok: true, videoId: "video-a", youtubeVideoId: "//foreign.example/video" } }, text: "保存しました。", links: ["/video-a"], roles: ["status"] },
+    { name: "invalid public IDs fall back to list", props: { mode: "edit", result: { ok: true, videoId: "../foreign", youtubeVideoId: "//foreign.example/video" } }, text: "保存しました。", links: ["/list"], roles: ["status"] },
+    { name: "blocked wins over permission hint", props: { submitBlockedReason: "一時停止", noEditableFormSections: true, permissionSubmitBlockedHint: "権限モードを選択" }, text: "一時停止", links: [], roles: ["alert"], excluded: "権限モードを選択" },
+    { name: "permission hint", props: { noEditableFormSections: true, permissionSubmitBlockedHint: "権限モードを選択" }, text: "権限モードを選択", links: [], roles: ["status"] },
+    { name: "editable sections suppress permission hint", props: { permissionSubmitBlockedHint: "権限モードを選択" }, text: "", links: [], roles: [] },
+    { name: "failure and blocked notice coexist", props: { result: { ok: false, message: "保存失敗" }, submitBlockedReason: "一時停止" }, text: "保存失敗", links: [], roles: ["alert", "alert"] },
+  ];
+  for (const scenario of cases) {
+    const props = Object.freeze({ mode: "free", result: null, noEditableFormSections: false, permissionSubmitBlockedHint: null, ...scenario.props });
+    if (props.result) Object.freeze(props.result);
+    const target = renderToStaticMarkup(React.createElement(VideoFormFeedback, props));
+    assert.equal(target, renderToStaticMarkup(React.createElement(CurrentFeedback, props)), scenario.name);
+    const dom = new JSDOM(`<form><input name="title" value="existing">${target}</form>`);
+    try {
+      const form = dom.window.document.querySelector("form");
+      if (scenario.text === "") assert.equal(target, "", scenario.name);
+      else assert.ok(form.textContent.includes(scenario.text), scenario.name);
+      assert.deepEqual([...form.querySelectorAll("a")].map((link) => link.getAttribute("href")), scenario.links, scenario.name);
+      assert.deepEqual([...form.querySelectorAll("[role]")].map((element) => element.getAttribute("role")), scenario.roles, scenario.name);
+      assert.equal(form.textContent.includes(PUBLIC_REFLECTION_DELAY_MESSAGE), Boolean(scenario.pending), scenario.name);
+      if (scenario.excluded) assert.equal(form.textContent.includes(scenario.excluded), false, scenario.name);
+      assert.deepEqual([...new dom.window.FormData(form)], [["title", "existing"]], "feedback cannot add or alter submitted fields");
+      assert.equal(form.querySelector("button"), null, "feedback links cannot implicitly submit the form");
+    } finally {
+      dom.window.close();
+    }
+  }
+  const targetSource = readFileSync(new URL("../src/components/forms/VideoFormFeedback.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(targetSource, /\bfetch\s*\(|localStorage|indexedDB|from\s+["']next(?:\/|["'])|@\/lib\/actions/);
+});
