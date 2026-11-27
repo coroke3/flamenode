@@ -4,6 +4,8 @@ import type { EditPermissionsResponse } from "@flamenode/contracts";
 import { getEditPermissions, type EditPermissionsReadResult } from "../../../api/videoCollaborators.js";
 import { AuthUnavailable, BannedNotice, LoginRequired, SessionLoading } from "../../guard.js";
 import { AppLink, useDocumentTitle } from "../../ui/AppLink.js";
+import { Icon } from "../../ui/Icon.js";
+import { videoPageHref } from "../../../lib/youtubeId.js";
 
 type LoadState = { status: "loading" } | EditPermissionsReadResult;
 
@@ -84,6 +86,7 @@ export function PermissionsReadView({
   data: EditPermissionsResponse;
 }): React.ReactElement {
   const href = editHref(videoId, data.privilegeMode);
+  const id = encodeURIComponent(videoId);
   if (data.kind === "no_access") {
     return (
       <div className="fn-public-container fn-page fn-guard-shell">
@@ -111,6 +114,31 @@ export function PermissionsReadView({
           公開メンバーとして表示するかどうかとは別です。
         </p>
       </header>
+      {/* CURRENT AdminVideoTabs: an authorized admin-mode receipt can only be issued by Hono.
+          Query parameters alone never select these links. */}
+      {data.privilegeMode === "admin" ? (
+        <nav className="fn-console-resource-tabs" aria-label="作品管理メニュー">
+          {([
+            { key: "detail", href: `/admin/videos/${id}`, label: "管理詳細", icon: "info" },
+            { key: "members", href: `/admin/videos/${id}/members`, label: "メンバー", icon: "users" },
+            { key: "edit", href: `/dashboard/edit/${id}?privileged=admin`, label: "内容編集", icon: "edit" },
+            { key: "permissions", href: `/dashboard/edit/${id}/permissions?privileged=admin`, label: "編集権限", icon: "settings" },
+            { key: "public", href: videoPageHref(data.video), label: "公開ページ", icon: "external" },
+            { key: "audit", href: `/admin/audit?table=videos&record=${id}`, label: "監査ログ", icon: "clock" },
+          ] as const).map((tab) => (
+            <AppLink
+              key={tab.key}
+              href={tab.href}
+              className={`fn-btn fn-btn-sm ${tab.key === "permissions" ? "fn-btn-primary" : "fn-btn-ghost"}`}
+              aria-current={tab.key === "permissions" ? "page" : undefined}
+            >
+              <Icon name={tab.icon} size={11} aria-hidden />
+              {tab.label}
+            </AppLink>
+          ))}
+        </nav>
+      ) : null}
+
       {!data.showCollabSection ? (
         <section className="fn-card">
           <div className="fn-card-body">

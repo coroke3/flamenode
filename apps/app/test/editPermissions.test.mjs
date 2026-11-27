@@ -340,3 +340,58 @@ test("MIG-0715 U01: resource and exact privilege tuple own the committed read vi
     await act(async () => root.unmount());
   }
 });
+
+test("MIG-0715 U03: authorized admin receipt renders CURRENT six management tabs with safe hrefs", async () => {
+  const cases = [
+    ["video-1", "https://youtu.be/abcdefghijk", "/abcdefghijk"],
+    ["video-1", "//outside.example", "/video-1"],
+    ["video A&1", null, "/list"],
+  ];
+  for (const [id, youtubeId, publicHref] of cases) {
+    const encoded = encodeURIComponent(id);
+    const receipt = permissionReceipt(id, "admin-video");
+    receipt.privilegeMode = "admin";
+    receipt.video.youtube_video_id = youtubeId;
+    const calls = [];
+    const m = await mountPermissions("/dashboard/edit/" + encoded + "/permissions", async options => {
+      calls.push(options);
+      return ok(receipt);
+    });
+    try {
+      const nav = m.container.querySelector('nav[aria-label="作品管理メニュー"]');
+      assert.ok(nav, "server-approved admin fallback also shows the menu");
+      assert.ok(nav.classList.contains("fn-console-resource-tabs"));
+      const links = [...nav.querySelectorAll("a")];
+      assert.deepEqual(links.map(a => [a.textContent.trim(), a.getAttribute("href")]), [
+        ["管理詳細", "/admin/videos/" + encoded],
+        ["メンバー", "/admin/videos/" + encoded + "/members"],
+        ["内容編集", "/dashboard/edit/" + encoded + "?privileged=admin"],
+        ["編集権限", "/dashboard/edit/" + encoded + "/permissions?privileged=admin"],
+        ["公開ページ", publicHref],
+        ["監査ログ", "/admin/audit?table=videos&record=" + encoded],
+      ]);
+      assert.deepEqual(links.map(a => a.getAttribute("aria-current")), [null, null, null, "page", null, null]);
+      assert.ok(links[3].classList.contains("fn-btn-primary"));
+      assert.ok(links.filter((_, i) => i !== 3).every(a => a.classList.contains("fn-btn-ghost")));
+      assert.ok(links.every(a => a.querySelector('svg[aria-hidden="true"]')));
+      assert.equal(calls.length, 1);
+      assert.deepEqual(calls[0].privilegeModes, []);
+      assert.equal(m.container.querySelectorAll("button,input,form").length, 0);
+    } finally { await m.unmount(); }
+  }
+});
+
+test("MIG-0715 U03: admin query does not grant menu access and denied receipts never show it", async () => {
+  for (const data of [
+    { ...permissionReceipt("video-1", "normal"), privilegeMode: "normal" },
+    { ...permissionReceipt("video-1", "event"), privilegeMode: "event" },
+    { kind: "no_access", privilegeMode: "admin" },
+  ]) {
+    const m = await mountPermissions("/dashboard/edit/video-1/permissions?privileged=admin", async () => ok(data));
+    try {
+      assert.equal(m.container.querySelector('nav[aria-label="作品管理メニュー"]'), null);
+      assert.equal(m.container.querySelector('a[href^="/admin/"]'), null);
+      assert.equal(m.container.querySelectorAll("button,input,form").length, 0);
+    } finally { await m.unmount(); }
+  }
+});
