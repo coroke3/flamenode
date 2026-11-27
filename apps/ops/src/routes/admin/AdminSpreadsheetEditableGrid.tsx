@@ -15,6 +15,7 @@ type CellSelection = {
   id: number; rowIndex: number; column: string; value: string; key: string;
   pk: Record<string, string>; before: string | null; invalidated?: boolean;
   selectInitialText?: boolean;
+  fromFormula?: boolean;
 };
 const HISTORY_LIMIT = 100;
 const DEFAULT_COL_WIDTH = 110;
@@ -132,7 +133,7 @@ export function AdminSpreadsheetEditableGrid({
   const visibleFocus = boundCellToPage(focusedCell);
   const focusedColumn = identityChanged ? undefined : columns[visibleFocus.col];
   const stats = computeSelectionStats();
-  // CURRENT formula bar projection. Keep this display-only until the shared edit/blur lifecycle is ported.
+  // CURRENT formula bar shares the guarded cell draft; blur and bulk clipboard writes remain unported.
   const focusedRow = identityChanged ? undefined : rows[visibleFocus.row];
   // A valid draft is identified by row/column name, not by the old visual column index.
   const formulaDraft = currentSelection && !selectionConflict ? currentSelection : null;
@@ -145,6 +146,10 @@ export function AdminSpreadsheetEditableGrid({
     : "—";
   const formulaValue = formulaDraft ? formulaDraft.value
     : focusedRow && focusedColumn ? cellValue(focusedRow[focusedColumn.name]) : "";
+  const formulaCanStart = canMutate && currentSelection === null && !selectionConflict &&
+    !!focusedRow && !!focusedColumn && focusedColumn.editable && focusedColumn.pk === 0 &&
+    !focusedColumn.generated && primaryKey(focusedRow, primaryKeys) !== null;
+  const formulaCanEdit = canMutate && (formulaDraft !== null || formulaCanStart);
   const formulaStatusText = identityChanged ? ""
     : inFlight.current !== null && historyInFlight.current === inFlight.current ? "履歴を適用中…"
     : busy ? "保存中…" : findHint || notice || (stats.cells > 1 ? `${stats.cells} セル` : "");
@@ -226,7 +231,7 @@ export function AdminSpreadsheetEditableGrid({
   React.useLayoutEffect(() => {
     const draft = liveSelection.current;
     const input = editorRef.current;
-    if (focusEditId === null || draft?.id !== focusEditId || draft.invalidated || !input || input.disabled) return;
+    if (focusEditId === null || draft?.id !== focusEditId || draft.invalidated || draft.fromFormula || !input || input.disabled) return;
     input.focus();
     if (draft.selectInitialText) input.select();
     else input.setSelectionRange(input.value.length, input.value.length);
@@ -243,7 +248,7 @@ export function AdminSpreadsheetEditableGrid({
     setSelection(next);
   }
 
-  function startCellEdit(rowIndex: number, colIndex: number, initialChar?: string): boolean {
+  function startCellEdit(rowIndex: number, colIndex: number, initialChar?: string, fromFormula = false): boolean {
     const column = columns[colIndex];
     const row = rows[rowIndex];
     const pk = row ? primaryKey(row, primaryKeys) : null;
@@ -252,11 +257,60 @@ export function AdminSpreadsheetEditableGrid({
         !column.editable || column.pk !== 0 || column.generated) return false;
     const value = cellValue(row[column.name]);
     setCellEdit({ id: ++nextEditId.current, rowIndex, column: column.name, value: initialChar ?? value, key, pk,
-      before: row[column.name] == null ? null : value, selectInitialText: initialChar !== undefined });
+      before: row[column.name] == null ? null : value, selectInitialText: initialChar !== undefined && !fromFormula, fromFormula });
     const position = { row: rowIndex, col: colIndex };
     setAnchorCell(position);
     setFocusedCell(position);
     return true;
+  }
+
+  // Also accept the formula-origin draft opened by focus in the same React batch.
+  // A retired draft, another editor's draft, or a replaced page cannot receive input from an old callback.
+  function liveFormulaDraft(): CellSelection | null {
+    const draft = liveSelection.current;
+    if (!formulaCanEdit || !draft || draft.invalidated || draft.key !== key ||
+        inFlight.current !== null || !isCurrent() || displayedPage.current !== data) return null;
+    if (formulaDraft?.id === draft.id ||
+        (formulaCanStart && draft.fromFormula && draft.rowIndex === visibleFocus.row &&
+          draft.column === focusedColumn?.name)) return draft;
+    return null;
+  }
+
+  function changeFormulaValue(value: string): void {
+    const draft = liveFormulaDraft();
+    if (draft) setCellEdit({ ...draft, value });
+    else if (formulaCanStart && liveSelection.current === null) {
+      startCellEdit(visibleFocus.row, visibleFocus.col, value, true);
+    }
+  }
+
+  function handleFormulaKey(event: React.KeyboardEvent<HTMLInputElement>): void {
+    // Native IME confirmation is not a request to persist a database edit.
+    if (event.nativeEvent.isComposing || event.key === "Process") return;
+    const mod = event.ctrlKey || event.metaKey;
+    if (mod && event.key === "c") {
+      event.preventDefault();
+      if (isCurrent() && displayedPage.current === data) void copyRange();
+      return;
+    }
+    // Bulk paste/cut and history need the separate CURRENT lifecycle and API gates.
+    if (mod && ["v", "x", "z", "y"].includes(event.key.toLowerCase())) {
+      event.preventDefault();
+      return;
+    }
+    const draft = liveFormulaDraft();
+    if (!draft) return;
+    const col = columns.findIndex(column => column.name === draft.column);
+    if (col < 0) return;
+    const position = { row: draft.rowIndex, col };
+    if (event.key === "Escape") {
+      event.preventDefault();
+      cancelCellEdit(draft.id, position);
+    } else if (event.key === "Enter" || event.key === "Tab") {
+      event.preventDefault();
+      const moveKey = event.key === "Enter" ? "ArrowDown" : event.shiftKey ? "ArrowLeft" : "ArrowRight";
+      void saveCell(draft.id, moveSpreadsheetFocus(position, moveKey, rows.length, columns.length));
+    }
   }
 
   function handleCellDoubleClick(event: React.MouseEvent<HTMLTableCellElement>, rowIndex: number, colIndex: number): void {
@@ -737,6 +791,10 @@ export function AdminSpreadsheetEditableGrid({
           padding: 6px 10px;
           font: 13px var(--font-mono, ui-monospace, monospace);
           color: var(--text-primary);
+          border: 0;
+          border-radius: 0;
+          box-sizing: border-box;
+          background: transparent;
           white-space: pre;
           overflow: hidden;
           text-overflow: ellipsis;
@@ -816,10 +874,19 @@ export function AdminSpreadsheetEditableGrid({
       ) : currentSelection && !selectionConflict ? (
         <p>見出しで選択する前に、セルを保存するかキャンセルしてください。</p>
       ) : null}
-      <div data-spreadsheet-formula-bar="" role="group" aria-label="数式バー（表示専用）">
+      <div data-spreadsheet-formula-bar="" role="group" aria-label="数式バー">
         <div data-spreadsheet-formula-reference="" aria-live="polite" title="セル参照">{formulaReference}</div>
         <span data-spreadsheet-formula-fx="" aria-hidden="true">fx</span>
-        <span data-spreadsheet-formula-value="" title={formulaValue}>{formulaValue}</span>
+        <input data-spreadsheet-formula-value="" type="text" aria-label="セルの値"
+          title={formulaValue} value={formulaValue} readOnly={!formulaCanEdit}
+          placeholder={formulaCanEdit ? "" : "読み取り専用"}
+          onFocus={() => {
+            if (formulaCanStart) startCellEdit(visibleFocus.row, visibleFocus.col, undefined, true);
+          }}
+          onChange={event => changeFormulaValue(event.currentTarget.value)}
+          onKeyDown={handleFormulaKey}
+          onPaste={event => event.preventDefault()}
+          onCut={event => event.preventDefault()} />
         <span data-spreadsheet-formula-status="">{formulaStatusText}</span>
       </div>
       <div data-spreadsheet-grid-viewport="" style={{ overflowX: "auto" }}>
@@ -948,7 +1015,7 @@ export function AdminSpreadsheetEditableGrid({
                     onDoubleClick={(event) => handleCellDoubleClick(event, ri, columns.indexOf(c))}
                     onKeyDown={(event) => handleGridKey(event, ri, columns.indexOf(c))}>{editing && currentSelection ? (
                     <label>{c.name} を編集
-                      <input ref={editorRef} type="text" autoFocus disabled={!canMutate} value={currentSelection.value}
+                      <input ref={editorRef} type="text" autoFocus={!currentSelection.fromFormula} disabled={!canMutate} value={currentSelection.value}
                         onChange={e => {
                           const draft = liveSelection.current;
                           if (draft?.id === currentSelection.id && !draft.invalidated) setCellEdit({ ...draft, value: e.target.value });

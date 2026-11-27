@@ -171,7 +171,7 @@ test("MIG-0737 U01: read-only, missing PK and globally disabled edits issue no m
     try {
       assert.equal(ui.host.querySelectorAll('button[aria-label="1行 title を編集"]').length, 0);
       assert.equal(ui.host.querySelector('button[aria-label="1行を削除"]').disabled, true);
-      assert.equal(ui.host.querySelectorAll("input").length, 0);
+      assert.equal(ui.host.querySelectorAll("[data-grid-cell] input").length, 0);
     } finally { await ui.cleanup(); }
   }
   assert.equal(calls, 0);
@@ -182,13 +182,13 @@ test("MIG-0737 U01: changing table/page/transport immediately fences previous un
   const ui = await mount({ data: fixture(), fetchFn: fn, allowMutations: true, onRefresh: () => {} });
   try {
     await click(ui, "1行 title を編集");
-    assert.equal(ui.host.querySelectorAll("input").length, 1);
+    assert.equal(ui.host.querySelectorAll("[data-grid-cell] input").length, 1);
     await ui.render({ data: fixture("events"), fetchFn: fn, allowMutations: true, onRefresh: () => {} });
-    assert.equal(ui.host.querySelectorAll("input").length, 0);
+    assert.equal(ui.host.querySelectorAll("[data-grid-cell] input").length, 0);
     assert.equal([...ui.host.querySelectorAll("button")].find(x => x.textContent === "元に戻す").disabled, true);
     await ui.render({ data: fixture("events", "editable", 2), fetchFn: fn,
       allowMutations: true, onRefresh: () => {} });
-    assert.equal(ui.host.querySelectorAll("input").length, 0);
+    assert.equal(ui.host.querySelectorAll("[data-grid-cell] input").length, 0);
   } finally { await ui.cleanup(); }
 });
 
@@ -224,13 +224,13 @@ test("MIG-0737 U01: a changed same-page edit snapshot cannot retarget or revive 
       await input(ui, "title を編集", "draft");
       await ui.render({ ...props, data: changed });
       assert.match(ui.host.querySelector('[role="alert"]')?.textContent ?? "", /状態が変更されました/, label);
-      assert.equal(ui.host.querySelectorAll('input').length, 0, label + " must not display draft on replacement row");
+      assert.equal(ui.host.querySelectorAll('[data-grid-cell] input').length, 0, label + " must not display draft on replacement row");
       assert.equal([...ui.host.querySelectorAll('button')].some(b => b.textContent === "セルを保存"), false, label);
       assert.equal(sent.length, 0, label);
       assert.equal(refreshes, 0, label);
       await ui.render(props);
       assert.ok(ui.host.querySelector('[role="alert"]'), label + " must remain invalidated");
-      assert.equal(ui.host.querySelectorAll('input').length, 0, label);
+      assert.equal(ui.host.querySelectorAll('[data-grid-cell] input').length, 0, label);
       assert.equal(ui.host.querySelector('button[aria-label="1行 title を編集"]').disabled, true, label);
       assert.equal([...ui.host.querySelectorAll('button')].find(b => b.textContent === "元に戻す").disabled, true);
       await click(ui, "編集を破棄");
@@ -259,7 +259,7 @@ test("MIG-0737 U01: keyboard edit retains original PK and value through unchange
     await input(ui, "title を編集", "draft");
     await ui.render({ ...props, data: { ...original, rows: [{ ...original.rows[0], secret: "updated unrelated value" }] } });
     assert.equal(ui.host.querySelector('[role="alert"]'), null);
-    assert.equal(ui.host.querySelector('input').value, "draft");
+    assert.equal(ui.host.querySelector('[data-grid-cell] input').value, "draft");
     await click(ui, "セルを保存");
     await click(ui, "元に戻す");
     assert.deepEqual(sent, [

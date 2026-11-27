@@ -71,7 +71,7 @@ test("MIG-0737 U01: read-only grid keyboard shift-range copies selected TSV, no 
     await flush();
     assert.deepEqual(copied, ["Alpha\nBeta"]);
     assert.match(ui.host.textContent, /選択範囲をコピーしました/);
-    assert.equal(ui.host.querySelectorAll("input").length, 0);
+    assert.equal(ui.host.querySelectorAll("[data-grid-cell] input").length, 0);
   } finally {
     await ui.cleanup();
     if (previous) Object.defineProperty(navigator, "clipboard", previous);
@@ -90,7 +90,7 @@ test("MIG-0737 U01: Enter navigates, edit buttons open only mutable columns; mis
     assert.equal((await press(pk, "Enter")).defaultPrevented, true);
     assertNavigation(ui, "1:0");
     assert.equal(ui.host.querySelectorAll('button[aria-label="1行 id を編集"]').length, 0);
-    assert.equal(ui.host.querySelectorAll("input").length, 0);
+    assert.equal(ui.host.querySelectorAll("[data-grid-cell] input").length, 0);
     const title = ui.host.querySelector('[data-grid-cell="0:1"]');
     assert.equal((await press(title, "Enter")).defaultPrevented, true);
     assertNavigation(ui, "1:1");
@@ -239,7 +239,7 @@ for (const scenario of [
       assert.equal(document.activeElement, gridCell(ui, scenario.next));
       assert.equal(calls, 0);
       assert.equal(refreshes, 0);
-      assert.equal(ui.host.querySelectorAll("input").length, 0);
+      assert.equal(ui.host.querySelectorAll("[data-grid-cell] input").length, 0);
     } finally {
       await ui.cleanup();
       if (previous) Object.defineProperty(navigator, "clipboard", previous);

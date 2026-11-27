@@ -1493,15 +1493,18 @@ test("MIG-0737 U01 editor copy: synchronous focus takeover during fallback never
 function assertFormula(ui, reference, value, status = "") {
   const bar = ui.host.querySelector("[data-spreadsheet-formula-bar]");
   assert.ok(bar);
-  assert.equal(bar.getAttribute("aria-label"), "数式バー（表示専用）");
+  assert.equal(bar.getAttribute("aria-label"), "数式バー");
   assert.equal(bar.querySelector("[data-spreadsheet-formula-reference]").textContent, reference);
   assert.equal(bar.querySelector("[data-spreadsheet-formula-reference]").getAttribute("aria-live"), "polite");
   assert.equal(bar.querySelector("[data-spreadsheet-formula-fx]").textContent, "fx");
   const display = bar.querySelector("[data-spreadsheet-formula-value]");
-  assert.equal(display.textContent, value);
+  assert.equal(display.tagName, "INPUT");
+  assert.equal(display.type, "text");
+  assert.equal(display.getAttribute("aria-label"), "セルの値");
+  assert.equal(display.value, value.replace(/[\r\n]/g, ""));
   assert.equal(display.title, value);
   assert.equal(bar.querySelector("[data-spreadsheet-formula-status]").textContent, status);
-  assert.equal(bar.querySelector("input,textarea,button,[contenteditable]"), null);
+  assert.deepEqual([...bar.querySelectorAll("input,textarea,button,[contenteditable]")], [display]);
   return bar;
 }
 
@@ -1705,7 +1708,8 @@ test("MIG-0737 U01 formula display: valid draft label follows its named column t
     assertNoEffects(ui);
     await ui.render({ data: { ...shrunk, columns: [data.columns[2], data.columns[0]] } });
     assertFormula(ui, "B4 (id)", "a");
-    assert.equal(ui.host.querySelector("input"), null);
+    assert.equal(ui.host.querySelector("[data-grid-cell] input"), null);
+    assert.equal(bar.querySelector("[data-spreadsheet-formula-value]").readOnly, true);
     assert.match(ui.host.textContent, /編集中の行または列の状態が変更/);
     await React.act(async () => button(ui, "編集を破棄").click());
     assertFormula(ui, "B4 (id)", "a");
@@ -1747,4 +1751,182 @@ test("MIG-0737 U01 formula display: long references and receipts retain scoped w
     assert.equal(requests.length, 1);
     assert.equal(JSON.parse(requests[0].body).column, name);
   } finally { await ui.cleanup(); }
+});
+
+function formulaInput(ui) {
+  const input = ui.host.querySelector("input[data-spreadsheet-formula-value]");
+  assert.ok(input);
+  return input;
+}
+
+test("MIG-0737 U01 formula input: focus owns the shared draft and typing/cancel do not write", async () => {
+  const ui = await mount({ allowMutations: true });
+  try {
+    await select(ui, "0:1");
+    const formula = formulaInput(ui);
+    assert.equal(formula.readOnly, false);
+    assert.equal(cell(ui, "0:1").querySelector("input"), null);
+    await React.act(async () => formula.focus());
+    const inline = cell(ui, "0:1").querySelector("input");
+    assert.ok(inline);
+    assert.equal(document.activeElement, formula);
+    assert.equal(formula.value, "Alpha");
+    await setInput(formula, "  日本語 draft  ");
+    assert.equal(inline.value, "  日本語 draft  ");
+    assertFormula(ui, "B4 (title)", "  日本語 draft  ");
+    assertNoEffects(ui);
+    await React.act(async () => inline.focus());
+    await setInput(inline, "same draft");
+    assert.equal(formula.value, "same draft");
+    await React.act(async () => formula.focus());
+    assert.equal(cell(ui, "0:1").querySelector("input"), inline);
+    assert.equal((await key(formula, "Escape")).defaultPrevented, true);
+    assert.equal(cell(ui, "0:1").querySelector("input"), null);
+    assert.equal(document.activeElement, cell(ui, "0:1"));
+    assertFormula(ui, "B4 (title)", "Alpha");
+    assertNoEffects(ui);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 formula input: explicit commit shares one PATCH and the existing endpoint movement", async () => {
+  for (const [pressed, modifiers, endpoint] of [
+    ["Enter", {}, "1:1"], ["Tab", {}, "0:2"], ["Tab", { shiftKey: true }, "0:0"],
+  ]) {
+    const requests = [];
+    let refreshes = 0;
+    const ui = await mount({ allowMutations: true,
+      fetchFn: async (_, init) => {
+        requests.push(init);
+        return new Response(JSON.stringify({ ok: true }), { headers: { "content-type": "application/json" } });
+      },
+      onRefresh: () => { refreshes++; },
+    });
+    try {
+      await select(ui, "0:1");
+      const formula = formulaInput(ui);
+      await React.act(async () => formula.focus());
+      await setInput(formula, "  updated  ");
+      const first = new dom.window.KeyboardEvent("keydown", { key: pressed, bubbles: true, cancelable: true, ...modifiers });
+      const second = new dom.window.KeyboardEvent("keydown", { key: pressed, bubbles: true, cancelable: true, ...modifiers });
+      await React.act(async () => { formula.dispatchEvent(first); formula.dispatchEvent(second); });
+      assert.equal(first.defaultPrevented, true);
+      assert.equal(requests.length, 1);
+      assert.equal(requests[0].method, "PATCH");
+      assert.deepEqual(JSON.parse(requests[0].body), {
+        table: "videos", primaryKey: { id: "a" }, column: "title", value: "  updated  ",
+      });
+      assert.equal(refreshes, 1);
+      assert.deepEqual(selected(ui), [endpoint]);
+      assert.equal(document.activeElement, cell(ui, endpoint));
+      assert.equal(ui.host.querySelector("[data-grid-cell] input"), null);
+    } finally { await ui.cleanup(); }
+  }
+});
+
+test("MIG-0737 U01 formula input: readonly, PK, generated, missing-PK, empty and default-off cells never open a draft", async () => {
+  const cases = [
+    [{}, "0:1"],
+    [{ allowMutations: true, data: { ...data, def: { ...data.def, mode: "readonly" } } }, "0:1"],
+    [{ allowMutations: true }, "0:0"],
+    [{ allowMutations: true }, "0:2"],
+    [{ allowMutations: true, data: { ...data, columns: [data.columns[0], { ...data.columns[1], generated: true }, data.columns[2]] } }, "0:1"],
+    [{ allowMutations: true, data: { ...data, primaryKeys: [] } }, "0:1"],
+    [{ allowMutations: true, data: { ...data, rows: [] } }, null],
+  ];
+  for (const [props, position] of cases) {
+    const ui = await mount(props);
+    try {
+      if (position !== null) await select(ui, position);
+      const formula = formulaInput(ui);
+      assert.equal(formula.readOnly, true);
+      await React.act(async () => formula.focus());
+      assert.equal(document.activeElement, formula);
+      assert.equal(ui.host.querySelector("[data-grid-cell] input"), null);
+      await setInput(formula, "unexpected");
+      await key(formula, "Enter");
+      assert.equal(ui.host.querySelector("[data-grid-cell] input"), null);
+      assertNoEffects(ui);
+    } finally { await ui.cleanup(); }
+  }
+});
+
+test("MIG-0737 U01 formula input: IME confirmation, pending clipboard units and ordinary blur never persist a draft", async () => {
+  const ui = await mount({ allowMutations: true });
+  const outside = document.createElement("button");
+  document.body.append(outside);
+  try {
+    await select(ui, "0:1");
+    const formula = formulaInput(ui);
+    await React.act(async () => formula.focus());
+    await setInput(formula, "仮入力");
+    for (const pressed of ["Enter", "Escape", "Tab"]) {
+      assert.equal((await key(formula, pressed, { isComposing: true })).defaultPrevented, false);
+      assert.equal(cell(ui, "0:1").querySelector("input").value, "仮入力");
+    }
+    for (const pressed of ["v", "x", "z", "y"]) {
+      assert.equal((await key(formula, pressed, { ctrlKey: true })).defaultPrevented, true);
+    }
+    for (const type of ["paste", "cut"]) {
+      const event = new dom.window.Event(type, { bubbles: true, cancelable: true });
+      await React.act(async () => formula.dispatchEvent(event));
+      assert.equal(event.defaultPrevented, true);
+    }
+    await React.act(async () => outside.focus());
+    assert.equal(document.activeElement, outside);
+    assert.equal(cell(ui, "0:1").querySelector("input").value, "仮入力");
+    assertNoEffects(ui);
+    await React.act(async () => button(ui, "キャンセル").click());
+    assertFormula(ui, "B4 (title)", "Alpha");
+    assertNoEffects(ui);
+  } finally {
+    outside.remove();
+    await ui.cleanup();
+  }
+});
+
+test("MIG-0737 U01 formula input: invalidation hides the draft and denies late input or save", async () => {
+  const ui = await mount({ allowMutations: true });
+  try {
+    await select(ui, "0:1");
+    const formula = formulaInput(ui);
+    await React.act(async () => formula.focus());
+    await setInput(formula, "retired draft");
+    const changed = { ...data, rows: [{ ...data.rows[0], title: "Server value" }, ...data.rows.slice(1)] };
+    await ui.render({ data: changed });
+    assertFormula(ui, "B4 (title)", "Server value");
+    assert.equal(formula.readOnly, true);
+    assert.equal(ui.host.querySelector("[data-grid-cell] input"), null);
+    await setInput(formula, "late edit");
+    await key(formula, "Enter");
+    assertNoEffects(ui);
+    await ui.render({ data });
+    assert.equal(formula.readOnly, true, "invalidated draft stays retired on A-B-A");
+    assertFormula(ui, "B4 (title)", "Alpha");
+    await React.act(async () => button(ui, "編集を破棄").click());
+    assert.equal(formula.readOnly, false);
+    assertNoEffects(ui);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 formula input: Ctrl/Cmd+C uses the displayed grid range, not the draft substring", async () => {
+  const previous = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+  const copied = [];
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async text => copied.push(text) } });
+  const ui = await mount({ allowMutations: true });
+  try {
+    await select(ui, "0:1");
+    const formula = formulaInput(ui);
+    await React.act(async () => formula.focus());
+    await setInput(formula, "Unsaved");
+    formula.setSelectionRange(1, 3);
+    assert.equal((await key(formula, "c", { ctrlKey: true })).defaultPrevented, true);
+    assert.equal((await key(formula, "c", { metaKey: true })).defaultPrevented, true);
+    assert.deepEqual(copied, ["Alpha", "Alpha"]);
+    assert.equal(formula.value, "Unsaved");
+    assertNoEffects(ui);
+  } finally {
+    await ui.cleanup();
+    if (previous) Object.defineProperty(navigator, "clipboard", previous);
+    else delete navigator.clipboard;
+  }
 });
