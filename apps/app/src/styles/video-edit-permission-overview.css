@@ -1,0 +1,107 @@
+.vedit-overview-panel {
+  display: grid;
+  gap: 12px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  line-height: 1.55;
+  scroll-margin-top: calc(var(--header-h, 64px) + 16px);
+}
+
+.vedit-overview-normal {
+  background: var(--bg-surface);
+  color: var(--text-muted);
+}
+
+.vedit-overview-event {
+  border-color: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 58%, var(--border-subtle));
+  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 6%, var(--bg-surface));
+  color: var(--text-primary);
+}
+
+.vedit-overview-admin {
+  border-color: color-mix(in srgb, var(--accent-danger) 58%, var(--border-subtle));
+  background: color-mix(in srgb, var(--accent-danger) 10%, var(--bg-surface));
+  color: var(--text-primary);
+}
+
+.vedit-overview-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.vedit-overview-normal .vedit-overview-heading {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.vedit-overview-event .vedit-overview-heading,
+.vedit-overview-admin .vedit-overview-heading {
+  color: var(--text-primary);
+}
+
+.vedit-overview-lead {
+  margin: 0;
+}
+
+.vedit-overview-eventName {
+  margin: 0;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.vedit-overview-auditNote {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent-danger) 35%, var(--border-subtle));
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.vedit-overview-lists {
+  display: grid;
+  gap: 10px;
+}
+
+@media (min-width: 640px) {
+  .vedit-overview-lists {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.vedit-overview-listBlock {
+  margin: 0;
+}
+
+.vedit-overview-listTitle {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.vedit-overview-list {
+  margin: 0;
+  padding-left: 1.1em;
+  color: var(--text-primary);
+}
+
+.vedit-overview-list li + li {
+  margin-top: 2px;
+}
+
+.vedit-overview-emptyList {
+  margin: 0;
+  color: var(--text-muted);
+}
