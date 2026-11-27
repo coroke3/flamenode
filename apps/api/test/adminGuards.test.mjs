@@ -286,6 +286,16 @@ test("MIG-0689: joined feature-list receipts stay bounded and preserve CostGuard
     "x".repeat(180_000),
     "garbage".repeat(30_000),
   ];
+  const radixExpiries = new Map([
+    ["0x" + "F".repeat(18_000), "Infinity"],
+    ["0O" + "7".repeat(18_000), "Infinity"],
+    ["0b" + "1".repeat(18_000), "Infinity"],
+    ["0b" + "0".repeat(180_000) + "1", "0b1"],
+    ["0O" + "0".repeat(18_000) + "37777777777", "0o37777777777"],
+    ["0X" + "0".repeat(18_000), "0x0"],
+    // Keep exact significant digits near the finite/overflow rounding boundary.
+    ["0x" + "0".repeat(18_000) + "F".repeat(256), "0x" + "F".repeat(256)],
+  ]);
   const cases = [
     ["normal", null, null, null],
     ["normal", " ", null, null],
@@ -316,8 +326,10 @@ test("MIG-0689: joined feature-list receipts stay bounded and preserve CostGuard
     // JS compares a whitespace-padded hexadecimal expiry as its numeric value.
     ["maintenance", malformed, expiryPad + "0xFFFFFFFF" + expiryPad, allow],
     ...impossibleExpiries.map((expiry) => ["maintenance", null, expiry, allow]),
-    // A large valid radix literal may coerce to Infinity. Do not replace it.
-    ["maintenance", malformed, "0x" + "F".repeat(18_000), allow],
+    // Strict ASCII radix literals retain the exact JS Number value.
+    ...Array.from(radixExpiries.keys(), (expiry) => ["maintenance", null, expiry, allow]),
+    // Ambiguous Unicode whitespace is deliberately left on the old path.
+    ["maintenance", malformed, "0x" + "F".repeat(18_000) + "\u00a0", allow],
     ["maintenance", malformed, expiryPad + "+Infinity" + expiryPad, allow],
   ];
   // Empty means zero bytes, even under a non-binary column collation.
@@ -342,6 +354,11 @@ test("MIG-0689: joined feature-list receipts stay bounded and preserve CostGuard
     assert.equal(state.cost_guard_settings.operation_mode, expectedMode);
     if (impossibleExpiries.includes(exceptionUntil)) {
       assert.equal(state.cost_guard_settings.cost_guard_exception_until, "!");
+    } else if (radixExpiries.has(exceptionUntil)) {
+      const compact = state.cost_guard_settings.cost_guard_exception_until;
+      assert.equal(compact, radixExpiries.get(exceptionUntil));
+      assert.equal(Number(compact), Number(exceptionUntil));
+      assert.ok(Buffer.byteLength(compact) <= 1026);
     } else if (typeof exceptionUntil === "string" && exceptionUntil.startsWith(expiryPad)) {
       const compact = state.cost_guard_settings.cost_guard_exception_until;
       assert.equal(compact, exceptionUntil.trim());

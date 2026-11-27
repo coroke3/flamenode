@@ -64,7 +64,11 @@ END`;
 // ASCII characters cannot occur anywhere in an ECMAScript numeric string,
 // and x/X/o/O can occur at most once (as a radix prefix). Map only those
 // provably nonnumeric strings to a fixed nonnumeric marker. Otherwise strip
-// ASCII edge whitespace, retaining NUL-containing and non-TEXT values.
+// ASCII edge whitespace. For a fully validated ASCII unsigned radix literal,
+// dropping leading zeroes preserves its Number value. A significant length
+// above 256 hex / 342 octal / 1024 binary digits proves overflow to Infinity.
+// Shorter literals keep all significant digits, including rounding boundaries.
+// Keep NUL-containing, non-TEXT and other ambiguous values on the old path.
 // This preserves numeric comparison decisions, NOT a universal row bound.
 export const COMPACT_COST_GUARD_EXCEPTION_UNTIL_SQL = `CASE
   WHEN typeof(s."cost_guard_exception_until") = 'text'
@@ -74,7 +78,25 @@ export const COMPACT_COST_GUARD_EXCEPTION_UNTIL_SQL = `CASE
     WHEN s."cost_guard_exception_until" GLOB '*[GHJKLMNPQRSTUVWYZghjklmpqrsuvwz_:@!?;,/(){}=]*'
       OR s."cost_guard_exception_until" GLOB '*[xXoO]*[xXoO]*'
     THEN '!'
-    ELSE trim(s."cost_guard_exception_until", char(9,10,11,12,13,32))
+    ELSE (
+      WITH trimmed(v) AS MATERIALIZED (
+        SELECT trim(s."cost_guard_exception_until", char(9,10,11,12,13,32))
+      ), radix(v, prefix, digits) AS MATERIALIZED (
+        SELECT v, lower(substr(v,1,2)), substr(v,3) FROM trimmed
+      )
+      SELECT CASE WHEN length(CAST(v AS BLOB)) = length(v)
+        AND length(digits) > 0
+        AND ((prefix = '0x' AND digits NOT GLOB '*[^0-9a-fA-F]*')
+          OR (prefix = '0o' AND digits NOT GLOB '*[^0-7]*')
+          OR (prefix = '0b' AND digits NOT GLOB '*[^01]*'))
+        THEN (SELECT CASE
+          WHEN length(significant) > CASE prefix WHEN '0x' THEN 256 WHEN '0o' THEN 342 ELSE 1024 END
+            THEN 'Infinity'
+          WHEN significant = '' THEN prefix || '0'
+          ELSE prefix || significant END
+          FROM (SELECT ltrim(digits,'0') AS significant))
+        ELSE v END FROM radix
+    )
   END
   ELSE s."cost_guard_exception_until"
 END`;
