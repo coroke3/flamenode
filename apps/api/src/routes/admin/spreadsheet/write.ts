@@ -136,6 +136,35 @@ WHERE EXISTS (
 )
 ORDER BY x.cid`;
 
+const SOFTWARE_CATALOG_SNAPSHOT_PREFIX = "__mig0638_catalog_";
+const SOFTWARE_CATALOG_SNAPSHOT_MAX_COLUMNS = 64;
+const SOFTWARE_CATALOG_SNAPSHOT_SQL = `WITH catalog AS (${TABLE_WRITE_COLUMNS_SQL.replace(
+  "SELECT x.name AS name",
+  "SELECT x.cid AS cid, x.name AS name",
+)}),
+snapshot AS (
+  SELECT * FROM "software_catalog" WHERE "id" = ? LIMIT 2
+),
+snapshot_count AS (
+  SELECT COUNT(*) AS count FROM snapshot
+)
+SELECT s.*,
+  c.cid AS "${SOFTWARE_CATALOG_SNAPSHOT_PREFIX}cid",
+  c.name AS "${SOFTWARE_CATALOG_SNAPSHOT_PREFIX}name",
+  c.type AS "${SOFTWARE_CATALOG_SNAPSHOT_PREFIX}type",
+  c.not_null AS "${SOFTWARE_CATALOG_SNAPSHOT_PREFIX}not_null",
+  c.pk AS "${SOFTWARE_CATALOG_SNAPSHOT_PREFIX}pk",
+  c.dflt_value AS "${SOFTWARE_CATALOG_SNAPSHOT_PREFIX}dflt_value",
+  c.hidden AS "${SOFTWARE_CATALOG_SNAPSHOT_PREFIX}hidden",
+  c.foreign_keys_json AS "${SOFTWARE_CATALOG_SNAPSHOT_PREFIX}foreign_keys_json",
+  c.primary_keys_json AS "${SOFTWARE_CATALOG_SNAPSHOT_PREFIX}primary_keys_json",
+  sc.count AS "${SOFTWARE_CATALOG_SNAPSHOT_PREFIX}snapshot_count"
+FROM catalog c
+CROSS JOIN snapshot_count sc
+LEFT JOIN snapshot s ON 1=1
+ORDER BY c.cid
+LIMIT ${SOFTWARE_CATALOG_SNAPSHOT_MAX_COLUMNS * 2 + 1}`;
+
 type WriteColumnRow = {
   name: string;
   type: string | null;
@@ -221,6 +250,49 @@ function snapshotSpreadsheetWriteCatalog(rows: unknown): {
   return { rows: columns, foreignKeys };
 }
 
+type SpreadsheetWriteTableDef = NonNullable<ReturnType<typeof buildSpreadsheetTableDefs>[number]>;
+
+function buildSpreadsheetWriteContextFromCatalog(
+  def: SpreadsheetWriteTableDef,
+  catalog: ReturnType<typeof snapshotSpreadsheetWriteCatalog>,
+  now: number,
+): {
+  ctx: SpreadsheetWriteTableContext;
+  foreignKeys: readonly SpreadsheetForeignKey[];
+  fromCache: false;
+} {
+  const { rows, foreignKeys } = catalog;
+  const enumCache = SPREADSHEET_COLUMN_ENUMS;
+  const raw: (AdminSpreadsheetColumnMeta & { pk: number })[] = rows.map((row) => {
+    const enumValues = enumCache[`${def.table}.${row.name}`];
+    return {
+      name: row.name,
+      type: row.type ?? "TEXT",
+      notNull: Boolean(row.not_null),
+      pk: Number(row.pk ?? 0),
+      editable: isSpreadsheetColumnEditable(def, row.name),
+      defaultValue: row.dflt_value ?? null,
+      generated: Number(row.hidden ?? 0) !== 0,
+      enumValues: enumValues ? [...enumValues] : undefined,
+    };
+  });
+  const primaryKeys = primaryKeysFromColumns(raw);
+  if (raw.length === 0 || primaryKeys.length === 0 || raw.some((column) => column.generated)) {
+    throw new SpreadsheetError(SPREADSHEET_ERROR.UNKNOWN_TABLE);
+  }
+
+  const ctx: SpreadsheetWriteTableContext = {
+    def,
+    columns: raw,
+    columnNames: raw.map((column) => column.name),
+    primaryKeys,
+    quotedTable: quoteIdent(def.table),
+  };
+  const frozenFks = Object.freeze(foreignKeys);
+  writeContextCache.set(def.table, { ctx, foreignKeys: frozenFks, cachedAt: now });
+  return { ctx, foreignKeys: frozenFks, fromCache: false };
+}
+
 export async function resolveSpreadsheetWriteTableContext(
   db: D1Database,
   table: string,
@@ -255,36 +327,150 @@ export async function resolveSpreadsheetWriteTableContext(
   } catch {
     throw new Error("spreadsheet_catalog_read_failed");
   }
-  const { rows, foreignKeys } = catalog;
-  const enumCache = SPREADSHEET_COLUMN_ENUMS;
-  const raw: (AdminSpreadsheetColumnMeta & { pk: number })[] = rows.map((row) => {
-    const enumValues = enumCache[`${def.table}.${row.name}`];
-    return {
-      name: row.name,
-      type: row.type ?? "TEXT",
-      notNull: Boolean(row.not_null),
-      pk: Number(row.pk ?? 0),
-      editable: isSpreadsheetColumnEditable(def, row.name),
-      defaultValue: row.dflt_value ?? null,
-      generated: Number(row.hidden ?? 0) !== 0,
-      enumValues: enumValues ? [...enumValues] : undefined,
-    };
-  });
-  const primaryKeys = primaryKeysFromColumns(raw);
-  if (raw.length === 0 || primaryKeys.length === 0 || raw.some((column) => column.generated)) {
-    throw new SpreadsheetError(SPREADSHEET_ERROR.UNKNOWN_TABLE);
+  return buildSpreadsheetWriteContextFromCatalog(def, catalog, now);
+}
+
+async function resolveSoftwareCatalogWriteContextWithSnapshot(
+  db: D1Database,
+  body: ReturnType<typeof parseSpreadsheetCrudBody>,
+  now = Date.now(),
+): Promise<{
+  ctx: SpreadsheetWriteTableContext;
+  foreignKeys: readonly SpreadsheetForeignKey[];
+  before: Record<string, unknown>;
+} | null> {
+  if (body.table.trim() !== "software_catalog" ||
+      (body.method !== "PATCH" && body.method !== "DELETE")) return null;
+
+  // Keep this optimization deliberately narrower than the general CRUD
+  // parser: these are the existing valid software_catalog PATCH/DELETE shapes.
+  // Other columns, empty/null values, composite keys and unusual schemas use
+  // the original catalog -> validation -> before-image path.
+  if (body.method === "PATCH" &&
+      (body.column !== "name" || typeof body.value !== "string" ||
+       body.value.length === 0 || body.value.includes("\0"))) return null;
+  const primaryKey = body.primaryKey as unknown as Record<string, unknown>;
+  if (!primaryKey || typeof primaryKey !== "object" || Array.isArray(primaryKey) ||
+      Object.keys(primaryKey).length !== 1 || !Object.hasOwn(primaryKey, "id")) return null;
+  const id = primaryKey.id;
+  if (typeof id !== "string" || id.trim() === "" || id.includes("\0")) return null;
+
+  const def = buildSpreadsheetTableDefs(["software_catalog"], SPREADSHEET_SCHEMA_TABLES)[0];
+  if (!def) return null;
+  const cached = writeContextCache.get(def.table);
+  if (cached && now - cached.cachedAt < WRITE_CACHE_TTL_MS) return null;
+
+  let receipt: { success?: boolean; results?: unknown[] };
+  try {
+    receipt = await db.prepare(SOFTWARE_CATALOG_SNAPSHOT_SQL)
+      .bind(def.table, def.table, def.table, def.table, id).all<unknown>();
+  } catch {
+    // This is the catalog boundary in the legacy ordering. Do not retry a
+    // failed read; retrying would exceed the request-wide pre-read budget.
+    throw new Error("spreadsheet_catalog_read_failed");
+  }
+  if (!receipt || receipt.success !== true || !Array.isArray(receipt.results)) {
+    throw new Error("spreadsheet_catalog_read_failed");
+  }
+  const receiptRows = receipt.results;
+  if (receiptRows.length === 0) throw new SpreadsheetError(SPREADSHEET_ERROR.UNKNOWN_TABLE);
+
+  const aliases = {
+    cid: SOFTWARE_CATALOG_SNAPSHOT_PREFIX + "cid",
+    name: SOFTWARE_CATALOG_SNAPSHOT_PREFIX + "name",
+    type: SOFTWARE_CATALOG_SNAPSHOT_PREFIX + "type",
+    notNull: SOFTWARE_CATALOG_SNAPSHOT_PREFIX + "not_null",
+    pk: SOFTWARE_CATALOG_SNAPSHOT_PREFIX + "pk",
+    defaultValue: SOFTWARE_CATALOG_SNAPSHOT_PREFIX + "dflt_value",
+    hidden: SOFTWARE_CATALOG_SNAPSHOT_PREFIX + "hidden",
+    foreignKeys: SOFTWARE_CATALOG_SNAPSHOT_PREFIX + "foreign_keys_json",
+    primaryKeys: SOFTWARE_CATALOG_SNAPSHOT_PREFIX + "primary_keys_json",
+    snapshotCount: SOFTWARE_CATALOG_SNAPSHOT_PREFIX + "snapshot_count",
+  };
+  const first = receiptRows[0];
+  if (!first || typeof first !== "object" || Array.isArray(first)) {
+    throw new Error("spreadsheet_catalog_read_failed");
+  }
+  const firstRow = first as Record<string, unknown>;
+  const snapshotCount = firstRow[aliases.snapshotCount];
+  if (!Number.isSafeInteger(snapshotCount) || (snapshotCount as number) < 0 ||
+      (snapshotCount as number) > 2) throw new Error("invalid_snapshot");
+  for (const candidate of receiptRows) {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+      throw new Error("spreadsheet_catalog_read_failed");
+    }
+    const row = candidate as Record<string, unknown>;
+    if (!Object.values(aliases).every(alias => Object.hasOwn(row, alias))) {
+      throw new Error("spreadsheet_catalog_read_failed");
+    }
+    if (row[aliases.snapshotCount] !== snapshotCount) throw new Error("invalid_snapshot");
+  }
+  if ((snapshotCount as number) > 1) throw new Error("invalid_snapshot");
+  if (receiptRows.length > SOFTWARE_CATALOG_SNAPSHOT_MAX_COLUMNS) {
+    throw new Error("spreadsheet_catalog_read_failed");
   }
 
-  const ctx: SpreadsheetWriteTableContext = {
-    def,
-    columns: raw,
-    columnNames: raw.map((column) => column.name),
-    primaryKeys,
-    quotedTable: quoteIdent(def.table),
-  };
-  const frozenFks = Object.freeze(foreignKeys);
-  writeContextCache.set(def.table, { ctx, foreignKeys: frozenFks, cachedAt: now });
-  return { ctx, foreignKeys: frozenFks, fromCache: false };
+  const catalogRows: WriteColumnRow[] = [];
+  let previousCid = -1;
+  for (const candidate of receiptRows) {
+    const row = candidate as Record<string, unknown>;
+    const cid = row[aliases.cid];
+    if (!Number.isSafeInteger(cid) || (cid as number) <= previousCid) {
+      throw new Error("spreadsheet_catalog_read_failed");
+    }
+    previousCid = cid as number;
+    catalogRows.push({
+      name: row[aliases.name] as string,
+      type: row[aliases.type] as string | null,
+      not_null: row[aliases.notNull] as number,
+      pk: row[aliases.pk] as number | null,
+      dflt_value: row[aliases.defaultValue] as string | null,
+      hidden: row[aliases.hidden] as number | null,
+      foreign_keys_json: row[aliases.foreignKeys] as string,
+      primary_keys_json: row[aliases.primaryKeys] as string,
+    });
+  }
+
+  let catalog: ReturnType<typeof snapshotSpreadsheetWriteCatalog>;
+  try {
+    catalog = snapshotSpreadsheetWriteCatalog(catalogRows);
+  } catch {
+    throw new Error("spreadsheet_catalog_read_failed");
+  }
+  const resolved = buildSpreadsheetWriteContextFromCatalog(def, catalog, now);
+  const { ctx, foreignKeys } = resolved;
+  if (ctx.def.mode !== "editable" ||
+      ctx.primaryKeys.length !== 1 || ctx.primaryKeys[0] !== "id" ||
+      foreignKeys.length !== 0 ||
+      ctx.columns.some(column => column.name.startsWith("__mig0638_"))) return null;
+  if (receiptRows.length !== catalog.rows.length) throw new Error("invalid_snapshot");
+  if ((snapshotCount as number) === 0) throw new Error("row_not_found");
+
+  let beforeValues: Record<string, unknown> | null = null;
+  for (const candidate of receiptRows) {
+    const row = candidate as Record<string, unknown>;
+    const cells: Array<[string, string | number | null]> = [];
+    for (const column of ctx.columns) {
+      if (!Object.hasOwn(row, column.name)) throw new Error("invalid_snapshot");
+      const value = row[column.name];
+      if (value !== null && typeof value !== "string" && typeof value !== "number") {
+        throw new Error("invalid_snapshot");
+      }
+      if (typeof value === "number" && !Number.isFinite(value)) {
+        throw new Error("invalid_snapshot");
+      }
+      cells.push([column.name, value]);
+    }
+    const candidateSnapshot = Object.freeze(Object.fromEntries(cells));
+    if (beforeValues === null) beforeValues = candidateSnapshot;
+    else if (ctx.columns.some(column =>
+      !Object.is(beforeValues?.[column.name], candidateSnapshot[column.name]))) {
+      throw new Error("invalid_snapshot");
+    }
+  }
+  if (!beforeValues) throw new Error("invalid_snapshot");
+  const before = snapshotSpreadsheetRawRow(ctx, { id }, beforeValues);
+  return { ctx, foreignKeys, before };
 }
 
 function spreadsheetOriginOptions(c: Context<AppEnv>) {
@@ -1408,7 +1594,8 @@ async function handleCrudWrite(
     // Track exact handler D1 pre-reads in addition to the shared middleware.
     const readCounter = { reads: 0 };
     const countedDb = countingRawDb(rawDb, readCounter);
-    const { ctx, foreignKeys } = await resolveSpreadsheetWriteTableContext(
+    const catalogSnapshot = await resolveSoftwareCatalogWriteContextWithSnapshot(countedDb, crudBody);
+    const { ctx, foreignKeys } = catalogSnapshot ?? await resolveSpreadsheetWriteTableContext(
       countedDb,
       crudBody.table,
     );
@@ -1417,7 +1604,13 @@ async function handleCrudWrite(
     let eventIdsByVideo: Map<string, string[]>;
     let videoReads = 0;
 
-    if (memberMutation && (crudBody.method === "PATCH" || crudBody.method === "DELETE")) {
+    if (catalogSnapshot) {
+      const prepared = prepareSpreadsheetGuardedCrudMutation(ctx, crudBody, user.id);
+      plan = buildSpreadsheetGuardedCrudPlanFromSnapshot(
+        ctx, prepared, catalogSnapshot.before, user.id,
+      );
+      eventIdsByVideo = new Map();
+    } else if (memberMutation && (crudBody.method === "PATCH" || crudBody.method === "DELETE")) {
       const prepared = prepareSpreadsheetGuardedCrudMutation(ctx, crudBody, user.id);
       const snapshotLookup = buildSpreadsheetMemberSnapshotFkReleaseLookup(ctx, foreignKeys, prepared);
       if (snapshotLookup) {

@@ -1672,7 +1672,7 @@ if (runUnderRootTsx(import.meta.url)) {
       const expected = ["video:" + video, "users_index:global", ...(linked ? ["event_release:a-open"] : [])];
       assertQueueAdvanced(before, expected);
     }
-    async function measure(label, method, path, payload, { cold, reads, writes = 0, batches = 1 }) {
+    async function measure(label, method, path, payload, { cold, reads, writes = 0, batches = 1, coldReadExtra = 1 }) {
       if (cold) resetAllCaches();
       const before = { ...honoD1.stats };
       // maxBinds is a high-water mark, not a counter: reset it per request.
@@ -1690,19 +1690,19 @@ if (runUnderRootTsx(import.meta.url)) {
       t.diagnostic("S3 characterization " + JSON.stringify(report));
       assert.equal(response.status, 200, label + " " + response.text);
       assert.match(response.headers.get("cache-control"), /private.*no-store/, label);
-      assert.equal(actual.reads, reads + Number(cold), label + " pre-reads");
+      assert.equal(actual.reads, reads + (cold ? coldReadExtra : 0), label + " pre-reads");
       assert.equal(actual.writes, writes, label + " standalone writes");
       assert.equal(actual.batches, batches, label + " batches");
       assert.ok(actual.maxBinds > 0 && actual.maxBinds <= 100, label + " binds");
       assert.ok(actual.statements >= actual.reads + actual.writes + actual.batches, label);
       return response.body;
     }
-    async function crud(label, method, payload, cold, reads, check) {
+    async function crud(label, method, payload, cold, reads, check, coldReadExtra = 1) {
       const beforeAudit = allAudits(honoSqlite).length;
       const beforeNonces = nonces();
       const beforeQueue = queueSnapshot();
       const beforeActive = activeQueue();
-      const body = await measure(label, method, "/data", payload, { cold, reads });
+      const body = await measure(label, method, "/data", payload, { cold, reads, coldReadExtra });
       contracts.AdminSpreadsheetMutationResponseSchema.parse(body);
       const added = allAudits(honoSqlite).slice(beforeAudit);
       assert.equal(added.length, 1, label);
@@ -1795,21 +1795,23 @@ if (runUnderRootTsx(import.meta.url)) {
       }
       for (const cold of [true, false]) {
         const id = cold ? "s3-cold" : "s3-warm";
+        // Cold misses combine live catalog metadata and the complete before-image in one bounded read.
         await crud("catalog PATCH " + id, "PATCH", { table: "software_catalog", primaryKey: { id }, column: "name", value: id + "-updated" }, cold, 4,
           (body, queue) => {
             assert.equal(body.pendingPublicReflection, false);
             assert.equal(tableRows("software_catalog").find(row => row.id === id).name, id + "-updated");
             assert.deepEqual(queueSnapshot(), queue);
-          });
+          }, 0);
       }
       for (const cold of [true, false]) {
         const id = cold ? "s3-cold" : "s3-warm";
+        // The cold catalog+snapshot CTE is also used for DELETE; warm cache still costs one before-image read.
         await crud("catalog DELETE " + id, "DELETE", { table: "software_catalog", primaryKey: { id } }, cold, 4,
           (body, queue) => {
             assert.equal(body.pendingPublicReflection, false);
             assert.ok(!tableRows("software_catalog").some(row => row.id === id));
             assert.deepEqual(queueSnapshot(), queue);
-          });
+          }, 0);
       }
 
       async function importPair(label, input, cold, reads, counts, check) {
