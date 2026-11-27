@@ -18,7 +18,7 @@ import type { AuditLogSettings } from "@flamenode/server-core/audit/types";
 import { MAX_SINGLE_ROW_LIMIT } from "../lib/limits.ts";
 import { writeGuardDenyResponse } from "./writeOrigin.ts";
 
-type CostGuardRow = AuditSettingsRow & {
+export type CostGuardRow = AuditSettingsRow & {
   operation_mode: string | null;
   disabled_features_json: string | null;
   cost_guard_exception_until: number | null;
@@ -32,37 +32,70 @@ export type CostGuardDenyReason = "maintenance_mode" | "cost_guard_blocked";
  * settings (ZERO_1102 S3: at most 3 D1 pre-reads). auditSettings is the
  * mapAuditSettings result of the same row (CURRENT reads the same row twice).
  */
+export type CostGuardSnapshot = {
+  row: CostGuardRow | null;
+  /** True only when the joined read and the source-specific fallback both failed. */
+  unavailable?: boolean;
+};
+
+/** Read the canonical default row; used only on the joined-read fallback path. */
+export async function loadCostGuardSettingsRow(
+  db: D1Database,
+): Promise<CostGuardRow | null> {
+  return db
+    .prepare(
+      `SELECT operation_mode, disabled_features_json,
+              cost_guard_exception_until, cost_guard_exception_features_json,
+              audit_normal_retention_days, audit_restorable_retention_days,
+              audit_long_retention_days, audit_max_payload_bytes, audit_compact_after_days
+       FROM system_settings WHERE id = ? LIMIT ${MAX_SINGLE_ROW_LIMIT}`,
+    )
+    .bind("default")
+    .first<CostGuardRow>();
+}
+
+export function evaluateCostGuardFromRow(
+  row: CostGuardRow | null,
+  feature: WriteFeatureKey,
+  now: number = Math.floor(Date.now() / 1000),
+): { denied: CostGuardDenyReason | null; auditSettings?: AuditLogSettings } {
+  if (!row) return { denied: "maintenance_mode" };
+  const decision = evaluateCostGuardCore({
+    feature,
+    operationMode: row.operation_mode,
+    disabledFeaturesJson: row.disabled_features_json,
+    exceptionUntil: row.cost_guard_exception_until,
+    exceptionFeaturesJson: row.cost_guard_exception_features_json,
+    now,
+  });
+  if (decision.blocked) {
+    return {
+      denied: decision.reason === "mode" ? "maintenance_mode" : "cost_guard_blocked",
+    };
+  }
+  return { denied: null, auditSettings: mapAuditSettings(row) };
+}
+
+export function evaluateCostGuardSnapshot(
+  snapshot: CostGuardSnapshot,
+  feature: WriteFeatureKey,
+  now: number = Math.floor(Date.now() / 1000),
+): { denied: CostGuardDenyReason | null; auditSettings?: AuditLogSettings } {
+  if (snapshot.unavailable) return { denied: "cost_guard_blocked" };
+  return evaluateCostGuardFromRow(snapshot.row, feature, now);
+}
+
+/**
+ * Existing standalone adapter. Routes outside the shared write guard keep
+ * the same one-read behavior and fixed-code provider failure mapping.
+ */
 export async function evaluateCostGuardWithSettings(
   db: D1Database,
   feature: WriteFeatureKey,
   now: number = Math.floor(Date.now() / 1000),
 ): Promise<{ denied: CostGuardDenyReason | null; auditSettings?: AuditLogSettings }> {
   try {
-    const row = await db
-      .prepare(
-        `SELECT operation_mode, disabled_features_json,
-                cost_guard_exception_until, cost_guard_exception_features_json,
-                audit_normal_retention_days, audit_restorable_retention_days,
-                audit_long_retention_days, audit_max_payload_bytes, audit_compact_after_days
-         FROM system_settings WHERE id = ? LIMIT ${MAX_SINGLE_ROW_LIMIT}`,
-      )
-      .bind("default")
-      .first<CostGuardRow>();
-    if (!row) return { denied: "maintenance_mode" };
-    const decision = evaluateCostGuardCore({
-      feature,
-      operationMode: row.operation_mode,
-      disabledFeaturesJson: row.disabled_features_json,
-      exceptionUntil: row.cost_guard_exception_until,
-      exceptionFeaturesJson: row.cost_guard_exception_features_json,
-      now,
-    });
-    if (decision.blocked) {
-      return {
-        denied: decision.reason === "mode" ? "maintenance_mode" : "cost_guard_blocked",
-      };
-    }
-    return { denied: null, auditSettings: mapAuditSettings(row) };
+    return evaluateCostGuardFromRow(await loadCostGuardSettingsRow(db), feature, now);
   } catch {
     return { denied: "cost_guard_blocked" };
   }
@@ -95,9 +128,12 @@ export function costGuardMiddleware(feature: WriteFeatureKey) {
       return writeGuardDenyResponse(c, "cost_guard_blocked", 503);
     }
     // writeGuardMiddleware already returned 503 db_unavailable without a DB.
-    const result = db
-      ? await evaluateCostGuardWithSettings(db, feature)
-      : { denied: "cost_guard_blocked" as const };
+    const snapshot = c.get("costGuardSnapshot") as CostGuardSnapshot | undefined;
+    const result = snapshot
+      ? evaluateCostGuardSnapshot(snapshot, feature)
+      : db
+        ? await evaluateCostGuardWithSettings(db, feature)
+        : { denied: "cost_guard_blocked" as const };
     if (result.denied) {
       return writeGuardDenyResponse(c, result.denied, 503);
     }
