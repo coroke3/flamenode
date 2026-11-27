@@ -191,3 +191,51 @@ test("RH-002 U02 CURRENT apply result bridge points to canonical shared implemen
   const current = await readFile(new URL("../../../src/lib/import/legacy/apply.ts", import.meta.url), "utf8");
   assert.match(current, /export \{ legacyApplyResultFromProgress \} from "@flamenode\/server-core\/legacyImport\/applyResult"/);
 });
+
+test("RH-002 U02 security: D1 provider SQL and params are never copied into apply response", async () => {
+  const { args, calls } = harness();
+  const secret = "PRIVATE_SQL_PARAMETER_9340";
+  args.applyStep = async () => {
+    calls.push("D1");
+    throw new Error("Failed query: SELECT secret FROM user; params: " + secret);
+  };
+  const response = await runLegacyImportApplyPipeline(args);
+  assert.equal(response.status, 409);
+  assert.deepEqual(calls, ["R2-claim", "D1", "R2-release"]);
+  assert.equal(response.body.requires_repreview, true);
+  assert.equal(response.body.retryable, false);
+  assert.equal(JSON.stringify(response.body).includes(secret), false);
+  assert.match(response.body.message, /インポートを確定できませんでした/);
+});
+
+test("RH-002 U02 security: classifier throws on D1 error without reflecting hostile getter", async () => {
+  const { args, calls } = harness();
+  args.applyStep = async () => {
+    calls.push("D1");
+    throw Object.defineProperty({}, "message", {
+      get() { throw new Error("PRIVATE_GETTER_VALUE"); },
+    });
+  };
+  args.isTransientApplyFailure = () => { throw new Error("classifier failure"); };
+  const response = await runLegacyImportApplyPipeline(args);
+  assert.equal(response.status, 409);
+  assert.deepEqual(calls, ["R2-claim", "D1", "R2-release"]);
+  assert.equal(response.body.retryable, false);
+  assert.equal(JSON.stringify(response.body).includes("PRIVATE_GETTER_VALUE"), false);
+});
+
+test("RH-002 U02 security: throwing classifier after committed D1 retains recovery metadata", async () => {
+  const { args, calls, claim } = harness();
+  claim.advance = async () => { calls.push("R2-advance"); throw new Error("R2 failure"); };
+  args.isTransientApplyFailure = () => { throw new Error("untrusted classifier"); };
+  const response = await runLegacyImportApplyPipeline(args);
+  assert.equal(response.status, 409);
+  assert.deepEqual(calls, ["R2-claim", "D1", "R2-advance", "R2-release"]);
+  assert.equal(response.body.kind, "committed_progress_pending");
+  assert.equal(response.body.committed, true);
+  assert.equal(response.body.requires_repreview, false);
+  assert.equal(response.body.retryable, true);
+  assert.equal(response.body.plan_hash, "hash");
+  assert.equal(response.body.attempt, 3);
+  assert.equal(response.body.progress.index, 1);
+});

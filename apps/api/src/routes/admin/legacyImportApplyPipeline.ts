@@ -116,18 +116,25 @@ export async function runLegacyImportApplyPipeline<Progress extends LegacyImport
     return success(stepOutcome.step.progress, stepOutcome.step.complete, stepOutcome.expiresAt);
   }
   return legacyImportCommittedProgressPending({
-    retryable: args.isTransientApplyFailure(stepOutcome.cause),
+    retryable: classifyTransient(stepOutcome.cause),
     planHash: claim.planHash,
     attempt: claim.attempt,
     progress: progressSummary(stepOutcome.step.progress),
     result: result(stepOutcome.step.progress, stepOutcome.step.complete),
   });
 
+  // Never allow a throwing provider-classifier to discard a committed D1 receipt.
+  // Non-transient failures remain generic; raw SQL/params are never HTTP text.
+  function classifyTransient(cause: unknown): boolean {
+    try { return args.isTransientApplyFailure(cause) === true; }
+    catch { return false; }
+  }
+
   function applyFailure(cause: unknown): { status: 409 | 503; body: Record<string, unknown> } {
-    const retryable = args.isTransientApplyFailure(cause);
+    const retryable = classifyTransient(cause);
     const message = retryable
       ? "CloudflareまたはD1/R2が一時的に応答できませんでした。"
-      : cause instanceof Error ? cause.message : "インポートを確定できませんでした。";
+      : "インポートを確定できませんでした。";
     return {
       status: retryable ? 503 : 409,
       body: {
