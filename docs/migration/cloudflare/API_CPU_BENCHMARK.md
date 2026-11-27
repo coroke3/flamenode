@@ -440,3 +440,60 @@ The Wrangler diagnostic was rejected by automatic approval review because it cou
 ### Remaining acceptance
 
 Keep Draft / IN_PROGRESS. Run all current 153 mounted methods plus session/BASELINE (155 scenarios), with at least 50 valid samples for every required kind, at least 10 discarded warmups and verified first-fetch cold provenance. Require strict warm BASELINE max + resolution <4ms; at >=4ms STOP on that host, without selecting retries/hosts to obtain a pass. Record fixed source SHA, raw distributions, resolution and the actual CPU source, including native/input/replay overhead described above. Complete D-12's 6,000-slot and T17's 500-video x 100-member verdicts, the existing owner-lane Auth.js coverage and separately authorized official nonproduction Worker/tail cpuTime evidence. Returned rows remain a proxy, not billed rows_read. No whole-PR merge or performance PASS follows from these fidelity results.
+
+## MIG-0639: explicit event-playlist harness inputs (2026-11-27)
+
+Source `2b1bf792d70ec2a79b5ec71e0b2dbb3697c35f80` follows the [bounded #456 work order](https://github.com/coroke3/flamenode/pull/456#issuecomment-7221131249) and integrates main `1cdf95dca594282d922cfd0bd98b2f703427b09a`. This adds local harness inputs and fidelity checks; no runtime API or Auth.js implementation changes. The default inventory remains **153 mounted methods plus session and BASELINE (155 scenarios)**, with the original video-only RH-031 request unchanged.
+
+`RH-031-PLAYLIST` is an explicit diagnostic variant selected by `--only RH-031-PLAYLIST`; it is not a duplicate mounted-method inventory entry. Plan inspection requires no runtime measurement:
+
+```bash
+node scripts/benchmark-api-cpu.mjs --dry-run --only RH-031-PLAYLIST
+```
+
+Programmatic diagnostics use `buildScenarios(plan, { includeEventPlaylist: true })`, select this ID, apply `prepareKind[kind].r2Objects`, and execute the kind's `setup` before its request. The query is `/api/videos/bench-playlist-video/viewer-overlay?playlist=bench-playlist-event`. Isolated video/event fixtures supply a matching public event label and a synthetic signed-in viewer; the manifest fences `bp-v1` while preserving the current video. Cold preparation now reapplies each selected scenario's own normal fixture before recording its request, including the shared visibility-manifest key.
+
+| Kind | Raw canonical playlist rows | Expected visible IDs | Purpose |
+| --- | --- | --- | --- |
+| normal | 3 | current video and `bp-v2` | Check the individual fence while retaining a nonempty playlist |
+| limit | 500 | 499 ordered survivors | Exercise the canonical item limit with short valid strings and a response within 64 KiB |
+| invalid | 501 | none, generic playlist label | Require rejection of the original oversized artifact before filtering its fenced row |
+| cold | normal fixture in a fresh process | same as normal | Preserve existing first-fetch provenance requirements |
+
+Each variant spec explicitly selects `visibilityGuardMode: "enforce"`. `benchmarkRequestHeaders()` validates `off|observe|enforce` and transports it in the reserved local `x-bench-visibility-guard-mode` header; `benchmarkRequestEnv()` validates the received value and clones the environment for that request. Unspecified requests retain the existing environment. Invalid modes fail the benchmark, and success or failure does not change the next request's mode. Node recording and generated simulator/replay dispatch use the same helper; cold mode selection needs no preliminary application fetch.
+
+R2 `head()` records and replays its own strict `r2.head` key/options identity, returning detached `{size, etag}` metadata or `null`, without a GET/body operation. GET and HEAD remain distinct transcript operations; wrong keys, typed options, order, exhausted/trailing entries and caught mismatches remain invalid. For the text objects installed by `setR2`, HEAD size matches the GET object's UTF-8 byte size and the fixed fixture ETag. The existing binary `put()` adapter stores a base64 representation and is unchanged; this unit does not establish general R2 upload/body/conditional-request conformance or actual R2 service cost. A synthetic ordered GET-manifest / GET-playlist / HEAD-manifest probe preserves stable, changed and missing final ETags for a fail-closed consumer. It is a harness transport regression, not an actual #723 endpoint test.
+
+The explicit spec's `expectPlaylist` carries the expected ordered IDs and label. After the response drains and the existing Node timer or workerd profiler has stopped, `playlistResponseMismatch()` verifies those values, the signed-in/non-degraded shape and the 64 KiB cap. Both recorder and measured responses must satisfy the contract; failed or missing body verification makes warm/cold samples unexpected even if HTTP status is 200. Default scenarios retain their existing recorder result shape. Request-local mode validation, environment copying and HEAD replay identity bookkeeping remain inside the generated request's measured work; no overhead is subtracted and no app-only CPU claim is made.
+
+Node v22.23.5 ran the existing benchmark suite **79/79 PASS** (71 existing cases plus eight bounded additions), including the real migrated-schema seed, metadata/null replay, sticky failures, mode isolation through throw, first-fetch mode transport, canonical 500/501 rows, body rejection and cold fixture isolation. The opt-in dry-run selects only this variant and BASELINE. These are harness/fixture tests; the separate actual-Hono diagnostic below uses a fixed temporary candidate combining this source with #719 `57860ad0e45069b4508da641cf6f6b77941782ad` and #723 `87404de199d525ecf55118f0a84b02368e132d3a`; full bounded S2 assessment also requires #705 `7cb2073b65af536e7030e6e3f31ada3947c95260`. Those runtime changes are not part of #456's source tree.
+
+Keep Draft / IN_PROGRESS. `--only` remains subject to `STOP_PARTIAL`; this variant supplies no full-run acceptance. No CPU profiling was run for this continuation. The strict warm BASELINE max + resolution <4ms gate, all 155 required scenarios, >=50 valid samples per required kind, >=10 warmups, S2 max <7ms, D1/response bounds, D-12/T17 verdicts, Auth.js coverage and separately authorized official Worker/tail evidence remain unchanged. Independent exact-source review and final-head required CI remain necessary; receipts belong on the existing PR.
+
+### Combined native playlist diagnostic (2026-11-28 JST)
+
+Publication mapping: public source `2b1bf792d70ec2a79b5ec71e0b2dbb3697c35f80` has the same complete tree `ea76c1ad2ffd3218e0a0823fedf05def131d0a95` as locally tested `f65a6b3e1f00cf1e1f556c8dccf5e44d17b62f67`. The temporary diagnostic combined commit below retains the local source in its ancestry; this establishes content equivalence without changing the recorded diagnostic ancestry.
+
+The integration coordinator ran actual Hono handlers through the generated native workerd replay wrapper on temporary combined head `27c077eb347a5b1604a87d911fd0b32d6b35394b`, tree `df1a2f81a3175d46cbc2aa83389619479ccca075`: locally tested benchmark source `f65a6b3e1f00cf1e1f556c8dccf5e44d17b62f67` plus main `1cdf95dca594282d922cfd0bd98b2f703427b09a`, public #719 `57860ad0e45069b4508da641cf6f6b77941782ad` and public #723 `87404de199d525ecf55118f0a84b02368e132d3a`. **#705 is absent from this diagnostic tree.** Node v22.23.5, workerd 1.20260730.1 and Miniflare 5.20260730.0-alpha were used. The `consumed-inputs.json` manifest identifies 343 tracked source inputs. Final `report.json` SHA-256: `8d8e19004a28c6c1017eb2cc8e62c3338ecb679c3803cbc39f2a680845ebac9a`; `native-final.log` retains the two final failures.
+
+The final nine-case report contains **7 PASS / 2 FAIL**. Here, `warm-normal` names the registration path's first application dispatch (worker fetch ordinal 2 after registration); it is not a steady-warm CPU sample. The table's fresh first-request cases use separate workers and attest fetch ordinal 1.
+
+| Diagnostic case | HTTP | Playlist items | Response bytes | Fetch ordinal | Replay complete | Result |
+| --- | --- | --- | --- | --- | --- | --- |
+| Registered first application normal (`warm-normal`) | 200 | 2 | 464 | 2 | 1 | PASS |
+| Steady limit (`warm-limit`) | 200 | 499 | 37,531 | 4 | 1 | PASS |
+| Steady invalid, raw 501 (`warm-invalid`) | 200 | 0 | 299 | 6 | 1 | PASS |
+| Unspecified mode after enforce | 200 | 3 | 535 | 8 | 1 | PASS |
+| Final manifest HEAD ETag changed | 200 | 0 | 299 | 10 | 1 | PASS |
+| Final manifest HEAD missing | 200 | 0 | 299 | 12 | 1 | PASS |
+| Fresh worker first normal | 200 | 2 | 464 | 1 | 1 | PASS |
+| Fresh worker first limit, warmed Node recording | 500 | unavailable | 21 | 1 | 0 | **FAIL** |
+| Fresh worker first invalid, warmed Node recording | 500 | unavailable | 21 | 1 | 0 | **FAIL** |
+
+Successful enforced replays preserve signed-in/non-degraded responses, D1 execution count 3 and the returned-row vector `[1,1,1]`; their strict transcripts contain four R2 GETs and one R2 HEAD. The unspecified-mode probe contains no HEAD and restores the three unfiltered items, confirming the preceding enforce override did not leak. The two fresh-worker failures report D1 count 0 and no usable playlist body; their recorded R2 operations are not evidence of successful replay. These are synthetic recorded-service operations and functional fidelity outcomes, with **no CPU profiling, actual R2 service measurement or official-tail evidence**.
+
+An earlier ETag-race attempt reused the first-application normal transcript on an already-warm worker. Its strict replay failed and the handler degraded to `authUnavailable`; that attempt remains invalid and is not included among the seven passing final cases. The final changed/missing-HEAD cases used a newly recorded steady-warm normal transcript. Native clock entries were not deleted, filtered, fabricated or reordered to obtain those passes.
+
+The remaining cold-context blocker is concrete: `apps/api/src/routes/live/operationMode.ts` stores module-level `isolateMode`; first initialization records three `Date.now()` inputs across the request, while this steady-warm path records two. `resolvePublicOperationMode()`/`remember()` therefore follow different input-operation sequences in a persistent Node recorder and a fresh worker. A new `createInprocTarget()` in the same Node process does not refresh imported application-module caches. Independent review identified this initialization mismatch as pre-existing at owner head `c205522351b72a67359bc8a246b78f1891dcaba9`; the operation-mode source blob is unchanged. Strict transcript rejection is retained.
+
+The bounded HEAD/mode/playlist source unit is complete and independently approved at prior final head `6dfa0d219857f89a53a70ffc63c54179202772f7`; this documentation amendment still requires final-head review/CI. The next #456 unit must align cold recorder application initialization with the measured fresh worker and prove matching first-request operation order, while keeping native invocation, exact identity and prior failure evidence. Do not edit/filter clock entries, relax identity, treat a new same-process DB target as a fresh app isolate, or convert the two failed cold cases into PASS. All full-run/cold, quiet BASELINE, CPU, D-12/T17, Auth.js, #705 and official-tail gates remain open. No whole-PR merge acceptance follows from this diagnostic.
