@@ -34,6 +34,7 @@ import { MAX_SINGLE_ROW_LIMIT } from "../lib/limits.ts";
 import {
   compactWriteFeatureListSql,
   COMPACT_COST_GUARD_MODE_SQL,
+  COMPACT_COST_GUARD_EXCEPTION_UNTIL_SQL,
   evaluateCostGuardSnapshot,
   loadCostGuardSettingsRow,
   type CostGuardRow,
@@ -323,7 +324,7 @@ export async function loadTosState(
          s."id" AS cost_guard_settings_id,
          ${COMPACT_COST_GUARD_MODE_SQL} AS cost_guard_operation_mode,
          ${compactWriteFeatureListSql('s."disabled_features_json"')} AS cost_guard_disabled_features_json,
-         s."cost_guard_exception_until" AS cost_guard_exception_until,
+         ${COMPACT_COST_GUARD_EXCEPTION_UNTIL_SQL} AS cost_guard_exception_until,
          ${compactWriteFeatureListSql('s."cost_guard_exception_features_json"')} AS cost_guard_exception_features_json,
          s."audit_normal_retention_days" AS cost_guard_audit_normal_retention_days,
          s."audit_restorable_retention_days" AS cost_guard_audit_restorable_retention_days,

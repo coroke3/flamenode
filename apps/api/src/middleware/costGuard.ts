@@ -58,6 +58,20 @@ export const COMPACT_COST_GUARD_MODE_SQL = `CASE
   ELSE '!'
 END`;
 
+// The domain uses exceptionUntil only in a numeric relational comparison.
+// Oversized legacy TEXT may contain padding around a JS numeric string
+// (e.g. hexadecimal); SQLite CAST would change that decision. Strip only
+// ASCII ECMAScript whitespace at the edges, and retain embedded-NUL and
+// non-TEXT values exactly. This is a lossless decision optimization, NOT
+// a universal scalar or admission-row size bound.
+export const COMPACT_COST_GUARD_EXCEPTION_UNTIL_SQL = `CASE
+  WHEN typeof(s."cost_guard_exception_until") = 'text'
+    AND length(CAST(s."cost_guard_exception_until" AS BLOB)) > 8192
+    AND instr(CAST(s."cost_guard_exception_until" AS BLOB), X'00') = 0
+  THEN trim(s."cost_guard_exception_until", char(9,10,11,12,13,32))
+  ELSE s."cost_guard_exception_until"
+END`;
+
 export type CostGuardRow = AuditSettingsRow & {
   operation_mode: string | null;
   disabled_features_json: string | null;
@@ -86,7 +100,7 @@ export async function loadCostGuardSettingsRow(
     .prepare(
       `SELECT ${COMPACT_COST_GUARD_MODE_SQL} AS operation_mode,
               ${compactWriteFeatureListSql('s."disabled_features_json"')} AS disabled_features_json,
-              cost_guard_exception_until,
+              ${COMPACT_COST_GUARD_EXCEPTION_UNTIL_SQL} AS cost_guard_exception_until,
               ${compactWriteFeatureListSql('s."cost_guard_exception_features_json"')} AS cost_guard_exception_features_json,
               audit_normal_retention_days, audit_restorable_retention_days,
               audit_long_retention_days, audit_max_payload_bytes, audit_compact_after_days

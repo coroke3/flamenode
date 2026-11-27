@@ -280,6 +280,7 @@ test("MIG-0689: joined feature-list receipts stay bounded and preserve CostGuard
   const malformed = "!" + "x".repeat(100000);
   const duplicates = JSON.stringify(Array(100).fill("reserve_slot"));
   const overflowCount = JSON.stringify(Array(101).fill("reserve_slot"));
+  const expiryPad = " \t\r\n\v\f".repeat(18000);
   const cases = [
     ["normal", null, null, null],
     ["normal", " ", null, null],
@@ -306,6 +307,10 @@ test("MIG-0689: joined feature-list receipts stay bounded and preserve CostGuard
     ["normal", null, now + 3600, JSON.stringify(WRITE_FEATURE_KEYS)],
     ["normal", null, now + 3600, '["unknown"]'],
     ["maintenance", null, now + 3600, malformed],
+    // INTEGER affinity preserves hex and malformed numeric TEXT. Do not CAST:
+    // JS compares a whitespace-padded hexadecimal expiry as its numeric value.
+    ["maintenance", malformed, expiryPad + "0xFFFFFFFF" + expiryPad, allow],
+    ["maintenance", null, expiryPad + "not-a-number" + expiryPad, allow],
   ];
   // Empty means zero bytes, even under a non-binary column collation.
   // RTRIM otherwise treats a malformed space-only JSON string as empty.
@@ -327,6 +332,13 @@ test("MIG-0689: joined feature-list receipts stay bounded and preserve CostGuard
     assert.ok(state?.cost_guard_settings);
     const expectedMode = operationMode == null || ["normal", "economy", "read_only", "static_only", "maintenance"].includes(operationMode) ? operationMode : "!";
     assert.equal(state.cost_guard_settings.operation_mode, expectedMode);
+    if (typeof exceptionUntil === "string" && exceptionUntil.startsWith(expiryPad)) {
+      const compact = state.cost_guard_settings.cost_guard_exception_until;
+      assert.equal(compact, exceptionUntil.trim());
+      assert.ok(Buffer.byteLength(compact) <= 12);
+    } else {
+      assert.equal(state.cost_guard_settings.cost_guard_exception_until, exceptionUntil);
+    }
     assert.ok(Buffer.byteLength(state.cost_guard_settings.operation_mode ?? "") <= 11);
     for (const value of [state.cost_guard_settings.disabled_features_json, state.cost_guard_settings.cost_guard_exception_features_json]) {
       assert.ok(Buffer.byteLength(value ?? "") <= maxBytes);
