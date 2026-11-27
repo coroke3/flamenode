@@ -3,10 +3,10 @@ import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { drizzle } from "drizzle-orm/d1";
 import { getTableColumns } from "drizzle-orm";
-import { planXIdAliasApproval, planXIdCanonicalApproval, planXIdInitialActiveSelection, planXIdLinkRejection } from "../src/xid/linkRequestReview.ts";
+import { planXIdAccountLinkInsert, planXIdAliasApproval, planXIdCanonicalApproval, planXIdInitialActiveSelection, planXIdLinkRejection } from "../src/xid/linkRequestReview.ts";
 import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
 import { assertChanges } from "../src/audit/mutate.ts";
-import { users, xUsers } from "@flamenode/db/schema";
+import { users, xUserAccountLinks, xUsers } from "@flamenode/db/schema";
 import { expectedRowCondition } from "../src/audit/expectedRowCondition.ts";
 
 // No D1 methods should run during planning; only the generated UPDATE is
@@ -387,6 +387,100 @@ test("SA-090 initial Active X CAS checks every user schema column and fails clos
         assert.equal(sqlite.prepare("SELECT n FROM marker").get().n, 0, label);
       }
       assert.equal(sqlite.prepare("SELECT active_x_user_id FROM user WHERE id='other'").get().active_x_user_id, null);
+    } finally { sqlite.close(); }
+  }
+});
+
+const ownerLinkRow = {
+  x_user_id: "candidate", auth_user_id: "applicant", link_role: "owner",
+  created_by_request_id: "req-1", created_at: 20, updated_at: 20,
+};
+const accountLinkPlan = (link = ownerLinkRow, actorXUserId = null) =>
+  planXIdAccountLinkInsert(db, { link, actorUserId: "reviewer", actorXUserId });
+
+test("SA-090 account link preserves exact CURRENT composite key, owner provenance and audit", () => {
+  assert.deepEqual(Object.keys(ownerLinkRow).sort(), Object.keys(getTableColumns(xUserAccountLinks)).sort());
+  for (const link of [
+    { ...ownerLinkRow },
+    { ...ownerLinkRow, x_user_id: "case_sensitive", auth_user_id: "other", created_by_request_id: "req-2", created_at: 21, updated_at: 21 },
+  ]) {
+    const before = { ...link };
+    for (const actorXUserId of [null, "reviewer-x"]) {
+      const plan = accountLinkPlan(link, actorXUserId);
+      assert.equal(plan.expectedChanges, 1);
+      assert.deepEqual(plan.statement.toSQL(), db.insert(xUserAccountLinks).values(link).toSQL());
+      assert.deepEqual(plan.audit, {
+        table_name: "x_user_account_links", target_id: `${link.x_user_id}:${link.auth_user_id}`,
+        operation: "CREATE", before: null, after: before,
+        actor_user_id: "reviewer", actor_x_user_id: actorXUserId,
+        reason: "X名義と認証ユーザーを連携", context: "x-identity-request",
+        retention_class: "long_audit",
+      });
+      assert.deepEqual(link, before);
+    }
+  }
+});
+
+test("SA-090 account link inserts a distinct pair and rolls back on duplicate or missing FK", () => {
+  const scenarios = [
+    { label: "new owner", succeeds: true },
+    { label: "same X another owner", succeeds: true, seed: ["candidate", "other", "owner", "req-2", 10, 10] },
+    { label: "same auth another X", succeeds: true, seed: ["other-x", "applicant", "manager", "req-2", 10, 10] },
+    { label: "concurrent owner", seed: ["candidate", "applicant", "owner", "req-2", 10, 10] },
+    { label: "concurrent manager", seed: ["candidate", "applicant", "manager", "req-2", 10, 10] },
+    { label: "missing X", remove: "DELETE FROM x_users WHERE id='candidate'" },
+    { label: "missing auth user", remove: "DELETE FROM user WHERE id='applicant'" },
+    { label: "missing request", remove: "DELETE FROM x_identity_requests WHERE id='req-1'" },
+  ];
+  const plan = accountLinkPlan();
+  const q = plan.statement.toSQL();
+  const check = new SQLiteSyncDialect().sqlToQuery(assertChanges(plan.expectedChanges));
+  for (const { label, seed, remove, succeeds } of scenarios) {
+    const sqlite = new DatabaseSync(":memory:");
+    try {
+      sqlite.exec(`PRAGMA foreign_keys=ON;
+        CREATE TABLE x_users (id TEXT PRIMARY KEY);
+        CREATE TABLE user (id TEXT PRIMARY KEY);
+        CREATE TABLE x_identity_requests (id TEXT PRIMARY KEY);
+        CREATE TABLE x_user_account_links (
+          x_user_id TEXT NOT NULL REFERENCES x_users(id) ON DELETE CASCADE,
+          auth_user_id TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+          link_role TEXT NOT NULL DEFAULT 'owner',
+          created_by_request_id TEXT REFERENCES x_identity_requests(id) ON DELETE SET NULL,
+          created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+          PRIMARY KEY (x_user_id, auth_user_id)
+        );
+        CREATE TABLE marker (n INTEGER NOT NULL);
+        INSERT INTO marker VALUES (0);
+        INSERT INTO x_users VALUES ('candidate'), ('other-x');
+        INSERT INTO user VALUES ('applicant'), ('other');
+        INSERT INTO x_identity_requests VALUES ('req-1'), ('req-2');`);
+      if (seed) sqlite.prepare("INSERT INTO x_user_account_links VALUES (?, ?, ?, ?, ?, ?)").run(...seed);
+      if (remove) sqlite.exec(remove);
+      const read = () => sqlite.prepare("SELECT * FROM x_user_account_links ORDER BY x_user_id, auth_user_id").all();
+      const before = read();
+      sqlite.exec("BEGIN; UPDATE marker SET n=1;");
+      if (succeeds) {
+        assert.equal(Number(sqlite.prepare(q.sql).run(...q.params).changes), 1, label);
+        assert.doesNotThrow(() => sqlite.prepare(check.sql).get(...check.params), label);
+        sqlite.exec("COMMIT");
+        const inserted = sqlite.prepare("SELECT * FROM x_user_account_links WHERE x_user_id='candidate' AND auth_user_id='applicant'").get();
+        assert.deepEqual({ ...inserted }, ownerLinkRow, label);
+        assert.equal(read().length, before.length + 1, label);
+        assert.deepEqual(read().filter(r => r.x_user_id !== "candidate" || r.auth_user_id !== "applicant"), before, label);
+        assert.equal(sqlite.prepare("SELECT n FROM marker").get().n, 1, label);
+        const committed = read();
+        sqlite.exec("BEGIN; UPDATE marker SET n=2;");
+        assert.throws(() => sqlite.prepare(q.sql).run(...q.params), undefined, "replay must not overwrite");
+        sqlite.exec("ROLLBACK");
+        assert.deepEqual(read(), committed, label);
+        assert.equal(sqlite.prepare("SELECT n FROM marker").get().n, 1, label);
+      } else {
+        assert.throws(() => sqlite.prepare(q.sql).run(...q.params), undefined, label);
+        sqlite.exec("ROLLBACK");
+        assert.deepEqual(read(), before, label);
+        assert.equal(sqlite.prepare("SELECT n FROM marker").get().n, 0, label);
+      }
     } finally { sqlite.close(); }
   }
 });

@@ -1,6 +1,6 @@
 import { and, eq, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
-import { users, xIdentityRequests, xUsers } from "@flamenode/db/schema";
+import { users, xIdentityRequests, xUserAccountLinks, xUsers } from "@flamenode/db/schema";
 import { buildXIdentityDecisionFields } from "@flamenode/domain/xid";
 import type { ServerCoreDb } from "../db.ts";
 import type { AtomicAuditMutationInput } from "../audit/mutate.ts";
@@ -233,6 +233,46 @@ export function planXIdInitialActiveSelection(
     notificationActiveX: {
       activeXId: effectiveXUserId,
       activeXName: xName ?? `@${effectiveXUserId}`,
+    },
+  };
+}
+
+/**
+ * SA-090 account-link insertion: plan the exact CURRENT owner row and audit.
+ * Hosts retain authorization, duplicate-link reads and owner/provenance
+ * construction. Never upsert: a concurrent duplicate must fail the batch,
+ * not overwrite a manager/owner role or the original request provenance.
+ */
+export function planXIdAccountLinkInsert(
+  db: ServerCoreDb,
+  input: {
+    link: typeof xUserAccountLinks.$inferSelect & {
+      link_role: "owner";
+      created_by_request_id: string;
+    };
+    actorUserId: string;
+    actorXUserId: string | null;
+  },
+): {
+  statement: BatchItem<"sqlite">;
+  expectedChanges: 1;
+  audit: AtomicAuditMutationInput["audits"][number];
+} {
+  const { link, actorUserId, actorXUserId } = input;
+  return {
+    statement: db.insert(xUserAccountLinks).values(link),
+    expectedChanges: 1,
+    audit: {
+      table_name: "x_user_account_links",
+      target_id: `${link.x_user_id}:${link.auth_user_id}`,
+      operation: "CREATE",
+      before: null,
+      after: link,
+      actor_user_id: actorUserId,
+      actor_x_user_id: actorXUserId,
+      reason: "X名義と認証ユーザーを連携",
+      context: "x-identity-request",
+      retention_class: "long_audit",
     },
   };
 }

@@ -14,7 +14,7 @@ import {
   or,
   sql,
 } from "drizzle-orm";
-import { planXIdAliasApproval, planXIdCanonicalApproval, planXIdInitialActiveSelection, planXIdLinkRejection } from "@flamenode/server-core/xid/linkRequestReview";
+import { planXIdAccountLinkInsert, planXIdAliasApproval, planXIdCanonicalApproval, planXIdInitialActiveSelection, planXIdLinkRejection } from "@flamenode/server-core/xid/linkRequestReview";
 import { canManageXIdLinkRequests } from "@/lib/auth/ownership";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import type { DB } from "@/lib/db/client";
@@ -880,20 +880,14 @@ async function approveXIdLinkRequestOnce(
         created_at: now,
         updated_at: now,
       };
-      statements.push(db.insert(xUserAccountLinks).values(link));
-      expected.push(1);
-      audits.push({
-        table_name: "x_user_account_links",
-        target_id: `${effectiveXUserId}:${requestedAuthUserId}`,
-        operation: "CREATE",
-        before: null,
-        after: link,
-        actor_user_id: operatorAuthUserId,
-        actor_x_user_id: operatorActorXUserId,
-        reason: "X名義と認証ユーザーを連携",
-        context: "x-identity-request",
-        retention_class: "long_audit",
+      const linkPlan = planXIdAccountLinkInsert(db, {
+        link,
+        actorUserId: operatorAuthUserId,
+        actorXUserId: operatorActorXUserId,
       });
+      statements.push(linkPlan.statement);
+      expected.push(linkPlan.expectedChanges);
+      audits.push(linkPlan.audit);
     }
 
     const authUser = (
