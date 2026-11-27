@@ -410,3 +410,90 @@ test("MIG-0645 U02o Hono: committed SQLite D1 audit receipt survives R2 CAS fail
     sqlite.close();
   }
 });
+
+test("MIG-0645 U02p Hono: audit receipt INSERT failure rolls back the complete SQLite D1 batch", async () => {
+  // This intentionally injected adapter is a transaction-boundary regression.
+  // It is not evidence that the production import apply step is wired.
+  const { sql } = await import("drizzle-orm");
+  const { mutateWithAudit } = await import("@flamenode/server-core/audit/mutate");
+  const { bucket, record } = previewBucket();
+  const { credential, form } = await createApplyCredential(bucket);
+  let markerInsertAttempts = 0;
+  let committedSteps = 0;
+  const { request, sqlite, stats, getD1ApplyCalls } = setup({
+    bucket,
+    applyStep: async (input) => {
+      assert.equal(input.progress.stage, "system_user");
+      assert.equal(input.actorAuthUserId, ADMIN.id);
+      assert.equal(input.previewToken, credential.previewToken);
+      assert.equal(input.planHash, credential.planHash);
+      const fingerprint = previewFingerprint(input.previewToken);
+      await mutateWithAudit(input.db, {
+        mutationStatements: [
+          input.db.run(sql.raw(
+            "INSERT INTO x_users (id, x_name, approval_status) VALUES ('legacy_x_rollback', 'Rollback X', 'imported')",
+          )),
+          input.db.run(sql.raw(
+            "INSERT INTO static_rebuild_queue (id, target_type, target_id, reason, priority, status) VALUES ('rebuild-x-rollback', 'users_index', 'global', 'legacy_import_x_users', 'low', 'pending')",
+          )),
+        ],
+        expectedMutationChanges: [1, 1],
+        audits: [
+          { table_name: "x_users_import_batch", target_id: "legacy_x_rollback",
+            operation: "CREATE", before: null, after: { ids: ["legacy_x_rollback"] },
+            actor_user_id: ADMIN.id, context: "legacy_import",
+            retention_class: "long_audit", restore_strategy: "none" },
+          { table_name: "legacy_import_steps", target_id: "hono-step:" + fingerprint,
+            operation: "SYSTEM", before: null,
+            after: { preview_fingerprint: fingerprint, plan_hash: input.planHash,
+              actor: input.actorAuthUserId, stage: "system_user", next_stage: "x_users" },
+            actor_user_id: ADMIN.id, context: "legacy_import:step",
+            retention_class: "long_audit", restore_strategy: "none" },
+        ],
+      });
+      committedSteps++;
+      return { progress: { ...input.progress, stage: "x_users", index: 0 }, complete: false };
+    },
+  });
+  try {
+    // The JS observer counts actual trigger execution even when the SQL batch
+    // rolls back. Reject only the receipt INSERT, after the earlier DML.
+    sqlite.function("observe_rejected_receipt", () => {
+      markerInsertAttempts++;
+      return 0;
+    });
+    sqlite.exec(`
+      CREATE TRIGGER reject_import_receipt
+      BEFORE INSERT ON audit_logs
+      WHEN NEW.table_name = 'legacy_import_steps'
+      BEGIN
+        SELECT observe_rejected_receipt();
+        SELECT RAISE(ABORT, 'synthetic_marker_abort');
+      END;
+    `);
+    const failed = await request(form());
+    assert.equal(failed.status, 409, JSON.stringify(await failed.clone().json()));
+    assert.equal(failed.headers.get("cache-control"), "private, no-store");
+    const body = await failed.json();
+    assert.equal(body.ok, false);
+    assert.equal(body.retryable, false);
+    assert.equal(body.requires_repreview, true);
+    assert.notEqual(body.committed, true, "rolled-back mutation must not be reported as committed");
+    assert.notEqual(body.kind, "committed_progress_pending");
+    assert.ok(!JSON.stringify(body).includes("synthetic_marker_abort"), "no provider details in HTTP");
+    assert.equal(markerInsertAttempts, 1, "fault injected at the actual receipt INSERT");
+    assert.equal(getD1ApplyCalls(), 1, "no implicit retry in the handler");
+    assert.equal(stats.batches, 1, "one attempted atomic batch");
+    assert.equal(committedSteps, 0);
+    for (const table of ["x_users", "static_rebuild_queue", "audit_logs"]) {
+      assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM "' + table + '"').get().n, 0,
+        table + " must roll back together");
+    }
+    assert.equal(record().status, "ready", "failed D1 step releases the R2 claim");
+    assert.equal(record().attempt, 1);
+    assert.equal(record().progress.stage, "system_user");
+    assert.equal(record().progress.index, 0);
+  } finally {
+    sqlite.close();
+  }
+});
