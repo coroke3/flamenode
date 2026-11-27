@@ -1,10 +1,13 @@
-import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
+import { and, eq, getTableColumns, inArray, sql, type SQL } from "drizzle-orm";
 import { eventCustomQuestions, events, slots, videos } from "@flamenode/db/schema";
 import { MAX_SLOTS_PER_VIDEO } from "@flamenode/domain/slots/limits";
 import { assertCondition } from "../audit/mutate.ts";
 import { expectedRowCondition } from "../audit/expectedRowCondition.ts";
 import {
   unionRequiredVideoFields,
+  firstMissingRequiredVideoField,
+  missingRequiredVideoFieldMessage,
+  type RequiredVideoFieldValues,
   UnslottedEventSyncError,
   type OptionalRequiredVideoField,
 } from "@flamenode/domain/video";
@@ -199,4 +202,113 @@ export function buildSlotSubmissionReceiptAssertions(receipt: SlotSubmissionRece
     `));
   }
   return assertions;
+}
+
+export type SlotSubmissionExistingVideo = typeof videos.$inferSelect;
+export type SlotSubmissionEventConfig = Pick<typeof events.$inferSelect,
+  "id" | "title" | "parts_json" | "slot_part_gap_minutes" | "required_video_fields_json">;
+
+export type SlotSubmissionVideoEventReceipt = {
+  existing: { kind: "none" } | { kind: "missing" } |
+    { kind: "found"; row: SlotSubmissionExistingVideo };
+  event: SlotSubmissionEventConfig | null;
+  youtubeDuplicate: boolean;
+};
+
+type SlotSubmissionVideoEventProjection = {
+  [K in keyof SlotSubmissionExistingVideo]: SlotSubmissionExistingVideo[K] | null;
+} & {
+  receipt_event_id: string | null;
+  receipt_event_title: string | null;
+  receipt_parts_json: string | null;
+  receipt_gap_minutes: number | null;
+  receipt_required_json: string | null;
+  receipt_youtube_duplicate: number;
+};
+
+/** SA-088 read projection candidate. Use the authorized receipt's anchor and
+ * the parsed optional YouTube ID, never trust a client-supplied video/event ID.
+ * Preserve CURRENT's separate denial stages: existing video missing before
+ * part resolution, duplicate after part resolution, event existence after
+ * stage/general/required validation. No visibility, deadline or configured
+ * slot-count filter. The caller must not surface the later fields early.
+ *
+ * One result row, three binds, canonical video columns only. This is a
+ * building block for the future combined preflight, NOT an extra allowed
+ * read in the final S3 path; raw legacy scalar bytes and CAS remain open.
+ */
+export async function readSlotSubmissionVideoEventReceipt(
+  db: Pick<ServerCoreDb, "all">,
+  anchor: Pick<SlotSubmissionReceiptRow, "event_id" | "video_id">,
+  submittedYoutubeId: string | null,
+): Promise<SlotSubmissionVideoEventReceipt> {
+  // Explicit schema-derived projection, not SELECT v.* (legacy columns may
+  // remain in a migrated database). Only static identifiers enter this SQL.
+  const videoColumns = sql.join(
+    Object.values(getTableColumns(videos)).map((column) => sql`v.${sql.identifier(column.name)}`),
+    sql`, `,
+  );
+  const rows = await db.all<SlotSubmissionVideoEventProjection>(sql`WITH submission_input AS (
+    SELECT ${anchor.event_id} AS event_id, ${anchor.video_id || null} AS video_id, ${submittedYoutubeId || null} AS youtube_id
+  )
+  SELECT ${videoColumns},
+    e.id AS receipt_event_id, e.title AS receipt_event_title,
+    e.parts_json AS receipt_parts_json, e.slot_part_gap_minutes AS receipt_gap_minutes,
+    e.required_video_fields_json AS receipt_required_json,
+    CASE WHEN input.youtube_id IS NULL THEN 0 ELSE EXISTS (
+      SELECT 1 FROM videos candidate WHERE candidate.youtube_video_id = input.youtube_id
+        AND candidate.visibility_status <> 'voided'
+        AND (v.id IS NULL OR candidate.id <> v.id)
+      LIMIT 1
+    ) END AS receipt_youtube_duplicate
+  FROM submission_input input
+  LEFT JOIN videos v ON v.id = input.video_id
+  LEFT JOIN events e ON e.id = input.event_id
+  LIMIT 1`);
+  if (rows.length !== 1) throw new Error("slot_submission_video_event_receipt_invalid");
+  const {
+    receipt_event_id, receipt_event_title, receipt_parts_json,
+    receipt_gap_minutes, receipt_required_json, receipt_youtube_duplicate,
+    ...video
+  } = rows[0];
+  if ((receipt_youtube_duplicate !== 0 && receipt_youtube_duplicate !== 1) ||
+      (video.id !== null && video.id !== (anchor.video_id || null)) ||
+      (receipt_event_id !== null && (receipt_event_id !== anchor.event_id || typeof receipt_event_title !== "string"))) {
+    throw new Error("slot_submission_video_event_receipt_invalid");
+  }
+  return {
+    existing: anchor.video_id
+      ? video.id === null ? { kind: "missing" } : { kind: "found", row: video as SlotSubmissionExistingVideo }
+      : { kind: "none" },
+    event: receipt_event_id === null ? null : {
+      id: receipt_event_id,
+      title: receipt_event_title!,
+      parts_json: receipt_parts_json,
+      slot_part_gap_minutes: receipt_gap_minutes,
+      required_video_fields_json: receipt_required_json,
+    },
+    youtubeDuplicate: receipt_youtube_duplicate === 1,
+  };
+}
+
+/** SA-088 required-field validation on the COMPLETE resolved event policy
+ * union. Called only after stage and general answers. The canonical part
+ * (not the form's part), first raw icon_mode entry and persisted icon match
+ * CURRENT. No implicit fallback to an old YouTube URL/profile/other fields.
+ * Do not call with just the anchor event when other events remain linked.
+ */
+export function validateSlotSubmissionRequiredFields(
+  requiredPolicyJson: readonly (string | null | undefined)[],
+  values: Omit<RequiredVideoFieldValues, "existing_icon_url">,
+  formData: FormData,
+  slotPart: string | null,
+  existingIconUrl: string | null,
+): { ok: true } | { ok: false; message: string } {
+  const missing = firstMissingRequiredVideoField(unionRequiredVideoFields(requiredPolicyJson), {
+    ...values,
+    part: slotPart,
+    icon_mode: String(formData.get("icon_mode") ?? values.icon_mode ?? ""),
+    existing_icon_url: existingIconUrl,
+  });
+  return missing ? { ok: false, message: missingRequiredVideoFieldMessage(missing) } : { ok: true };
 }

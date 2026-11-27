@@ -1278,6 +1278,92 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+  test("U03a SA-088: one video/event receipt preserves CURRENT independent read results", async () => {
+    const { readSlotSubmissionVideoEventReceipt } = await import("@flamenode/server-core/video/requiredVideoFields");
+    const { checkYoutubeVideoDuplicate } = await import("@flamenode/server-core/video/youtubeDuplicate");
+    const { videos, events } = await import("@flamenode/db/schema");
+    const { eq } = await import("drizzle-orm");
+    const w = seedWorld();
+    try {
+      w.sqlite.prepare("UPDATE events SET parts_json=?, slot_part_gap_minutes=?, required_video_fields_json=?, visibility_status='private', end_time=1 WHERE id='ev_closed'")
+        .run('["A","B"]', 15, '["part","icon_url"]');
+      const add = (id, youtube, status, icon = null) => insert(w.sqlite, "videos", {
+        id, submitted_by_user_id: "u_owner", creator_x_user_id: "x_owner",
+        creator_display_name: "Owner", title: "Existing " + id,
+        visibility_status: status, creator_icon_url: icon, youtube_video_id: youtube,
+        created_at: 100, updated_at: 100,
+      });
+      add("v_slot", "abcdefghijk", "public", "https://example.invalid/icon");
+      add("v_voided", "voided_0001", "voided");
+      add("v_private", "private0001", "private");
+      add("v_no_youtube", null, "pending");
+      const before = snapshotDb(w.sqlite);
+      const db = drizzle(w.d1);
+      for (const eventId of ["ev_closed", "ev_open", "missing", "' OR 1=1 --"]) {
+        for (const videoId of [null, "", "v_slot", "v_no_youtube", "missing"]) {
+          for (const youtubeId of [null, "abcdefghijk", "voided_0001", "private0001", "missing0001"]) {
+            const video = videoId ? (await db.select().from(videos).where(eq(videos.id, videoId)).limit(1))[0] : null;
+            const event = (await db.select({
+              id: events.id, title: events.title, parts_json: events.parts_json,
+              slot_part_gap_minutes: events.slot_part_gap_minutes,
+              required_video_fields_json: events.required_video_fields_json,
+            }).from(events).where(eq(events.id, eventId)).limit(1))[0] ?? null;
+            const duplicate = youtubeId ? await checkYoutubeVideoDuplicate(db, youtubeId, video?.id) : false;
+            const reads = w.d1.stats.reads;
+            const actual = await readSlotSubmissionVideoEventReceipt(db, { event_id: eventId, video_id: videoId }, youtubeId);
+            assert.equal(w.d1.stats.reads - reads, 1);
+            assert.deepEqual(actual, {
+              existing: videoId ? video ? { kind: "found", row: video } : { kind: "missing" } : { kind: "none" },
+              event,
+              youtubeDuplicate: duplicate,
+            }, JSON.stringify([eventId, videoId, youtubeId]));
+          }
+        }
+      }
+      assert.equal(w.d1.stats.maxBinds, 3);
+      assert.equal(w.d1.stats.batches, 0);
+      assert.deepEqual(snapshotDb(w.sqlite), before);
+      assert.deepEqual(w.bucket.puts, []);
+      assert.deepEqual(w.bucket.deletes, []);
+    } finally {
+      w.sqlite.close();
+    }
+  });
+
+  test("U03a SA-088: canonical part and persisted icon drive the union of required fields", async () => {
+    const { validateSlotSubmissionRequiredFields } = await import("@flamenode/server-core/video/requiredVideoFields");
+    const { unionRequiredVideoFields, firstMissingRequiredVideoField, missingRequiredVideoFieldMessage } = await import("@flamenode/domain/video");
+    const cases = [
+      { policy: ['["part"]'], values: { part: "" }, part: "Canonical", ok: true },
+      { policy: ['["part"]'], values: { part: "Forged" }, part: null, message: "「部」は必須です。" },
+      { policy: ['["icon_url"]'], values: { icon_mode: "keep" }, icon: "persisted", ok: true },
+      { policy: ['["icon_url"]'], values: { icon_mode: "keep", icon_url: "client" }, message: "「アイコン」は必須です。" },
+      { policy: ['["icon_url"]'], values: { icon_mode: "none", icon_url: "client" }, icon: "persisted", message: "「アイコン」は必須です。" },
+      { policy: ['["icon_url"]'], values: { icon_mode: "upload" }, ok: true },
+      { policy: ['["icon_url"]'], values: { icon_mode: "none" }, modes: ["keep", "none"], icon: "persisted", ok: true },
+      { policy: ['["icon_url"]'], values: { icon_mode: "keep" }, modes: ["none", "keep"], icon: "persisted", message: "「アイコン」は必須です。" },
+      { policy: ['["part"]','["music","icon_url"]'], values: {}, message: "「アイコン」は必須です。" },
+      { policy: ['["part"]','["music"]'], values: {}, part: "A", message: "「使用楽曲」は必須です。" },
+      { policy: ['["music"]','["music","part"]'], values: { music: "Song" }, part: "A", ok: true },
+      { policy: ['["youtube_url"]'], values: { youtube_url: "" }, message: "「YouTube URL」は必須です。" },
+      { policy: ['["other_social_links"]'], values: { other_social_links: "[]" }, message: "「その他のSNSリンク」は必須です。" },
+      { policy: ['bad','{"music":true}',null], values: {}, ok: true },
+      { policy: ['["unknown",5," part "]'], values: {}, part: "A", ok: true },
+    ];
+    for (const c of cases) {
+      const form = new FormData();
+      for (const mode of c.modes ?? []) form.append("icon_mode", mode);
+      const oracleMissing = firstMissingRequiredVideoField(unionRequiredVideoFields(c.policy), {
+        ...c.values, part: c.part ?? null, icon_mode: String(form.get("icon_mode") ?? c.values.icon_mode ?? ""),
+        existing_icon_url: c.icon ?? null,
+      });
+      const oracle = oracleMissing ? { ok: false, message: missingRequiredVideoFieldMessage(oracleMissing) } : { ok: true };
+      const actual = validateSlotSubmissionRequiredFields(c.policy, c.values, form, c.part ?? null, c.icon ?? null);
+      assert.deepEqual(actual, oracle);
+      assert.deepEqual(actual, c.ok ? { ok: true } : { ok: false, message: c.message });
+    }
+  });
+
   test("U03a SA-088: CURRENT reservation group denial order and absolute cap, no writes (including preflight)", async () => {
     const { submitSlotVideo } = await import("../../../src/lib/actions/video/submitSlotVideo.ts");
     const inconsistent = "連続枠の予約者情報が不整合です。運営へ連絡してください。";
