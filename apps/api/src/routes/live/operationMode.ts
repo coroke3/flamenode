@@ -70,14 +70,20 @@ function scanOversizedKvMirror(raw: string): ParsedOperationModeKvMirror | null 
   const whitespace = (): void => {
     while (i < n && (raw[i] === " " || raw[i] === "\t" || raw[i] === "\n" || raw[i] === "\r")) i++;
   };
+  // Scan long legacy reason values with the engine's native regex search.
+  // Only quote, escape and control characters require per-character handling.
+  const stringSpecial = /["\\\u0000-\u001f]/g;
   const stringToken = (): [number, number] => {
     const start = i;
     if (raw[i++] !== '"') throw new Error("quote");
-    while (i < n) {
-      const c = raw.charCodeAt(i++);
-      if (c === 34) return [start, i];
-      if (c < 32) throw new Error("control");
-      if (c !== 92) continue;
+    stringSpecial.lastIndex = i;
+    while (true) {
+      const match = stringSpecial.exec(raw);
+      if (!match) throw new Error("unterminated string");
+      i = stringSpecial.lastIndex;
+      const c = match[0];
+      if (c === '"') return [start, i];
+      if (c !== "\\") throw new Error("control");
       if (i >= n) throw new Error("escape");
       const e = raw[i++];
       if (e === "u") {
@@ -85,8 +91,8 @@ function scanOversizedKvMirror(raw: string): ParsedOperationModeKvMirror | null 
           if (i >= n || !/[0-9a-fA-F]/.test(raw[i++])) throw new Error("unicode");
         }
       } else if (!'"\\/bfnrt'.includes(e)) throw new Error("escape");
+      stringSpecial.lastIndex = i;
     }
-    throw new Error("unterminated string");
   };
   const smallString = (token: [number, number]): string | null =>
     token[1] - token[0] <= 128 ? JSON.parse(raw.slice(token[0], token[1])) as string : null;
@@ -137,7 +143,7 @@ function scanOversizedKvMirror(raw: string): ParsedOperationModeKvMirror | null 
       const token = numberToken();
       if (rootKey === "mode") mode = null;
       if (rootKey === "updated_at") updatedAt =
-        token[1] - token[0] <= 128 ? Number(raw.slice(token[0], token[1])) : NaN;
+        Number(raw.slice(token[0], token[1]));
       return;
     }
     for (const literal of ["true", "false", "null"]) {

@@ -509,3 +509,17 @@ test("MIG-0661 T09 / #916: oversized malformed or invalid last root fields fail 
     assert.equal(d1.count, 0);
   }
 });
+
+test("MIG-0661 T09 / #916: oversized finite exponent underflow matches JSON.parse without large JSON.parse", async () => {
+  const hugeExponent = "9".repeat(150);
+  const raw = '{"mode":"maintenance","updated_at":1e-' + hugeExponent
+    + ',"reason":"' + "X".repeat(70 * 1024) + '"}';
+  assert.equal(JSON.parse(raw).updated_at, 0);
+  resetOperationModeCachesForTests();
+  const d1 = { count: 0 }, kv = { count: 0 };
+  const env = { DB: unavailableD1(d1), KV: kvResponse(raw, kv) };
+  assert.equal(await resolvePublicOperationMode(env, { allowD1: false }), "maintenance");
+  assert.deepEqual(await requestWith(env), { mode: "maintenance", reason: null });
+  assert.equal(kv.count, 1);
+  assert.equal(d1.count, 0);
+});
