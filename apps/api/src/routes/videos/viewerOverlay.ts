@@ -61,6 +61,15 @@ const UNAVAILABLE_HEADERS = {
   "Retry-After": "3",
 } as const;
 
+/** Diagnostics must not change the route's fail-closed response. */
+function logViewerOverlayProviderError(stage: "snapshot read" | "viewer read" | "db read"): void {
+  try {
+    console.error(`[video-viewer-overlay] ${stage} failed`, "provider_error");
+  } catch {
+    // Best effort only; never forward raw provider data or mask the HTTP result.
+  }
+}
+
 function parseJsonArray<T = string>(value: unknown): T[] {
   if (Array.isArray(value)) return value as T[];
   if (typeof value === "string") {
@@ -257,7 +266,7 @@ export function createVideoViewerOverlayRoutes(
       });
     } catch {
       // Raw provider exceptions may contain internal paths, SQL values or credentials.
-      console.error("[video-viewer-overlay] snapshot read failed", "provider_error");
+      logViewerOverlayProviderError("snapshot read");
       return c.json({ error: "viewer_overlay_unavailable" }, 503, UNAVAILABLE_HEADERS);
     }
 
@@ -375,7 +384,7 @@ SELECT
           .first<{ video_json: string | null; user_json: string | null }>();
       } catch {
         // Do not forward bound SQL parameters or nested provider exceptions to logs.
-        console.error("[video-viewer-overlay] viewer read failed", "provider_error");
+        logViewerOverlayProviderError("viewer read");
         return authUnavailable();
       }
       // CURRENT: a session whose user row is gone is signed out.
@@ -633,7 +642,7 @@ SELECT
       return boundedOverlayResponse(c, result);
     } catch {
       // The degraded response is intentionally stable regardless of provider detail.
-      console.error("[video-viewer-overlay] db read failed", "provider_error");
+      logViewerOverlayProviderError("db read");
       if (!degraded) return authUnavailable();
       // CURRENT: the viewer is known, the overlay read failed.
       return boundedOverlayResponse(c, {
