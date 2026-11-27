@@ -21,6 +21,7 @@ export const MODULES = [
   ["sqicon", "src/components/media/SquareIconEditor.module.css", "apps/app/src/styles/shared-social.css"],
   ["vform", "src/components/forms/VideoForm.module.css", "apps/app/src/styles/video-form.css"],
   ["vedit-overview", "src/components/video/permission/VideoEditPermissionOverview.module.css", "apps/app/src/styles/video-edit-permission-overview.css"],
+  ["empty-state", "src/components/ui/EmptyState.module.css", "apps/app/src/styles/empty-state.css"],
 ];
 
 export function portCssModule(css, prefix) {

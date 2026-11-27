@@ -591,3 +591,25 @@ test("identity, video, mode and client changes hide snapshots and stop stale rea
   assert.equal(calls.length, 11, "replacing the client also stops pagination");
   loading();
 });
+
+
+test("MIG-0717 U02b2b preserves the CURRENT neutral EmptyState structure and spacing for not_found", async (t) => {
+  const api = createVideoEditApi(async () => json({ error: "not_found" }, 404));
+  const { container } = await mountEdit(t, api);
+  const outer = container.querySelector(".fn-public-container.fn-page");
+  assert.ok(outer);
+  assert.equal(outer.style.paddingBlock, "48px 64px");
+  const panel = outer.querySelector("section.fn-empty-state.empty-state-empty.empty-state-tone-neutral");
+  assert.ok(panel);
+  assert.equal(panel.querySelector("h2.empty-state-title")?.textContent, "ページが見つかりません");
+  assert.ok(panel.querySelector(".empty-state-icon[aria-hidden]"));
+  assert.equal(panel.querySelector(".empty-state-description")?.textContent,
+    "URL を確認するか、トップページから再度お探しください。");
+  const action = panel.querySelector(".empty-state-actions a");
+  assert.ok(action);
+  assert.equal(action.getAttribute("href"), "/");
+  assert.equal(action.textContent.trim(), "トップへ戻る");
+  assert.ok(action.classList.contains("fn-btn-primary"));
+  assert.equal(panel.querySelector("h1"), null);
+  assert.equal(container.querySelector(".fn-page--video-edit"), null);
+});

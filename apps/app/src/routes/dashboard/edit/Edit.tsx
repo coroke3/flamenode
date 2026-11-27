@@ -84,12 +84,16 @@ function EditReadBoundary({ api, videoId, mode }: {
   if (state.status === "unavailable") return <AuthUnavailable />;
   if (state.status === "not_found") {
     return (
-      <div className="fn-public-container fn-page">
-        <section className="fn-empty-state">
-          <Icon name="info" size={18} aria-hidden />
-          <h1>ページが見つかりません</h1>
-          <p>URL を確認するか、トップページから再度お探しください。</p>
-          <AppLink href="/" className="fn-btn fn-btn-primary">トップへ戻る</AppLink>
+      <div className="fn-public-container fn-page" style={{ paddingBlock: "48px 64px" }}>
+        <section className="fn-empty-state empty-state-empty empty-state-tone-neutral">
+          <div className="empty-state-icon" aria-hidden>
+            <Icon name="info" size={18} aria-hidden />
+          </div>
+          <h2 className="empty-state-title">ページが見つかりません</h2>
+          <p className="empty-state-description">URL を確認するか、トップページから再度お探しください。</p>
+          <div className="empty-state-actions">
+            <AppLink href="/" className="fn-btn fn-btn-primary">トップへ戻る</AppLink>
+          </div>
         </section>
       </div>
     );

@@ -126,7 +126,7 @@ test("MIG-0701 U04 T08: every Personal route class has a CSS definition", async 
   const missing = new Set();
   for (const p of await getTsx("apps/app/src/routes/")) {
     const source = (await read(p)).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
-    for (const [, token] of source.matchAll(/(?<![\w-])((?:fn|dash|onb|settings|vcard)-[A-Za-z0-9_-]*[A-Za-z0-9_])/g)) {
+    for (const [, token] of source.matchAll(/(?<![\w-])((?:fn|dash|onb|settings|vcard|vedit-overview|empty-state)-[A-Za-z0-9_-]*[A-Za-z0-9_])/g)) {
       if (!defined.has(token) && !exceptions.has(token)) missing.add(p + ": " + token);
     }
   }
@@ -145,6 +145,23 @@ test("MIG-0714 B05: every full-form vform class has a derived CSS definition", a
   assert.ok(used.size > 0, "full form must reference the generated vform styles");
   assert.deepEqual(missing, [], "missing full-form CSS definitions");
 });
+
+test("MIG-0717 U02b2b: CURRENT EmptyState CSS is exactly derived and keeps its public global selector", async () => {
+  const entry = MODULES.find(([prefix]) => prefix === "empty-state");
+  assert.deepEqual(entry, [
+    "empty-state",
+    "src/components/ui/EmptyState.module.css",
+    "apps/app/src/styles/empty-state.css",
+  ]);
+  const [source, target] = await Promise.all([
+    read("src/components/ui/EmptyState.module.css"),
+    read("apps/app/src/styles/empty-state.css"),
+  ]);
+  assert.equal(target, portCssModule(source, "empty-state"));
+  assert.ok(target.includes('[data-fn-surface="public"] .empty-state-empty'));
+  for (const token of ["empty-state-empty","empty-state-icon","empty-state-title","empty-state-description","empty-state-actions","empty-state-tone-neutral"]) assert.ok(target.includes("." + token));
+});
+
 test("MIG-0701 U04 T07: main imports CSS in CURRENT order", async () => {
   const actual = [...(await read("apps/app/src/main.tsx")).matchAll(/^import "(.+\.css)";$/gm)].map((m) => m[1]);
   assert.deepEqual(actual, [
@@ -154,5 +171,6 @@ test("MIG-0701 U04 T07: main imports CSS in CURRENT order", async () => {
     "./styles/cost-guard-banner.css",
     "./styles/video-form.css",
     "./styles/video-edit-permission-overview.css",
+    "./styles/empty-state.css",
   ]);
 });
