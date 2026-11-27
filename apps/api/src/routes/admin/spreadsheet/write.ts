@@ -995,7 +995,7 @@ export function spreadsheetMemberForeignKeyRowFromAudit(
   audit: SpreadsheetReleaseAudit,
   foreignKeys: readonly SpreadsheetForeignKey[],
 ): Record<string, string | null> {
-  const inserted = audit.after;
+  const inserted = audit.after ?? audit.before;
   if (!inserted) throw new Error("invalid_snapshot");
   const cells: Array<[string, string | null]> = [];
   for (const foreignKey of foreignKeys) {
@@ -1030,27 +1030,29 @@ async function handleCrudWrite(
       countedDb,
       crudBody.table,
     );
-    const memberPost = crudBody.method === "POST" && crudBody.table === "video_members";
+    const memberMutation = crudBody.table === "video_members";
     const plan = await planSpreadsheetGuardedCrud(
       countedDb,
       ctx,
       crudBody,
-      memberPost ? [] : foreignKeys,
+      memberMutation ? [] : foreignKeys,
       user.id,
       SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES,
     );
     let eventIdsByVideo: Map<string, string[]>;
     let videoReads = 0;
-    if (memberPost) {
-      // The combined read is eligible only for the canonical single video_id FK.
-      // Keep the completed INSERT/audit after-image as the source of FK values.
+    if (memberMutation) {
+      // Combine the canonical member FK proof and release lookup for POST,
+      // PATCH and DELETE. UPDATE uses its complete after-image; DELETE uses
+      // the fresh complete before-image. Other FK shapes retain safe fallback.
       const fkRow = spreadsheetMemberForeignKeyRowFromAudit(plan.audit, foreignKeys);
       const combined = buildSpreadsheetMemberFkReleaseLookup(foreignKeys, [fkRow], [plan.audit]);
       if (combined) {
         const receipt = await countedDb.prepare(combined.statement).bind(...combined.binds).all<unknown>();
         eventIdsByVideo = validateSpreadsheetMemberFkReleaseLookupReceipt(combined, receipt).eventIdsByVideo;
       } else {
-        // Other FK plans retain the original FK-first preflight and release lookup.
+        // Preserve FK-first validation and release lookup for unsupported,
+        // empty or over-limit plans; no FK check is skipped on fallback.
         await validateSpreadsheetForeignKeys(
           countedDb,
           foreignKeys,
