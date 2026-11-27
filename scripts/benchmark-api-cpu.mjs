@@ -1608,6 +1608,7 @@ function counting(env) {
 async function handleRequest(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === "/__bench/ping") return new Response("ok", { headers: { "x-bench-build": BUILD_ID } });
+    if (url.pathname === "/__bench/noop" && !request.headers.has("x-bench-script")) return new Response("ok");
 
     if (url.pathname === "/__bench/burn") {
       // Calibration only: synchronous CPU burn so the harness can check the clock is real.
@@ -1878,7 +1879,7 @@ async function createWranglerTarget(plan, opts) {
     if (stop.error) throw new Error(`Profiler.stop failed: ${json(stop.error)}`);
     return {
       status: res.status, bytes: buf.byteLength,
-      d1: res.headers.has("x-bench-d1") ? Number(res.headers.get("x-bench-d1")) : null,
+      d1: res.headers.has("x-bench-d1") ? Number(res.headers.get("x-bench-d1")) : rec ? null : 0,
       d1RowsReturned: res.headers.has("x-bench-returned-rows")
         ? Number(res.headers.get("x-bench-returned-rows")) : null,
       d1PerQueryRows: (res.headers.get("x-bench-query-rows") || "")

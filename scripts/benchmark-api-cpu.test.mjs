@@ -1154,7 +1154,7 @@ test("MIG-0639: typed replay identity distinguishes SQL, bind types, methods, ba
   const cyclic = {};
   cyclic.self = cyclic;
   assert.throws(() => identity(cyclic), /cyclic/);
-  const accessor = Object.defineProperty({}, "value", { get() { throw new Error("must not execute"); } });
+  const accessor = Object.defineProperty({}, "value", { enumerable: true, get() { throw new Error("must not execute"); } });
   assert.throws(() => identity(accessor), /accessor/);
   assert.throws(() => identity(Number.NaN), /unsupported/);
   assert.throws(() => identity("x".repeat(262145)), /too large/);
@@ -1230,6 +1230,17 @@ test("MIG-0639: generated workerd replay fails closed on wrong SQL, exhausted/tr
     const missing = await invoke(missingWorker, "/probe", "missing-id");
     assert.equal(missing.status, 503);
     assert.equal(missing.headers.get("x-bench-replay-complete"), "0");
+
+    const noopWorker = await load("noop-replay", [], 'return new Response("unused");');
+    const replayNoop = await invoke(noopWorker, "/__bench/noop");
+    assert.equal(replayNoop.status, 200);
+    assert.equal(replayNoop.headers.get("x-bench-replay-complete"), "1");
+    assert.equal(replayNoop.headers.get("x-bench-d1"), "0");
+    assert.equal(replayNoop.headers.get("x-bench-returned-rows"), "0");
+    assert.equal(replayNoop.headers.get("x-bench-query-rows"), "");
+    const simNoop = await noopWorker.fetch(new Request("http://bench.local/__bench/noop"), {}, {});
+    assert.equal(simNoop.status, 200);
+    assert.equal(simNoop.headers.get("x-bench-d1"), null, "non-replay noop remains outside counting wrapper");
   } finally {
     globalThis.fetch = originalFetch;
     if (originalIdentity === undefined) delete globalThis.__flamenodeBenchIdentity;
