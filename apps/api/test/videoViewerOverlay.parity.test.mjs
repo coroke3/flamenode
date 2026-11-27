@@ -568,8 +568,8 @@ if (runUnderRootTsx(import.meta.url)) {
         const stmt = originalPrepare(sql);
         if (!sql.includes("AS video_json") || !sql.includes("AS user_json")) return stmt;
         assert.match(sql, /WITH staff_entries AS MATERIALIZED/);
-        assert.match(sql, /length\(CAST\(q\\."custom_permission_keys_json" AS BLOB\)\)/);
-        assert.match(sql, /length\(CAST\(q\\."permission_preset" AS BLOB\)\)/);
+        assert.match(sql, /length\(CAST\(q\."custom_permission_keys_json" AS BLOB\)\)/);
+        assert.match(sql, /length\(CAST\(q\."permission_preset" AS BLOB\)\)/);
         const originalBind = stmt.bind.bind(stmt);
         stmt.bind = (...params) => {
           const bound = originalBind(...params);
