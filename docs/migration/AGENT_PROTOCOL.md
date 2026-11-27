@@ -397,6 +397,7 @@ WAKE:
 
 - 基本: 独立レビュー = builderと別のagent（Claude / Codex・ChatGPT / Antigravity）または人間。
 - 上位モデルsubagent: builderより上位のモデル（Claudeでは Haiku < Sonnet < Opus。Luna / Flash 等の軽量モデルはHaiku相当）を、新しいcontextのsubagentとして起動し、PR diff・Work Order・関連するCURRENT契約（UX/FN/permission/visibility/side effect）を渡してレビューさせた場合は独立レビューとして数える。同等以下のモデルのsubagent、builder自身の見直しは数えない。builderが最上位モデル（例: Opus）の場合は、他agentまたは人間のレビューが必要。
+- セッション限定のモデル指定例外: ユーザーが当該セッションで「現在のモデルは要求される上位モデルとして十分なので進めてよい」と明示した場合に限り、そのモデルで指定上位モデルの役割を実行でき、モデル階層だけを理由に停止しない。builderとreviewerは別agentとし、subagentによるレビューはfresh context、高リスクは独立Leadの追加レビューを維持する。builder自身の承認、最終HEADの独立レビュー・必須CI・性能/受入条件・本番操作/意味変更の承認の省略は認めない。この例外は当該セッションに限り、本protocol・`IMPLEMENTATION_RUNBOOK.md`・`GIT_WORKFLOW.md`・adapterに残るモデル階層だけの停止指示に優先する。他セッションへの継続許可や軽量モデルへの一般委任ではない。
 - PR commentに `Independent review: <agent>/<model> (<separate agent | fresh-context subagent of <builder model> | human>) | Head: <40hex> | Verdict: APPROVE or CHANGES_REQUESTED` と、確認した契約・テスト・rollbackを書く。全agentが同じGitHubアカウントのためGitHub上のApproveは使わない。
 - reviewerはbranchを編集せず、CHANGES_REQUESTEDの修正はbuilderが行う。**reviewed Head以降のpushは例外なく最終Headで独立レビューと必須CIを要する。** STATUS/work-itemだけの統合commitやmain同期も免除しない。最終のレビュー・CI証跡はPR commentへ記録する（work-itemへ追記commitするとHeadが変わるため）。
 - merge: 2026-11-27 owner policy: 通常の移行PRは個別の人間承認不要。全micro-unit・受入条件・依存・rollback・最新main統合・最終HEADの必須CI成功と独立APPROVEを確認したagentがsquash mergeし、mainで確認して次のREADYへ進む。高リスクは独立した上位Lead agentの追加レビューを要求するが、既定仕様の範囲内のコード統合に人間承認は不要。非本番Phase Gateは証拠に基づく独立Leadレビューで通過可能。本番切替・本番DB/データ移行・Route/Custom Domain/DNS・Secrets・仕様/権限/可視性の意味変更は別途明示承認を維持する。通常main mergeに伴う既存Workers Builds自動実行はこの方針で許可するが、手動deployや本番切替の許可ではない。既存の個別承認待ち記録は履歴であり、本方針が優先する。 PRへ `Merge requested: integrated | Head: <40hex> | Review: <URL> | CI: <URL>` を証拠として記録し、PRが非Draft・競合なし・最新mainと整合・未解決のblocking findingなしであることを確認し、expected HEADを指定してsquash mergeする。CI/レビュー不足なら停止し、他の依存独立taskへ進む。
@@ -516,4 +517,4 @@ Next:
 7. 依存taskへは、依存PRのmergeと最新mainのstatus/lock解消を再読込するまで移らない。依存の無いtaskはREVIEW待ちの間も進めてよい。hostが反復機構を持たなければ一回で終了する。
 8. stale`IN_PROGRESS`/古いPRは自動削除しない。PRを根拠にhandoffし、claim譲渡・失敗理由・未実行チェック・次の実行者を明示する。
 
-状態機械としての契約: `READY → IN_PROGRESS → REVIEW → DONE`。例外: `IN_PROGRESS/REVIEW → BLOCKED`（復旧条件明記）。`REVIEW`は合格を意味しない。`DONE`はreview/CIと依存完了を必要とする。フェーズGateはユーザーの明示承認を別に要する。
+状態機械としての契約: `READY → IN_PROGRESS → REVIEW → DONE`。例外: `IN_PROGRESS/REVIEW → BLOCKED`（復旧条件明記）。`REVIEW`は合格を意味しない。`DONE`はreview/CIと依存完了を必要とする。非本番Phase Gateは独立Leadレビューと必須検証で通過可能。本番切替・手動本番操作・仕様/権限/可視性の意味変更は別途ユーザーの明示承認を要する。
