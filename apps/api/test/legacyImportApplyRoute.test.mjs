@@ -106,7 +106,7 @@ test("MIG-0645 U02 apply Hono: non-multipart input rejects before claim and D1",
 
 // Test the real shared preview-store CAS with an explicitly simulated D1 step.
 // This does not establish the atomic D1 mutation/step-marker/audit contract.
-function previewBucket({ failAdvanceOnce = false } = {}) {
+function previewBucket({ failAdvanceOnce = false, failCompleteOnce = false } = {}) {
   const objects = new Map();
   let version = 0;
   return {
@@ -124,6 +124,10 @@ function previewBucket({ failAdvanceOnce = false } = {}) {
         if (expected && expected !== previous?.etag) return null;
         const data = String(value);
         const next = JSON.parse(data);
+        if (failCompleteOnce && expected && next.status === "completed") {
+          failCompleteOnce = false;
+          return null;
+        }
         if (failAdvanceOnce && expected && next.status === "ready" &&
             next.progress.stage === "x_users") {
           failAdvanceOnce = false;
@@ -136,6 +140,16 @@ function previewBucket({ failAdvanceOnce = false } = {}) {
       async delete(key) { objects.delete(key); },
     },
     record: () => JSON.parse([...objects.values()][0].data),
+    // Model a previous HTTP request that committed the last D1 step while its
+    // R2 receipt is still in the "ready / complete" position. No D1 write here.
+    markProgressComplete: () => {
+      const [key, entry] = [...objects.entries()][0];
+      assert.ok(key, "create preview before marking completion");
+      const record = JSON.parse(entry.data);
+      assert.equal(record.status, "ready");
+      record.progress = { ...record.progress, stage: "complete", index: 0 };
+      objects.set(key, { ...entry, data: JSON.stringify(record) });
+    },
   };
 }
 
@@ -228,4 +242,37 @@ test("MIG-0645 U02 apply Hono: advance CAS failure reports committed pending and
   assert.equal(simulatedCommits, 1, "simulated marker replay does not simulate a second commit");
   assert.equal(record().progress.stage, "x_users");
   assert.equal(stats.batches, 0, "real audit-atomic D1 step is still not wired");
+});
+
+test("MIG-0645 U02 apply Hono: finalization CAS failure keeps committed receipt and retries without D1 replay", async () => {
+  const { bucket, record, markProgressComplete } = previewBucket({ failCompleteOnce: true });
+  const { form } = await createApplyCredential(bucket);
+  markProgressComplete();
+  const { request, stats, getD1ApplyCalls } = setup({ bucket });
+  const failed = await request(form());
+  assert.equal(failed.status, 503, JSON.stringify(await failed.clone().json()));
+  const body = await failed.json();
+  assert.equal(body.kind, "committed_progress_pending");
+  assert.equal(body.committed, true);
+  assert.equal(body.retryable, true);
+  assert.equal(body.requires_repreview, false);
+  assert.equal(body.result.complete, true);
+  assert.equal(body.progress.stage, "complete");
+  assert.equal(body.attempt, 1);
+  assert.equal(record().status, "ready", "failed finalization releases claim");
+  assert.equal(record().progress.stage, "complete", "previous D1 progress is retained");
+  assert.equal(getD1ApplyCalls(), 0, "completion does not replay a committed D1 step");
+  assert.equal(stats.batches, 0);
+  assert.equal(failed.headers.get("cache-control"), "private, no-store");
+
+  const recovered = await request(form());
+  assert.equal(recovered.status, 200, JSON.stringify(await recovered.clone().json()));
+  const next = await recovered.json();
+  assert.equal(next.ok, true);
+  assert.equal(next.continuation_required, false);
+  assert.equal(next.result.complete, true);
+  assert.equal(next.attempt, 2);
+  assert.equal(record().status, "completed");
+  assert.equal(getD1ApplyCalls(), 0, "R2-only recovery must never replay D1");
+  assert.equal(stats.batches, 0);
 });
