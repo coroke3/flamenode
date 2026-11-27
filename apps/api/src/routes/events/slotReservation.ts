@@ -41,31 +41,19 @@ import {
 const GENERIC_FAILURE_MESSAGE =
   "枠の状態が変更されたか、安全な保存を完了できませんでした。画面を更新してもう一度お試しください。";
 
-// SA-019 stores a canonical JSON array of distinct WRITE_FEATURE_KEYS.
-// Its longest valid serialization contains every key; use the same bound in
-// the invalid-snapshot predicate and SELECT projection.
-const MAX_SLOT_GATE_DISABLED_FEATURES_BYTES =
-  new TextEncoder().encode(JSON.stringify(WRITE_FEATURE_KEYS)).byteLength;
-
 /**
- * SEC #716: the fused guard also reads legacy TEXT values. Limit every
- * projected scalar *inside SQLite*, before D1 serializes a first-row result.
- * The fixed caps sum to 8,064 bytes; adding the current 924-byte canonical
- * list gives 8,988 raw bytes, at most 53,928 escaped bytes plus fixed row
- * keys/numbers (under 64KiB). The parity test guards this aggregate budget.
- * Oversized/wrong-type fields are
- * replaced with NULL on the wire and signalled for a 503, never truncated.
+ * SEC #716: actor/mode and audit scalars are bounded inside SQLite.
+ * Feature-list JSON is validated and reduced to one per-feature state value
+ * in SQLite, never returned in the D1 row. No persisted value is truncated;
+ * invalid values are handled only at the stage that consumes them.
  */
-const SLOT_GATE_BOUNDED_TEXT = [
+const SLOT_GATE_ACTOR_TEXT = [
   ['u."discord_id"', 512],
   ['u."name"', 1024],
   ['u."active_x_user_id"', 512],
   ['u."image"', 2048],
   ['x."x_name"', 1024],
   ['x."icon_url"', 2048],
-  ['settings."operation_mode"', 128],
-  ['settings."disabled_features_json"', MAX_SLOT_GATE_DISABLED_FEATURES_BYTES],
-  ['settings."cost_guard_exception_features_json"', 768],
 ] as const;
 const SLOT_GATE_NUMERIC_FIELDS = [
   'u."is_tos_accepted"',
@@ -76,6 +64,7 @@ const SLOT_GATE_NUMERIC_FIELDS = [
   'settings."audit_max_payload_bytes"',
   'settings."audit_compact_after_days"',
 ] as const;
+const SLOT_GATE_ALLOWED_FEATURE_SQL = WRITE_FEATURE_KEYS.map((key) => `'${key}'`).join(", ");
 
 function invalidGateTextSql(column: string, maxBytes: number): string {
   return `(${column} IS NOT NULL AND
@@ -90,10 +79,40 @@ function invalidGateNumberSql(column: string): string {
 function boundedGateNumberSql(column: string): string {
   return `CASE WHEN ${invalidGateNumberSql(column)} THEN NULL ELSE ${column} END`;
 }
-const SLOT_GATE_INVALID_SNAPSHOT_SQL = [
-  ...SLOT_GATE_BOUNDED_TEXT.map(([column, maxBytes]) => invalidGateTextSql(column, maxBytes)),
-  ...SLOT_GATE_NUMERIC_FIELDS.map(invalidGateNumberSql),
-].join(' OR ');
+
+/**
+ * Return -1 for malformed/non-feature JSON, 0 for a valid list without this
+ * feature, or 1 when it contains this feature. The 101-row cap proves the
+ * same <=100 string-array contract as parseWriteFeatureList; duplicates,
+ * escaped strings and legal whitespace retain JSON.parse semantics.
+ */
+function featureListStateSql(column: string, feature: WriteFeatureKey): string {
+  return `CASE
+    WHEN ${column} IS NULL OR ${column} = '' THEN 0
+    WHEN typeof(${column}) <> 'text' THEN -1
+    WHEN json_valid(${column}) <> 1 THEN -1
+    WHEN json_type(${column}) <> 'array' THEN -1
+    ELSE (
+      SELECT CASE
+        WHEN COUNT(*) > 100 THEN -1
+        WHEN SUM(CASE WHEN item.type <> 'text'
+                           OR item.value NOT IN (${SLOT_GATE_ALLOWED_FEATURE_SQL})
+                      THEN 1 ELSE 0 END) > 0 THEN -1
+        WHEN SUM(CASE WHEN item.type = 'text' AND item.value = '${feature}'
+                      THEN 1 ELSE 0 END) > 0 THEN 1
+        ELSE 0
+      END
+      FROM (SELECT type, value FROM json_each(${column}) LIMIT 101) AS item
+    )
+  END`;
+}
+const SLOT_GATE_INVALID_ACTOR_SQL = SLOT_GATE_ACTOR_TEXT
+  .map(([column, maxBytes]) => invalidGateTextSql(column, maxBytes))
+  .join(' OR ');
+const SLOT_GATE_INVALID_AUDIT_SQL = SLOT_GATE_NUMERIC_FIELDS
+  .filter((column) => column.startsWith('settings."audit_'))
+  .map(invalidGateNumberSql)
+  .join(' OR ');
 
 /**
  * S3 #725: route-local one-statement ToS + CostGuard + audit actor gate.
@@ -101,7 +120,15 @@ const SLOT_GATE_INVALID_SNAPSHOT_SQL = [
  * published_at=0 is a valid latest major in the existing write guard.
  */
 const SLOT_WRITE_GATE_SQL = `${TERMS_REACCEPT_REQUIRED_CTE_SQL}
- SELECT CASE WHEN ${SLOT_GATE_INVALID_SNAPSHOT_SQL} THEN 1 ELSE 0 END AS invalid_gate_snapshot,
+ SELECT 1 AS slot_combined_write_gate,
+   CASE WHEN ${invalidGateNumberSql('u."is_tos_accepted"')} THEN 1 ELSE 0 END AS invalid_identity_snapshot,
+   CASE WHEN ${SLOT_GATE_INVALID_ACTOR_SQL} THEN 1 ELSE 0 END AS invalid_actor_snapshot,
+   CASE WHEN ${invalidGateNumberSql('settings."cost_guard_exception_until')}
+        THEN 1 ELSE 0 END AS invalid_exception_until,
+   ${featureListStateSql('settings."cost_guard_exception_features_json', feature)} AS exception_feature_state,
+   CASE WHEN ${invalidGateTextSql('settings."operation_mode"', 128)} THEN 1 ELSE 0 END AS invalid_operation_mode,
+   ${featureListStateSql('settings."disabled_features_json', feature)} AS disabled_feature_state,
+   CASE WHEN ${SLOT_GATE_INVALID_AUDIT_SQL} THEN 1 ELSE 0 END AS invalid_audit_settings,
    ${boundedGateNumberSql('u."is_tos_accepted"')} AS is_tos_accepted,
    CASE WHEN u."is_tos_accepted" = 1
          AND (SELECT "published_at" FROM required_major) IS NOT NULL
@@ -126,9 +153,7 @@ const SLOT_WRITE_GATE_SQL = `${TERMS_REACCEPT_REQUIRED_CTE_SQL}
    ${boundedGateTextSql('u."active_x_user_id"', 512)} AS active_x_user_id, ${boundedGateTextSql('u."image"', 2048)} AS user_image,
    ${boundedGateTextSql('x."x_name"', 1024)} AS x_name, ${boundedGateTextSql('x."icon_url"', 2048)} AS x_icon_url,
    settings."id" AS settings_id, ${boundedGateTextSql('settings."operation_mode"', 128)} AS operation_mode,
-   ${boundedGateTextSql('settings."disabled_features_json"', MAX_SLOT_GATE_DISABLED_FEATURES_BYTES)} AS disabled_features_json,
    ${boundedGateNumberSql('settings."cost_guard_exception_until"')} AS cost_guard_exception_until,
-   ${boundedGateTextSql('settings."cost_guard_exception_features_json"', 768)} AS cost_guard_exception_features_json,
    ${boundedGateNumberSql('settings."audit_normal_retention_days"')} AS audit_normal_retention_days,
    ${boundedGateNumberSql('settings."audit_restorable_retention_days"')} AS audit_restorable_retention_days,
    ${boundedGateNumberSql('settings."audit_long_retention_days"')} AS audit_long_retention_days,
@@ -141,14 +166,19 @@ const SLOT_WRITE_GATE_SQL = `${TERMS_REACCEPT_REQUIRED_CTE_SQL}
  LIMIT ${MAX_SINGLE_ROW_LIMIT}`;
 
 type SlotWriteGateRow = ActorSnapshotRow & AuditSettingsRow & {
-  invalid_gate_snapshot: number;
+  slot_combined_write_gate: number;
+  invalid_identity_snapshot: number;
+  invalid_actor_snapshot: number;
+  invalid_exception_until: number;
+  exception_feature_state: number;
+  invalid_operation_mode: number;
+  disabled_feature_state: number;
+  invalid_audit_settings: number;
   is_tos_accepted: number | null;
   terms_reaccept_required: number | null;
   settings_id: string | null;
   operation_mode: string | null;
-  disabled_features_json: string | null;
   cost_guard_exception_until: number | null;
-  cost_guard_exception_features_json: string | null;
 };
 
 function slotCombinedWriteGuard(feature: WriteFeatureKey): MiddlewareHandler<AppEnv> {
@@ -181,24 +211,40 @@ function slotCombinedWriteGuard(feature: WriteFeatureKey): MiddlewareHandler<App
     });
     if (!identity.ok) return writeGuardDenyResponse(c, identity.reason, identity.status);
     const row = gate.row;
-    if (row?.invalid_gate_snapshot === 1) {
+    if (row?.invalid_identity_snapshot === 1) {
       return writeGuardDenyResponse(c, "db_unavailable", 503);
     }
     if (!row || row.settings_id !== "default") {
       return writeGuardDenyResponse(c, "maintenance_mode", 503);
     }
     try {
+      // Preserve evaluateCostGuardCore's order: validate the exception first;
+      // a live matching exception bypasses mode and disabled features. The
+      // SQL projection returns only the selected feature's state.
+      if (row.invalid_exception_until === 1) {
+        return writeGuardDenyResponse(c, "db_unavailable", 503);
+      }
+      const exceptionFeaturesJson = row.exception_feature_state < 0
+        ? "!"
+        : row.exception_feature_state === 1 ? JSON.stringify([feature]) : "[]";
+      const disabledFeaturesJson = row.disabled_feature_state < 0
+        ? "!"
+        : row.disabled_feature_state === 1 ? JSON.stringify([feature]) : "[]";
       const cost = evaluateCostGuardCore({
         feature,
-        operationMode: row.operation_mode,
-        disabledFeaturesJson: row.disabled_features_json,
+        operationMode: row.invalid_operation_mode === 1 ? null : row.operation_mode,
+        disabledFeaturesJson,
         exceptionUntil: row.cost_guard_exception_until,
-        exceptionFeaturesJson: row.cost_guard_exception_features_json,
+        exceptionFeaturesJson,
         now: Math.floor(Date.now() / 1000),
       });
       if (cost.blocked) {
         return writeGuardDenyResponse(c,
           cost.reason === "mode" ? "maintenance_mode" : "cost_guard_blocked", 503);
+      }
+      // Actor/audit values are consumed only after CostGuard admits the request.
+      if (row.invalid_actor_snapshot === 1 || row.invalid_audit_settings === 1) {
+        return writeGuardDenyResponse(c, "db_unavailable", 503);
       }
       c.set("auditSettings", mapAuditSettings(row));
       c.set("actorSnapshotJsonById", {

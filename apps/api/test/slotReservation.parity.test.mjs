@@ -558,7 +558,7 @@ if (runUnderRootTsx(import.meta.url)) {
         const prepare = w.d1.prepare.bind(w.d1);
         w.d1.prepare = (sql) => {
           const stmt = prepare(sql);
-          if (!sql.includes("AS invalid_gate_snapshot")) return stmt;
+          if (!sql.includes("AS slot_combined_write_gate")) return stmt;
           const bind = stmt.bind.bind(stmt);
           stmt.bind = (...args) => {
             const bound = bind(...args);
@@ -566,7 +566,7 @@ if (runUnderRootTsx(import.meta.url)) {
             bound.first = async () => {
               const raw = await first();
               gateReads += 1;
-              assert.equal(raw?.invalid_gate_snapshot, 1);
+              assert.equal(raw?.slot_combined_write_gate, 1);
               assert.equal(raw?.active_x_user_id, null,
                 "oversized selected ID never enters the fused D1 result");
               assert.doesNotMatch(JSON.stringify(raw), /x{1000}/);
@@ -1940,7 +1940,7 @@ if (runUnderRootTsx(import.meta.url)) {
       { label: "reserve disabled in full canonical list", raw: all, status: 503, reason: "cost_guard_blocked" },
       { label: "full canonical list with active reserve exception", raw: all, exception: true, status: 200, reason: null },
       { label: "malformed within byte bound", raw: '["reserve_slot",', status: 503, reason: "cost_guard_blocked" },
-      { label: "invalid one byte over canonical bound", raw: all + "x", oversized: true, status: 503, reason: "db_unavailable" },
+      { label: "malformed JSON after canonical list", raw: all + "x", oversized: true, status: 503, reason: "cost_guard_blocked" },
     ];
     for (const fixture of cases) {
       const w = world();
@@ -1964,7 +1964,7 @@ if (runUnderRootTsx(import.meta.url)) {
       const prepare = w.d1.prepare.bind(w.d1);
       w.d1.prepare = (sql) => {
         const statement = prepare(sql);
-        if (!sql.includes("invalid_gate_snapshot")) return statement;
+        if (!sql.includes("slot_combined_write_gate")) return statement;
         const bind = statement.bind.bind(statement);
         statement.bind = (...params) => {
           const bound = bind(...params);
@@ -1993,11 +1993,14 @@ if (runUnderRootTsx(import.meta.url)) {
         assert.equal(response.headers.get("cache-control"), "private, no-store");
         assert.equal(result.ok, fixture.status === 200, fixture.label);
         assert.ok(gateRow, fixture.label + " executes the real fused gate");
-        assert.equal(gateRow.invalid_gate_snapshot, fixture.oversized ? 1 : 0);
-        assert.equal(gateRow.disabled_features_json, fixture.oversized ? null : fixture.raw);
+        assert.equal(gateRow.slot_combined_write_gate, 1);
+        assert.equal(gateRow.disabled_feature_state, fixture.oversized ? -1 :
+          fixture.raw === all ? 1 : fixture.label === "malformed within byte bound" ? -1 : 0);
+        assert.equal(gateRow.disabled_features_json, undefined,
+          "arbitrary persisted JSON is evaluated in SQLite, never returned through D1");
         assert.ok(Buffer.byteLength(JSON.stringify(gateRow), "utf8") < 64 * 1024);
         assert.match(w.d1.stats.readSql[0], /FROM "session" s/);
-        assert.match(w.d1.stats.readSql[1], /invalid_gate_snapshot/);
+        assert.match(w.d1.stats.readSql[1], /slot_combined_write_gate/);
         if (fixture.status === 200) {
           assert.equal(w.d1.stats.reads, 3, fixture.label);
           assert.match(w.d1.stats.readSql[2], /invalid_snapshot/);
@@ -2015,6 +2018,114 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+  test("S3 #725: fused CostGuard preserves exception, mode and disabled-list precedence", async () => {
+    const longException = "[" + " ".repeat(900) + Array(50).fill('"reserve_slot"').join(",") + "]";
+    const longUnrelatedDisabled = "[" + " ".repeat(900) + Array(100).fill('"edit_video"').join(",") + "]";
+    const cases = [
+      {
+        label: "active exception overrides oversized mode and disabled list",
+        mode: "M".repeat(180_000),
+        disabled: "[" + Array(100).fill('"reserve_slot"').join(",") + "]",
+        exceptionUntil: NOW_SEC + 60, exception: longException, status: 200,
+      },
+      {
+        label: "expired exception does not override maintenance mode",
+        mode: "maintenance", disabled: '{"not":"a feature list"}',
+        exceptionUntil: NOW_SEC - 1, exception: '["reserve_slot"]',
+        status: 503, reason: "maintenance_mode",
+      },
+      {
+        label: "maintenance mode is decided before malformed disabled list",
+        mode: "maintenance", disabled: '{"not":"a feature list"}',
+        exceptionUntil: null, exception: null, status: 503, reason: "maintenance_mode",
+      },
+      {
+        label: "normal mode rejects malformed disabled list",
+        mode: "normal", disabled: '{"not":"a feature list"}',
+        exceptionUntil: null, exception: null, status: 503, reason: "cost_guard_blocked",
+      },
+      {
+        label: "normal mode accepts 100 duplicate known keys and legal whitespace",
+        mode: "normal", disabled: longUnrelatedDisabled,
+        exceptionUntil: null, exception: null, status: 200,
+      },
+      {
+        label: "normal mode blocks when the selected feature is disabled",
+        mode: "normal", disabled: '["edit_video","reserve_slot","reserve_slot"]',
+        exceptionUntil: null, exception: null, status: 503, reason: "cost_guard_blocked",
+      },
+      {
+        label: "malformed exception is rejected before maintenance mode",
+        mode: "maintenance", disabled: "[]", exceptionUntil: NOW_SEC + 60,
+        exception: '{"not":"an array"}', status: 503, reason: "cost_guard_blocked",
+      },
+    ];
+    for (const fixture of cases) {
+      const w = world();
+      const token = "s3-costguard-precedence";
+      insert(w.sqlite, "session", {
+        sessionToken: token, userId: "u_owner", expires: NOW_SEC * 1000 + 60_000,
+      });
+      w.sqlite.prepare(`UPDATE system_settings SET operation_mode = ?,
+        disabled_features_json = ?, cost_guard_exception_until = ?,
+        cost_guard_exception_features_json = ? WHERE id = 'default'`)
+        .run(fixture.mode, fixture.disabled, fixture.exceptionUntil, fixture.exception);
+      const expected = evaluateCostGuardCore({
+        feature: "reserve_slot", operationMode: fixture.mode,
+        disabledFeaturesJson: fixture.disabled, exceptionUntil: fixture.exceptionUntil,
+        exceptionFeaturesJson: fixture.exception, now: NOW_SEC,
+      });
+      assert.equal(expected.blocked, fixture.status !== 200, fixture.label);
+      let gateRow;
+      const prepare = w.d1.prepare.bind(w.d1);
+      w.d1.prepare = (sql) => {
+        const statement = prepare(sql);
+        if (!sql.includes("slot_combined_write_gate")) return statement;
+        const bind = statement.bind.bind(statement);
+        statement.bind = (...params) => {
+          const bound = bind(...params);
+          const first = bound.first.bind(bound);
+          bound.first = async () => { gateRow = await first(); return gateRow; };
+          return bound;
+        };
+        return statement;
+      };
+      const before = state(w);
+      const thaw = freeze();
+      try {
+        const response = await app.request(SITE + "/api/events/ev1/slots/s20/reserve", {
+          method: "POST",
+          headers: {
+            Origin: SITE, cookie: "__Secure-authjs.session-token=" + token,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ display_name: "CostGuard precedence" }),
+        }, { DB: w.d1, NEXT_PUBLIC_SITE_URL: SITE });
+        const body = await response.json();
+        assert.equal(response.status, fixture.status, fixture.label + ": " + JSON.stringify(body));
+        assert.equal(response.headers.get("cache-control"), "private, no-store");
+        assert.ok(gateRow, fixture.label);
+        assert.equal(gateRow.disabled_features_json, undefined);
+        assert.equal(gateRow.cost_guard_exception_features_json, undefined);
+        assert.ok(Buffer.byteLength(JSON.stringify(gateRow), "utf8") < 64 * 1024);
+        assert.match(w.d1.stats.readSql[0], /FROM "session" s/);
+        assert.match(w.d1.stats.readSql[1], /slot_combined_write_gate/);
+        if (fixture.status === 200) {
+          assert.equal(body.ok, true, fixture.label);
+          assert.equal(w.d1.stats.reads, 3, fixture.label);
+          assert.equal(w.d1.stats.batches, 1, fixture.label);
+        } else {
+          assert.equal(body.reason, fixture.reason, fixture.label);
+          assert.equal(w.d1.stats.reads, 2, fixture.label);
+          assert.equal(w.d1.stats.batches, 0, fixture.label);
+          assert.deepEqual(state(w), before, fixture.label + " no slot/audit/outbox/queue write");
+        }
+      } finally {
+        thaw();
+      }
+    }
+  });
+
   test("SEC #716 / S3 #725: fused gate bounds legacy first-row data before D1 wire", async () => {
     // These columns are read only by the new fused gate, not by the preceding
     // Auth.js session SELECT. Exercise actual HTTPS-cookie + Hono + SQLite.
@@ -2023,18 +2134,21 @@ if (runUnderRootTsx(import.meta.url)) {
         label: "active X icon",
         table: "x_users", column: "icon_url", idColumn: "id",
         userId: (db) => db.prepare("SELECT active_x_user_id AS id FROM user WHERE id = 'u_owner'").get().id,
-        alias: "x_icon_url", value: String.fromCharCode(1).repeat(180_000),
+        alias: "x_icon_url", marker: "invalid_actor_snapshot", reason: "db_unavailable",
+        value: String.fromCharCode(1).repeat(180_000),
       },
       {
         label: "CostGuard disabled feature JSON",
         table: "system_settings", column: "disabled_features_json", idColumn: "id",
-        userId: () => "default", alias: "disabled_features_json",
+        userId: () => "default", alias: "disabled_features_json", marker: "disabled_feature_state",
+        markerValue: -1, notProjected: true, reason: "cost_guard_blocked",
         value: JSON.stringify({ oversized: "A".repeat(180_000) }),
       },
       {
         label: "audit retention column with invalid TEXT storage type",
         table: "system_settings", column: "audit_normal_retention_days", idColumn: "id",
         userId: () => "default", alias: "audit_normal_retention_days",
+        marker: "invalid_audit_settings", reason: "db_unavailable",
         value: "invalid-" + "X".repeat(180_000),
       },
     ]) {
@@ -2051,7 +2165,7 @@ if (runUnderRootTsx(import.meta.url)) {
       const prepare = w.d1.prepare.bind(w.d1);
       w.d1.prepare = (sql) => {
         const statement = prepare(sql);
-        if (!sql.includes("invalid_gate_snapshot")) return statement;
+        if (!sql.includes("slot_combined_write_gate")) return statement;
         const bind = statement.bind.bind(statement);
         statement.bind = (...params) => {
           const bound = bind(...params);
@@ -2078,10 +2192,16 @@ if (runUnderRootTsx(import.meta.url)) {
         const body = await response.json();
         assert.equal(response.status, 503, field.label);
         assert.equal(response.headers.get("cache-control"), "private, no-store", field.label);
-        assert.equal(body.reason, "db_unavailable", field.label);
-        assert.equal(capturedGateRow?.invalid_gate_snapshot, 1, field.label);
-        assert.equal(capturedGateRow[field.alias], null,
-          field.label + " must never reach the D1 first-row result");
+        assert.equal(body.reason, field.reason ?? "db_unavailable", field.label);
+        assert.equal(capturedGateRow?.slot_combined_write_gate, 1, field.label);
+        if (field.marker) {
+          assert.equal(capturedGateRow[field.marker], field.markerValue ?? 1, field.label);
+          assert.equal(capturedGateRow[field.alias], field.notProjected ? undefined : null,
+            field.label + " must never reach the D1 first-row result");
+        } else {
+          assert.equal(capturedGateRow[field.alias], null,
+            field.label + " must never reach the D1 first-row result");
+        }
         assert.ok(Buffer.byteLength(JSON.stringify(capturedGateRow), "utf8") < 64 * 1024,
           field.label + " D1 transport row is bounded");
         assert.ok(Buffer.byteLength(JSON.stringify(body), "utf8") < 2048);
