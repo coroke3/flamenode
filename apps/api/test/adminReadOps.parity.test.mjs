@@ -1503,7 +1503,11 @@ if (runUnderRootTsx(import.meta.url)) {
             if (recorded) return;
             recorded = true;
             const data = Array.isArray(rows) ? rows : [];
-            projections.push({ rows: data.length, bytes: Buffer.byteLength(JSON.stringify(data)) });
+            projections.push({
+              rows: data.length,
+              bytes: Buffer.byteLength(JSON.stringify(data)),
+              sampleIds: data.map((row) => Array.isArray(row) ? row[2] : row.id),
+            });
           };
           return {
             ...stmt,
@@ -1665,6 +1669,64 @@ if (runUnderRootTsx(import.meta.url)) {
       assert.equal(oversized.stats.writes, 0);
       assert.doesNotMatch(oversized.text, /xxxxxxxxxxxxxxxxxxxx/);
       sqlite.prepare("DELETE FROM videos WHERE id = ?").run(oversizedId);
+
+      // Isolate each sampled identifier: no healthy or later-sort BLOB may
+      // accidentally evade the actual first-five sample projection.
+      sqlite.exec("SAVEPOINT mig0626_like_id_bytes");
+      try {
+        sqlite.exec("UPDATE videos SET app_like_count = 0; DELETE FROM video_interactions_auth");
+        const fixtureId = prefix + "zz-id-byte-fixture";
+        const idCases = [];
+        for (const unit of ["x", "é", "あ", "🚀"]) {
+          for (const size of [255, 256, 257]) {
+            const width = Buffer.byteLength(unit);
+            const value = "!" + unit.repeat(Math.floor((size - 1) / width)) + "x".repeat((size - 1) % width);
+            assert.equal(Buffer.byteLength(value), size);
+            idCases.push({ raw: Buffer.from(value), decoded: value, storage: "text", size });
+          }
+        }
+        // Stored malformed UTF-8 is within 256 bytes but its local adapter
+        // replacement decoding can exceed that limit. Keep valid decoded
+        // boundary strings intact; never return an over-bound sample.
+        for (const [count, tail] of [[84, 2], [85, 0], [85, 1], [86, 0]]) {
+          const raw = Buffer.concat([Buffer.from("!"), Buffer.alloc(count, 0xff), Buffer.alloc(tail, 120)]);
+          const decoded = "!" + "\uFFFD".repeat(count) + "x".repeat(tail);
+          idCases.push({ raw, decoded, storage: "text", size: raw.length });
+        }
+        for (const size of [0, 7, 256, 257]) {
+          idCases.push({ raw: Buffer.alloc(size, 120), decoded: null, storage: "blob", size });
+        }
+        for (const { raw, decoded, storage, size } of idCases) {
+          video(fixtureId, 6);
+          const valueSql = storage === "text" ? "CAST(? AS TEXT)" : "?";
+          sqlite.prepare("UPDATE videos SET id = " + valueSql + " WHERE id = ?").run(raw, fixtureId);
+          const stored = sqlite.prepare("SELECT typeof(id) AS storage, length(CAST(id AS BLOB)) AS bytes FROM videos WHERE title = ?").get(fixtureId);
+          assert.equal(stored.storage, storage);
+          assert.equal(stored.bytes, size);
+          const receipt = await measure();
+          const accepted = storage === "text" && size <= 256 && Buffer.byteLength(decoded) <= 256;
+          assert.equal(receipt.projections.length, 1);
+          assert.equal(receipt.projections[0].rows, 1);
+          assert.deepEqual(receipt.projections[0].sampleIds, [
+            storage === "text" && size <= 256 ? decoded : null,
+          ], "actual SQL projection");
+          if (accepted) {
+            assertReadOnly(receipt, 2, 1);
+            assert.deepEqual(receipt.body, expected("warn", 1, [
+              "video:" + decoded + " stored:6 actual:0 diff:6 threshold:5 [abs(5)]",
+            ]));
+          } else {
+            assert.equal(receipt.status, 503);
+            assert.deepEqual(receipt.body, { error: "unavailable" });
+            assert.equal(receipt.headers.get("cache-control"), "private, no-store");
+            assert.equal(receipt.stats.statements, 2);
+            assert.equal(receipt.stats.writes, 0);
+          }
+          sqlite.prepare("DELETE FROM videos WHERE title = ?").run(fixtureId);
+        }
+      } finally {
+        sqlite.exec("ROLLBACK TO mig0626_like_id_bytes; RELEASE mig0626_like_id_bytes");
+      }
 
       const denied = await measure("tok-alice");
       assert.equal(denied.status, 403);

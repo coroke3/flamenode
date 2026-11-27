@@ -450,7 +450,8 @@ export async function runAuthLikeCountDriftCandidate(db: AnyDb): Promise<HealthC
     samples AS (
       SELECT
         CASE
-          WHEN length(CAST(id AS BLOB)) <= ${LIKE_COUNT_DIAGNOSTIC_MAX_SAMPLE_ID_BYTES}
+          WHEN typeof(id) = 'text'
+            AND length(CAST(id AS BLOB)) <= ${LIKE_COUNT_DIAGNOSTIC_MAX_SAMPLE_ID_BYTES}
           THEN id
           ELSE NULL
         END AS id,
@@ -501,7 +502,13 @@ export async function runAuthLikeCountDriftCandidate(db: AnyDb): Promise<HealthC
     }
     if (typeof idValue !== "string") throw new Error("invalid diagnostic sample identifier");
     const idBytes = diagnosticNonNegativeSafeInteger(idBytesValue);
-    if (idBytes > LIKE_COUNT_DIAGNOSTIC_MAX_SAMPLE_ID_BYTES) {
+    // SQLite bounds stored bytes, not the provider's replacement-decoded string.
+    // The code-unit precheck bounds the allocation even for an unexpected receipt.
+    if (
+      idBytes > LIKE_COUNT_DIAGNOSTIC_MAX_SAMPLE_ID_BYTES ||
+      idValue.length > LIKE_COUNT_DIAGNOSTIC_MAX_SAMPLE_ID_BYTES ||
+      new TextEncoder().encode(idValue).byteLength > LIKE_COUNT_DIAGNOSTIC_MAX_SAMPLE_ID_BYTES
+    ) {
       throw new Error("diagnostic sample identifier exceeds byte bound");
     }
 
