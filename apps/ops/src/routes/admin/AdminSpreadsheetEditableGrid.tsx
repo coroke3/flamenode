@@ -673,7 +673,6 @@ export function AdminSpreadsheetEditableGrid({
             --sheet-border: var(--border-subtle, #3c4043);
           }
         }
-      `}
         [data-spreadsheet-context-menu] {
           position: fixed;
           z-index: 200;
@@ -702,7 +701,7 @@ export function AdminSpreadsheetEditableGrid({
           opacity: 0.45;
           cursor: default;
         }
-</style>
+      `}</style>
       <p>{editable ? "編集可能な列のみ変更できます。主キー列は変更できません。" : "読み取り専用（編集は無効です）。"}</p>
       {notice ? <p role="status">{notice}</p> : null}
       {!identityChanged && findHint ? <p role="status">{findHint}</p> : null}
