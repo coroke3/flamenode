@@ -1770,6 +1770,157 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+  test("MIG-0626 U05: characterize staff permission diagnostic parsing and the remaining 500-row transfer gap", async () => {
+    // Explicit characterization of CURRENT; 500 is NOT an accepted S2
+    // limit or a complete database-wide integrity count.
+    const prefix = "mig0626-staff-characterization-";
+    const endpoint = "/api/admin-read/ops/integrity/";
+    const add = (suffix, json, preset = "custom") => ins("event_staff", {
+      id: prefix + suffix, event_id: "ev1", x_user_id: prefix + "x-" + suffix,
+      display_name: "synthetic staff", permission_preset: preset,
+      custom_permission_keys_json: json, created_at: T0, updated_at: T0,
+    });
+    const measure = async (check, token = ADMIN) => {
+      const d1 = createD1(sqlite);
+      const prepare = d1.prepare;
+      const projections = [];
+      d1.prepare = (sql) => {
+        const wrap = (stmt) => {
+          if (!/\bfrom\s+"?event_staff"?(?:\s|$)/i.test(sql)) return stmt;
+          return {
+            ...stmt,
+            bind: (...args) => wrap(stmt.bind(...args)),
+            async raw(options) {
+              const rows = await stmt.raw(options);
+              const data = options?.columnNames ? rows.slice(1) : rows;
+              projections.push({ rows: data.length, bytes: Buffer.byteLength(JSON.stringify(data)) });
+              return rows;
+            },
+            async all() {
+              const result = await stmt.all();
+              projections.push({ rows: result.results.length, bytes: Buffer.byteLength(JSON.stringify(result.results)) });
+              return result;
+            },
+          };
+        };
+        return wrap(prepare(sql));
+      };
+      return { ...(await call(endpoint + check, token, { d1 })), projections };
+    };
+    const readOnly = (receipt, status = 200, statements = 2) => {
+      assert.equal(receipt.status, status);
+      assert.equal(receipt.headers.get("cache-control"), "private, no-store");
+      assert.equal(receipt.stats.statements, statements);
+      assert.equal(receipt.stats.writes, 0);
+      assert.ok(Buffer.byteLength(receipt.text) <= 64 * 1024);
+    };
+    const invalid = "staff_custom_json_invalid";
+    const issue = (suffix) => ({
+      id: prefix + suffix,
+      title: "@" + prefix + "x-" + suffix,
+      description: "JSON 不正 event:ev1",
+      adminHref: "/manage/events/ev1/staff",
+    });
+    const result = (count, issues) => ({
+      id: invalid, title: "custom JSON がパース不能", area: "event_staff",
+      severity: "warning", description: "custom_permission_keys_json が壊れています。",
+      count, issues, moreCount: count - issues.length,
+      recommendation: "JSON を修正してください。",
+    });
+    const cases = [
+      ["null", null, false],
+      ["empty", "", false],
+      ["empty-array", "[]", false],
+      ["trimmed-empty", "\u00a0[]\u00a0", false],
+      ["spaced-array", " [ ] ", true],
+      ["whitespace-only", " \t\n ", true],
+      ["malformed", "{not json", true],
+      ["non-array", '{"key":"event.basic"}', true],
+      ["non-strings", "[null,7,true,{}]", true],
+      ["unknown-only", '["bogus.key"]', true],
+      ["known", '["event.basic"]', false],
+      ["legacy-alias", '["videos.title"]', false],
+      ["admin-only-key", '["xid.link_requests"]', false],
+      ["mixed", '["bogus.key",7,"event.basic"]', false],
+      ["duplicate", '["event.basic","event.basic"]', false],
+      ["escaped-key", '["\\u0065vent.basic"]', false],
+      ["wrong-case", '["EVENT.BASIC"]', true],
+      ["trailing-space-key", '["event.basic "]', true],
+      ["nul-key", '["event.basic\\u0000"]', true],
+      ["json-trailing-comma", '["event.basic",]', true],
+    ];
+    // Do not disturb the shared seed for the other parity checks.
+    sqlite.exec("SAVEPOINT mig0626_staff_characterization");
+    try {
+      sqlite.exec("UPDATE event_staff SET permission_preset = 'public_staff'");
+      const empty = await measure(invalid);
+      readOnly(empty);
+      assert.deepEqual(empty.body, { ran: true, results: [] });
+      assert.deepEqual(empty.projections.map((p) => p.rows), [0]);
+
+      for (const [suffix, json] of cases) add(suffix, json);
+      add("owner", "{not json", "owner");
+      add("manager", "{not json", "manager");
+      add("excluded", "{not json", "public_staff");
+      const corpus = await measure(invalid);
+      readOnly(corpus);
+      const expectedIssues = cases.filter(([, , bad]) => bad).map(([suffix]) => issue(suffix));
+      assert.deepEqual(corpus.projections.map((p) => p.rows), [cases.length + 2]);
+      assert.equal(corpus.body.results.length, 1);
+      const sortIssues = (items) => [...items].sort((a, b) => a.id.localeCompare(b.id));
+      const received = corpus.body.results[0];
+      assert.deepEqual({ ...received, issues: sortIssues(received.issues) },
+        result(expectedIssues.length, sortIssues(expectedIssues)));
+      assert.doesNotMatch(corpus.text, /bogus\.key|not json/);
+      const owner = await measure("staff_owner_missing_permissions");
+      readOnly(owner);
+      assert.deepEqual(owner.body, { ran: true, results: [] });
+      const manager = await measure("staff_manager_has_dangerous_permissions");
+      readOnly(manager);
+      assert.equal(manager.body.results[0].count, 1);
+      assert.deepEqual(manager.body.results[0].issues, [{
+        ...issue("manager"), description: "危険権限: video.permissions",
+      }]);
+
+      sqlite.exec("UPDATE event_staff SET permission_preset = 'public_staff'");
+      // A small/empty HTTP receipt does not prove bounded D1 input or parse CPU.
+      const huge = JSON.stringify(["event.basic", "z".repeat(70_000)]);
+      add("large-valid", huge);
+      const large = await measure(invalid);
+      readOnly(large);
+      assert.deepEqual(large.body, { ran: true, results: [] });
+      assert.deepEqual(large.projections.map((p) => p.rows), [1]);
+      assert.ok(large.projections[0].bytes > 64 * 1024);
+
+      sqlite.exec("UPDATE event_staff SET permission_preset = 'public_staff'");
+      // All 620 rows are invalid, so this demonstrates an incomplete count
+      // independently of the existing SELECT's unspecified row order.
+      const allIds = Array.from({ length: 620 }, (_, i) => "bulk-" + i);
+      for (const suffix of allIds) add(suffix, "{not json");
+      const fullInvalid = sqlite.prepare(
+        "SELECT COUNT(*) AS n FROM event_staff WHERE permission_preset = 'custom'"
+      ).get().n;
+      assert.equal(fullInvalid, 620);
+      const bulk = await measure(invalid);
+      readOnly(bulk);
+      assert.deepEqual(bulk.projections.map((p) => p.rows), [500]);
+      assert.equal(bulk.body.results.length, 1);
+      const observed = bulk.body.results[0];
+      assert.equal(observed.count, 500, "CURRENT incomplete count; update when full scan/snapshot contract is approved");
+      assert.equal(observed.moreCount, 450);
+      assert.equal(observed.issues.length, 50);
+      assert.equal(new Set(observed.issues.map((r) => r.id)).size, 50);
+      const allowed = new Set(allIds.map((suffix) => JSON.stringify(issue(suffix))));
+      assert.ok(observed.issues.every((row) => allowed.has(JSON.stringify(row))));
+      assert.ok(observed.count < fullInvalid, "characterization of known gap, NOT acceptance");
+      const denied = await measure(invalid, "tok-alice");
+      readOnly(denied, 403, 1);
+      assert.deepEqual(denied.projections, []);
+    } finally {
+      sqlite.exec("ROLLBACK TO mig0626_staff_characterization; RELEASE mig0626_staff_characterization");
+    }
+  });
+
   test("MIG-0626 U05: integrity diagnosis bounds the full UTF-8 response and preserves in-budget issues", async () => {
     const { runIntegrityCheckById } = await import("@flamenode/server-core/admin/integrityChecks");
     const checkId = "audit_videos_orphan";
