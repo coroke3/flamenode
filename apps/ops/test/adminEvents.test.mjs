@@ -26,6 +26,7 @@ import {
 import { AdminEvents } from "../.test-dist/apps/ops/src/routes/admin/AdminEvents.js";
 import { EventTemplates } from "../.test-dist/apps/ops/src/routes/admin/EventTemplates.js";
 import { EventNew } from "../.test-dist/apps/ops/src/routes/admin/EventNew.js";
+import { EventEdit } from "../.test-dist/apps/ops/src/routes/manage/EventEdit.js";
 import { buildFormDraftStorageKey } from "../.test-dist/apps/ops/src/lib/useFormDraft.js";
 import { EventGroupsPage } from "../.test-dist/apps/ops/src/routes/admin/EventGroups.js";
 import {
@@ -1230,4 +1231,160 @@ test("MIG-0721 U02b: edit read validates opaque draft owner and never substitute
     const r = await readManageEventEdit("event-1", async () => json(200, expected));
     assert.deepEqual(r, { status: "ok", data: expected });
   }
+});
+
+// U02c uses injected verified-host grants. This is a mounted JSDOM consumer,
+// not evidence that the actual protected host observes account transitions.
+const editAuthority = (authUserId, generation) => ({ authUserId, generation });
+const editDraftKey = authUserId => buildFormDraftStorageKey({
+  authUserId, formId: "event-edit-event-1", schemaVersion: "event-form-v3",
+});
+const editReadFixture = (owner, title, editableSections = editFixture().editableSections) => ({
+  ...editFixture(), draftAuthUserId: owner, editableSections,
+  initial: { ...editFixture().initial, title },
+});
+
+async function withEventEdit(props, run) {
+  let router;
+  try {
+    return await withDom("https://flamenode.test/manage/events/event-1/edit", async view => {
+      const { dom, container, root } = view;
+      let updateProps;
+      const commits = [];
+      function Host() {
+        const [current, update] = React.useState(props);
+        updateProps = update;
+        return React.createElement(React.Profiler, { id: "event-edit", onRender() {
+          commits.push({ generation: current.authority?.generation ?? null,
+            title: container.querySelector('[name="title"]')?.value ?? null,
+            hasForm: Boolean(container.querySelector("form")) });
+        } }, React.createElement(EventEdit, current));
+      }
+      router = createMemoryRouter([
+        { path: "/manage/events/:id/edit", element: React.createElement(Host) },
+      ], { initialEntries: ["/manage/events/event-1/edit"] });
+      await React.act(async () => root.render(React.createElement(RouterProvider, { router })));
+      const change = (name, value) => React.act(async () => {
+        const input = container.querySelector('[name="' + name + '"]');
+        assert.ok(input, name);
+        Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), "value").set.call(input, value);
+        input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+      });
+      await run({ ...view, router, commits, change,
+        update: next => React.act(async () => updateProps(previous => ({ ...previous, ...next }))) });
+    });
+  } finally {
+    router?.dispose();
+  }
+}
+
+test("MIG-0721 U02c: committed null-X A-B-A retires old reads and submit receipts; isolates and restores only the current draft", async () => {
+  const pending = [], writes = [], navigation = [];
+  const fetchFn = (path, init) => new Promise(resolve => pending.push({ path, init, resolve }));
+  const ports = { createEvent: async () => assert.fail("edit must not create"),
+    updateEvent: data => new Promise(resolve => writes.push({ data, resolve })),
+    router: { push: href => navigation.push(href), refresh: () => navigation.push("refresh") } };
+  await withEventEdit({ ...ports, fetchFn, authority: null }, async ({ dom, container, commits, change, update }) => {
+    const title = () => container.querySelector('[name="title"]')?.value ?? null;
+    const finish = (index, body) => React.act(async () => pending[index].resolve(json(200, body)));
+    assert.equal(pending.length, 0);
+    await update({ authority: editAuthority("auth-a", "a1") });
+    assert.equal(pending.length, 1);
+    assert.equal(title(), null);
+    await finish(0, editReadFixture("auth-a", "Server A"));
+    assert.equal(title(), "Server A");
+    assert.equal(container.querySelector('[name="revision"]').value, "0");
+    assert.ok(container.querySelector('a[href="/manage/events/event-1/slots"]'));
+    assert.equal(container.querySelector('[name="title"]').readOnly, false);
+    await update({ authority: editAuthority("auth-a", "a1") });
+    assert.equal(pending.length, 1, "same verified generation is not a new read");
+    await change("title", "Private A draft");
+    await React.act(async () => dom.window.dispatchEvent(new dom.window.Event("pagehide")));
+    assert.equal(JSON.parse(dom.window.localStorage.getItem(editDraftKey("auth-a"))).value.title, "Private A draft");
+    const submit = () => container.querySelector("form").dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+    await React.act(async () => { submit(); submit(); });
+    assert.equal(writes.length, 1);
+    assert.equal(writes[0].data.get("revision"), "0");
+
+    const switchFrame = commits.length;
+    await update({ authority: editAuthority("auth-b", "b1") });
+    assert.equal(pending.length, 2);
+    assert.equal(title(), null);
+    assert.ok(commits.slice(switchFrame).every(frame => !frame.hasForm));
+    // A response for the wrong Auth user may not select or restore that draft.
+    await finish(1, editReadFixture("auth-a", "Mismatched old A"));
+    assert.equal(title(), null);
+    assert.doesNotMatch(container.textContent, /Mismatched old A|Private A draft/);
+    const retry = [...container.querySelectorAll("button")].find(b => b.textContent.trim() === "イベント設定を再取得");
+    assert.ok(retry);
+    await React.act(async () => retry.click());
+    assert.equal(pending.length, 3);
+    await finish(2, editReadFixture("auth-b", "Server B"));
+    assert.equal(title(), "Server B");
+    await change("title", "Private B draft");
+    await React.act(async () => dom.window.dispatchEvent(new dom.window.Event("pagehide")));
+    assert.equal(JSON.parse(dom.window.localStorage.getItem(editDraftKey("auth-b"))).value.title, "Private B draft");
+    await update({ refreshKey: 1 });
+    assert.equal(title(), null);
+    assert.equal(pending.length, 4);
+    await update({ authority: editAuthority("auth-a", "a2") });
+    assert.equal(pending.length, 5);
+    assert.ok(pending[3].init.signal.aborted);
+    await finish(3, editReadFixture("auth-b", "Retired B"));
+    assert.equal(title(), null);
+    await finish(4, editReadFixture("auth-a", "Fresh server A"));
+    assert.equal(title(), "Private A draft");
+    await React.act(async () => writes[0].resolve({ ok: true, pendingPublicReflection: true }));
+    assert.deepEqual(navigation, [], "retired write receipt cannot refresh the current visit");
+    assert.equal(title(), "Private A draft");
+    assert.ok(dom.window.localStorage.getItem(editDraftKey("auth-a")));
+    assert.doesNotMatch(container.textContent, /Retired B|Private B draft|保存しました/);
+    assert.ok(pending.every(p => p.path === "/api/manage/events/event-1/edit" &&
+      p.init.method === "GET" && p.init.cache === "no-store"));
+    await update({ authority: null });
+    assert.equal(title(), null);
+    assert.equal(pending.length, 5);
+  });
+});
+
+test("MIG-0721 U02c: current grant requires fresh valid owner/resource/section receipt; slot-only permission and denial controls", async () => {
+  const pending = [];
+  const fetchFn = (path, init) => new Promise(resolve => pending.push({ path, init, resolve }));
+  const onlySlots = { basic: false, publish: false, questions: false, slots: true };
+  const valid = editReadFixture("auth-a", "Only slots", onlySlots);
+  await withEventEdit({ ...eventNewPorts, authority: editAuthority("auth-a", "g1"), fetchFn },
+    async ({ container, commits, update }) => {
+      const form = () => container.querySelector("form");
+      const resolve = response => React.act(async () => pending.at(-1).resolve(response));
+      await resolve(json(200, valid));
+      assert.ok(form());
+      assert.equal(form().querySelector('[name="title"]').readOnly, true);
+      assert.equal(form().querySelector("#section-slots [role=status]"), null);
+      for (const section of ["basic", "publish", "questions"]) {
+        assert.match(form().querySelector("#section-" + section).textContent, /変更権限がありません/);
+      }
+      let revision = 0;
+      for (const response of [
+        json(401, {}), json(403, { redirect: "/dashboard" }), json(404, {}),
+        json(503, {}), new Response("{", { status: 200 }),
+        json(200, { ...valid, draftAuthUserId: "auth-b" }),
+        json(200, { ...valid, initial: { ...valid.initial, id: "other" } }),
+        json(200, { ...valid, editableSections: { ...onlySlots, slots: false } }),
+      ]) {
+        const start = commits.length;
+        await update({ refreshKey: ++revision });
+        assert.equal(form(), null, "explicit refresh removes prior private controls");
+        assert.ok(commits.slice(start).every(frame => !frame.hasForm));
+        await resolve(response);
+        assert.equal(form(), null);
+        assert.doesNotMatch(container.textContent, /Only slots/);
+        await update({ refreshKey: ++revision });
+        await resolve(json(200, valid));
+        assert.ok(form());
+      }
+      const count = pending.length;
+      await update({ authority: editAuthority(" auth-a ", "g2") });
+      assert.equal(form(), null, "must not trim an opaque authenticated owner into another draft bucket");
+      assert.equal(pending.length, count);
+    });
 });
