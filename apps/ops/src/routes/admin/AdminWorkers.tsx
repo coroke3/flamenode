@@ -90,11 +90,43 @@ function statusStyle(level: Exclude<MonitorLevel, "running">): React.CSSProperti
   return { background: "var(--accent-success-soft, #dcfce7)", borderColor: "var(--accent-success, #16a34a)", color: "var(--accent-success, #166534)" };
 }
 
+// Both CURRENT and Hono always produce these five Cron jobs and four pipelines.
+// Artifact history is intentionally variable and is not part of this identity check.
+const MONITOR_JOB_NAMES = [
+  "fast-jobs", "content-jobs", "sync-jobs",
+  "fast-jobs:slot-deadline-reminders", "content-jobs:cleanup",
+] as const;
+const MONITOR_PIPELINE_IDS = ["notifications", "static", "youtube", "scores"] as const;
+
+function hasCompleteMonitoringSnapshot(snapshot: Snapshot): boolean {
+  const { jobs, pipelines } = snapshot;
+  if (jobs.length !== MONITOR_JOB_NAMES.length || pipelines.length !== MONITOR_PIPELINE_IDS.length) {
+    return false;
+  }
+  const jobNames = new Set(jobs.map(job => job.jobName));
+  const pipelineIds = new Set(pipelines.map(pipeline => pipeline.id));
+  if (!MONITOR_JOB_NAMES.every(name => jobNames.has(name)) ||
+      !MONITOR_PIPELINE_IDS.every(id => pipelineIds.has(id))) {
+    return false;
+  }
+  // The producers never emit running/unknown pipeline states. A running Cron
+  // job is normal, while an unknown Cron job contributes to the warning state.
+  if (pipelines.some(({ level }) => level !== "ok" && level !== "warn" && level !== "critical")) {
+    return false;
+  }
+  const critical = jobs.some(job => job.level === "critical") ||
+    pipelines.some(pipeline => pipeline.level === "critical");
+  const warning = jobs.some(job => job.level === "warn" || job.level === "unknown") ||
+    pipelines.some(pipeline => pipeline.level === "warn");
+  return snapshot.overallLevel === (critical ? "critical" : warning ? "warn" : "ok");
+}
+
 export function AdminWorkersView({ data, onRefresh }: {
   data: OpsDataState<AdminWorkersResponse>;
   onRefresh: () => void;
 }): React.ReactElement {
-  const snapshot = data.status === "ok" && data.data.error === null ? data.data.snapshot : null;
+  const receivedSnapshot = data.status === "ok" && data.data.error === null ? data.data.snapshot : null;
+  const snapshot = receivedSnapshot && hasCompleteMonitoringSnapshot(receivedSnapshot) ? receivedSnapshot : null;
   return (
     <div>
       <ConsolePageHeader title="バックグラウンド処理監視"
@@ -106,9 +138,9 @@ export function AdminWorkersView({ data, onRefresh }: {
         <Link href="/admin/health" className="fn-btn fn-btn-ghost fn-btn-sm">DBヘルスチェック</Link>
       </div>
       {data.status === "loading" ? <p role="status">読み込み中…</p>
-        : data.status === "ok" && data.data.error === null && snapshot === null
+        : data.status === "ok" && data.data.error === null && receivedSnapshot === null
           ? <p role="status">監視スナップショットがありません。</p>
-        : data.status !== "ok" || data.data.error !== null
+        : data.status !== "ok" || data.data.error !== null || snapshot === null
           ? <p role="alert" style={{ marginTop: 18 }}>
               {data.status === "anonymous" ? "ログインが必要です。"
                 : data.status === "forbidden" || data.status === "notFound" ? "閲覧権限がありません。"

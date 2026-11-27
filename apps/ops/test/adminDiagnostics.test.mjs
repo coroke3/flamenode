@@ -361,22 +361,42 @@ test("U02a workers rejects partial/error-leaking snapshots and keeps 401/403/404
 });
 
 
-test("U02b Worker dashboard shows CURRENT cron, queue, pipelines, artifacts and wake failure details", () => {
+function workerMonitoringFixture() {
   const emptyQueue = { pending: 1, processing: 0, failed: 2, deadLetter: 3, stuck: 0, oldestPendingAt: 1_700_000_000 };
-  const snapshot = {
+  return {
     generatedAt: 1_700_000_000,
     operationMode: "normal", overallLevel: "critical", overallMessage: "通知が滞留しています",
-    jobs: [{ jobName: "sync", label: "YouTube同期", cadenceSeconds: 60, detailHref: "/admin/youtube-sync",
-      level: "critical", message: "ジョブ失敗", leaseExpiresAt: null, lastStartedAt: null,
-      lastSucceededAt: null, lastFailedAt: null, lastErrorCode: "sync_failed", nextExpectedAt: null }],
+    jobs: [
+      ["sync-jobs", "YouTube同期", "/admin/youtube-sync", 3600],
+      ["fast-jobs", "通知", "/admin/notifications", 3600],
+      ["content-jobs", "静的JSON", "/admin/static-builds", 3600],
+      ["fast-jobs:slot-deadline-reminders", "締切", "/admin/notifications", 3600],
+      ["content-jobs:cleanup", "整理", "/admin/static-builds", 86400],
+    ].map(([jobName, label, detailHref, cadenceSeconds], i) => ({
+      jobName, label, detailHref, cadenceSeconds, level: i === 0 ? "critical" : "ok",
+      message: i === 0 ? "ジョブ失敗" : "正常", leaseExpiresAt: null, lastStartedAt: null,
+      lastSucceededAt: null, lastFailedAt: null, lastErrorCode: i === 0 ? "sync_failed" : null,
+      nextExpectedAt: null,
+    })),
     notifications: emptyQueue, staticRebuilds: { ...emptyQueue, pending: 0, failed: 0, deadLetter: 0 },
     youtube: { eligible: 1, pending: 2, stale: 0, failed: 4, oldestPendingAt: null },
     scores: { eligible: 1, stale: 0, oldestUpdatedAt: null },
     artifacts: [{ targetType: "top", generatedAt: null }],
-    pipelines: [{ id: "youtube", label: "YouTube", level: "warn", backlog: 4,
-      capacityPerDay: 100, estimatedDrainMinutes: 70, note: "stale", detailHref: "/admin/youtube-sync" }],
+    pipelines: [
+      ["youtube", "YouTube", "/admin/youtube-sync", 2400],
+      ["notifications", "通知", "/admin/notifications", 8000],
+      ["static", "静的JSON", "/admin/static-builds", 1500],
+      ["scores", "スコア", "/admin/static-builds", 3600],
+    ].map(([id, label, detailHref, capacityPerDay], i) => ({
+      id, label, detailHref, capacityPerDay, level: i === 0 ? "warn" : "ok",
+      backlog: i === 0 ? 4 : 0, estimatedDrainMinutes: i === 0 ? 70 : 0, note: "stale",
+    })),
     queueWakeFailures: { notification_available: { at: 1_700_000_000, reason: "wake_failed" }, static_rebuild_available: null },
   };
+}
+
+test("U02b Worker dashboard shows CURRENT cron, queue, pipelines, artifacts and wake failure details", () => {
+  const snapshot = workerMonitoringFixture();
   const html = render(h(AdminWorkersView, {
     data: { status: "ok", data: { snapshot, error: null } }, onRefresh: () => {},
   }), "/admin/workers");
@@ -400,9 +420,10 @@ test("U02b Worker dashboard shows CURRENT cron, queue, pipelines, artifacts and 
   assert.equal(dom.querySelectorAll("table").length, 3);
   assert.equal(dom.querySelectorAll('button[type="button"]').length, 1);
   assert.ok(dom.querySelector('a[href="/admin/health"]'));
-  const dynamicDetailCount = snapshot.jobs.length + snapshot.pipelines.length;
+  const dynamicSyncCount = [...snapshot.jobs, ...snapshot.pipelines]
+    .filter(row => row.detailHref === "/admin/youtube-sync").length;
   const baselineSyncLinks = dom.querySelectorAll('a[href="/admin/youtube-sync"]').length;
-  assert.equal(baselineSyncLinks, dynamicDetailCount + 1,
+  assert.equal(baselineSyncLinks, dynamicSyncCount + 1,
     "two dynamic action links plus the independent static YouTube queue link are retained");
   for (const unsafeHref of [
     "javascript:alert(1)", "https://attacker.invalid/steal",
@@ -425,9 +446,66 @@ test("U02b Worker dashboard shows CURRENT cron, queue, pipelines, artifacts and 
       "unsafe destination must not become a link: " + unsafeHref);
     assert.equal(
       links.filter((anchor) => anchor.getAttribute("href") === "/admin/youtube-sync").length,
-      baselineSyncLinks - dynamicDetailCount,
+      baselineSyncLinks - dynamicSyncCount,
       "invalid worker and pipeline links are removed but the trusted static queue link remains",
     );
+  }
+});
+
+test("MIG-0736 Worker monitoring requires complete identities and a consistent aggregate level", async () => {
+  const baseline = workerMonitoringFixture();
+  const clean = {
+    ...baseline, overallLevel: "ok", overallMessage: "内部記録上、バックグラウンド処理は想定範囲内です。",
+    jobs: baseline.jobs.map(job => ({ ...job, level: "ok", lastErrorCode: null })),
+    pipelines: baseline.pipelines.map(pipeline => ({ ...pipeline, level: "ok" })),
+  };
+  const show = async snapshot => {
+    const data = await getAdminWorkers(async () => response(200, { snapshot, error: null }));
+    return render(h(AdminWorkersView, { data, onRefresh: () => {} }), "/admin/workers");
+  };
+  const changeJob = (index, fields) => clean.jobs.map((row, i) => i === index ? { ...row, ...fields } : row);
+  const changePipeline = (index, fields) => clean.pipelines.map((row, i) => i === index ? { ...row, ...fields } : row);
+  const invalid = [
+    { ...clean, jobs: [] },
+    { ...clean, pipelines: [] },
+    ...clean.jobs.map((_, i) => ({ ...clean, jobs: clean.jobs.filter((_, j) => i !== j) })),
+    ...clean.pipelines.map((_, i) => ({ ...clean, pipelines: clean.pipelines.filter((_, j) => i !== j) })),
+    ...clean.jobs.map((row, i) => ({ ...clean, jobs: changeJob(i, { jobName: clean.jobs[(i + 1) % clean.jobs.length].jobName }) })),
+    ...clean.pipelines.map((row, i) => ({ ...clean, pipelines: changePipeline(i, { id: clean.pipelines[(i + 1) % clean.pipelines.length].id }) })),
+    { ...clean, jobs: [...clean.jobs, clean.jobs[0]] },
+    { ...clean, pipelines: [...clean.pipelines, clean.pipelines[0]] },
+    { ...clean, jobs: changeJob(0, { jobName: "unexpected-job" }) },
+    { ...clean, pipelines: changePipeline(0, { id: "unexpected-pipeline" }) },
+    { ...clean, overallLevel: "warn" },
+    { ...clean, overallLevel: "critical" },
+    { ...clean, overallLevel: "unknown" },
+    ...["warn", "unknown", "critical"].map(level => ({ ...clean, jobs: changeJob(0, { level }) })),
+    ...["warn", "critical", "running", "unknown"].map(level => ({ ...clean, pipelines: changePipeline(0, { level }) })),
+    { ...baseline, overallLevel: "warn" },
+  ];
+  for (const snapshot of invalid) {
+    const html = await show(snapshot);
+    assert.match(html, /監視情報の取得に失敗しました/);
+    assert.doesNotMatch(html, /Cron実行状態|処理能力と滞留|内部記録上|グローバル静的JSONの最終生成/);
+  }
+
+  // Normal running Cron, optional artifact history and queue wake alert
+  // are not reasons to reclassify the producer's overall level.
+  for (const snapshot of [
+    clean,
+    { ...clean, jobs: [...clean.jobs].reverse(), pipelines: [...clean.pipelines].reverse(), artifacts: [] },
+    { ...clean, jobs: changeJob(0, { level: "running" }) },
+    { ...clean, jobs: changeJob(0, { level: "unknown" }), overallLevel: "warn" },
+    { ...clean, jobs: changeJob(0, { level: "warn" }), overallLevel: "warn" },
+    { ...clean, pipelines: changePipeline(0, { level: "warn" }), overallLevel: "warn" },
+    { ...clean, jobs: changeJob(0, { level: "critical" }), pipelines: changePipeline(0, { level: "warn" }), overallLevel: "critical" },
+    baseline,
+  ]) {
+    const html = await show(snapshot);
+    assert.match(html, /Cron実行状態/);
+    assert.match(html, /処理能力と滞留/);
+    assert.match(html, /Queue wake 最終失敗/);
+    assert.doesNotMatch(html, /監視情報の取得に失敗しました/);
   }
 });
 
