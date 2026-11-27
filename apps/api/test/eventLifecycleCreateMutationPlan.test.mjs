@@ -1757,3 +1757,119 @@ test("MIG-0652 U03i SQLite: strict audit failure rolls back stage UPDATE", async
   assert.equal(row.updated_at, f.before.updated_at);
   assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
 });
+
+/** U03j: real transactional D1 execution of the staged answer-first deletion plan.
+ * These tests do not mount or claim the full CURRENT/Hono update API. */
+async function stageDeleteSqliteFixture() {
+  const f = stageUpdateSqliteFixture();
+  const answers = ["v_stage_1", "v_stage_2"].map((video_id, index) => ({
+    video_id, event_id: event.id, question_id: f.before.id,
+    answer_text: "stage answer " + index, answer_json: null,
+    created_at: now - 100, updated_at: now - 20 + index,
+  }));
+  for (const row of answers) insert(f.sqlite, "video_custom_answers", row);
+  const { and, eq, or } = await import("drizzle-orm");
+  const { planStageQuestionMutationSteps } =
+    await import("@flamenode/server-core/event/updatePayload");
+  const stage = planStageQuestionMutationSteps({
+    existing: [f.before], next: [], deletedAnswers: answers,
+  });
+  assert.equal(stage.ok, true);
+  assert.deepEqual(stage.operations.map(step => step.kind),
+    ["delete_answers", "delete_questions"]);
+  assert.deepEqual(stage.expectedMutationChanges, [2, 1]);
+  const statements = [];
+  const audits = [];
+  for (const operation of stage.operations) {
+    if (operation.kind === "delete_answers") {
+      statements.push(f.db.delete(schema.videoCustomAnswers).where(or(
+        ...operation.rows.map(row => and(
+          eq(schema.videoCustomAnswers.video_id, row.video_id),
+          eq(schema.videoCustomAnswers.event_id, row.event_id),
+          eq(schema.videoCustomAnswers.question_id, row.question_id),
+          eq(schema.videoCustomAnswers.updated_at, row.updated_at),
+        )),
+      )));
+      audits.push(...operation.rows.map(row => ({
+        table_name: "video_custom_answers",
+        target_id: row.video_id + ":" + row.event_id + ":" + row.question_id,
+        operation: "DELETE", before: row, after: null,
+        actor_user_id: "u_admin", context: "event-update:removed-stage-question-answer",
+        retention_class: "normal", strict: true,
+      })));
+    } else if (operation.kind === "delete_questions") {
+      statements.push(f.db.delete(schema.eventCustomQuestions).where(or(
+        ...operation.rows.map(row => and(
+          eq(schema.eventCustomQuestions.id, row.id),
+          eq(schema.eventCustomQuestions.updated_at, row.updated_at),
+        )),
+      )));
+      audits.push(...operation.rows.map(row => ({
+        table_name: "event_custom_questions", target_id: row.id,
+        operation: "DELETE", before: row, after: null,
+        actor_user_id: "u_admin", context: "event-update:removed-stage-question",
+        retention_class: "normal", strict: true,
+      })));
+    } else {
+      assert.fail("unexpected stage deletion operation: " + operation.kind);
+    }
+  }
+  const mutationPlan = {
+    mutationStatements: statements,
+    expectedMutationChanges: stage.expectedMutationChanges,
+    audits,
+  };
+  return { ...f, answers, stage, mutationPlan };
+}
+
+test("MIG-0652 U03j SQLite: answer-first cascade delete and three strict audits commit atomically", async () => {
+  const f = await stageDeleteSqliteFixture();
+  const auditIds = await mutateWithAudit(f.db, f.mutationPlan);
+  assert.equal(auditIds.length, 3);
+  assert.equal(f.d1.stats.batches, 1);
+  assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM video_custom_answers").get().n, 0);
+  assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM event_custom_questions").get().n, 0);
+  const auditRows = f.sqlite.prepare(
+    "SELECT table_name, operation, target_id FROM audit_logs ORDER BY rowid").all();
+  assert.deepEqual(auditRows.map(row => [row.table_name, row.operation, row.target_id]), [
+    ["video_custom_answers", "DELETE", f.answers[0].video_id + ":" + event.id + ":" + f.before.id],
+    ["video_custom_answers", "DELETE", f.answers[1].video_id + ":" + event.id + ":" + f.before.id],
+    ["event_custom_questions", "DELETE", f.before.id],
+  ]);
+  assert.ok(f.d1.stats.maxBinds <= 100);
+});
+
+test("MIG-0652 U03j SQLite: one stale answer CAS rolls back all deletes and audits", async () => {
+  const f = await stageDeleteSqliteFixture();
+  f.sqlite.prepare("UPDATE video_custom_answers SET updated_at = updated_at + 1 WHERE video_id = ?")
+    .run(f.answers[1].video_id);
+  await assert.rejects(mutateWithAudit(f.db, f.mutationPlan));
+  assert.equal(f.d1.stats.batches, 1);
+  assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM video_custom_answers").get().n, 2);
+  assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM event_custom_questions").get().n, 1);
+  assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+  assert.equal(f.sqlite.prepare("SELECT updated_at FROM video_custom_answers WHERE video_id = ?")
+    .get(f.answers[1].video_id).updated_at, f.answers[1].updated_at + 1);
+});
+
+test("MIG-0652 U03j SQLite: stale question CAS rolls back successful answer deletion", async () => {
+  const f = await stageDeleteSqliteFixture();
+  f.sqlite.prepare("UPDATE event_custom_questions SET updated_at = updated_at + 1 WHERE id = ?")
+    .run(f.before.id);
+  await assert.rejects(mutateWithAudit(f.db, f.mutationPlan));
+  assert.equal(f.d1.stats.batches, 1);
+  assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM video_custom_answers").get().n, 2);
+  assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM event_custom_questions").get().n, 1);
+  assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+});
+
+test("MIG-0652 U03j SQLite: late strict audit rejection undoes answer and question deletions", async () => {
+  const f = await stageDeleteSqliteFixture();
+  f.sqlite.exec("CREATE TRIGGER reject_stage_cascade_audit BEFORE INSERT ON audit_logs " +
+    "BEGIN SELECT RAISE(ABORT, 'stage-cascade-audit-denied'); END");
+  await assert.rejects(mutateWithAudit(f.db, f.mutationPlan), /stage-cascade-audit-denied/);
+  assert.equal(f.d1.stats.batches, 1);
+  assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM video_custom_answers").get().n, 2);
+  assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM event_custom_questions").get().n, 1);
+  assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+});
