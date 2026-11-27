@@ -962,6 +962,59 @@ if (runUnderRootTsx(import.meta.url)) {
       { name: "configured slot part satisfies required part even with empty form part",
         requiredFields: ["part"], parts: ["第1部"], form: { part: "" },
         sibling: { reserved_by_user_id: "u_notos" }, message: inconsistent },
+      // Stage-permission questions have a distinct multipart namespace and run
+      // before general custom answers, required video fields and group checks.
+      { name: "missing stage answer precedes all later denials",
+        stage: {}, question: true, requiredFields: ["music"],
+        sibling: { reserved_by_user_id: "u_notos" },
+        message: "ステージ確認を入力してください。" },
+      { name: "stage answer 1001 characters precedes general question",
+        stage: {}, question: true, requiredFields: ["music"],
+        stageIds: ["stage_permission"], stageValues: ["x".repeat(1001)],
+        sibling: { reserved_by_user_id: "u_notos" },
+        message: "ステージ確認は1000文字以内で入力してください。" },
+      { name: "stage answer 1000 characters reaches general question",
+        stage: {}, question: true, requiredFields: ["music"],
+        stageIds: ["stage_permission"], stageValues: ["x".repeat(1000)],
+        sibling: { reserved_by_user_id: "u_notos" },
+        message: "枠応募理由を入力してください。" },
+      { name: "both stage and general answers reach missing music",
+        stage: {}, question: true, requiredFields: ["music"],
+        stageIds: ["stage_permission"], stageValues: ["許諾済み"],
+        form: { "custom_answer:ev_closed:slot_reason": "応募します" },
+        sibling: { reserved_by_user_id: "u_notos" },
+        message: "「使用楽曲」は必須です。" },
+      { name: "duplicate stage IDs use last valid answer",
+        stage: {}, requiredFields: ["music"],
+        stageIds: ["stage_permission", "stage_permission"],
+        stageValues: ["x".repeat(1001), " 許諾済み "],
+        sibling: { reserved_by_user_id: "u_notos" },
+        message: "「使用楽曲」は必須です。" },
+      { name: "last duplicate stage answer can explicitly clear required value",
+        stage: {}, question: true,
+        stageIds: ["stage_permission", "stage_permission"],
+        stageValues: ["許諾済み", "  "],
+        sibling: { reserved_by_user_id: "u_notos" },
+        message: "ステージ確認を入力してください。" },
+      { name: "inactive required stage question is ignored",
+        stage: { is_active: 0 }, question: true,
+        sibling: { reserved_by_user_id: "u_notos" },
+        message: "枠応募理由を入力してください。" },
+      { name: "missing paired stage value is treated as empty",
+        stage: {}, stageIds: ["stage_permission"],
+        sibling: { reserved_by_user_id: "u_notos" },
+        message: "ステージ確認を入力してください。" },
+      { name: "general answer namespace cannot satisfy stage permission",
+        stage: {}, question: true,
+        form: { "custom_answer:ev_closed:stage_permission": "許諾済み",
+          "custom_answer:ev_closed:slot_reason": "応募します" },
+        sibling: { reserved_by_user_id: "u_notos" },
+        message: "ステージ確認を入力してください。" },
+      { name: "valid stage and general answers reach icon validation",
+        stage: {}, question: true,
+        stageIds: ["stage_permission"], stageValues: ["許諾済み"],
+        form: { "custom_answer:ev_closed:slot_reason": "応募します", icon_mode: "upload" },
+        message: "画像ファイルが必要です。" },
       { name: "single already-submitted slot", count: 1,
         anchor: { reservation_group_id: null, status: "submitted", video_id: "v_group_other" },
         message: "予約中の枠だけ作品を提出できます。" },
@@ -976,6 +1029,14 @@ if (runUnderRootTsx(import.meta.url)) {
           w.sqlite.prepare("UPDATE events SET slot_part_gap_minutes=15, max_slots_per_video=1, parts_json=?, required_video_fields_json=? WHERE id='ev_closed'")
             .run(scenario.parts ? JSON.stringify(scenario.parts) : null,
               scenario.requiredFields ? JSON.stringify(scenario.requiredFields) : null);
+          if (scenario.stage) {
+            insert(w.sqlite, "event_custom_questions", {
+              id: "q_slot_stage", event_id: "ev_closed", question_key: "stage_permission",
+              label: "ステージ確認", type: "textarea", max_length: 1000,
+              is_active: 1, required: 1, sort_order: 0, visibility: "review", updated_at: 100,
+              ...scenario.stage,
+            });
+          }
           if (scenario.question) {
             insert(w.sqlite, "event_custom_questions", {
               id: "q_slot_reason", event_id: "ev_closed", question_key: "slot_reason",
@@ -1027,6 +1088,8 @@ if (runUnderRootTsx(import.meta.url)) {
           const fd = baseForm({ youtubeUrl: scenario.youtubeUrl ?? "" });
           fd.set("slot_id", "slot_submit");
           for (const [key, value] of Object.entries(scenario.form ?? {})) fd.set(key, value);
+          for (const id of scenario.stageIds ?? []) fd.append("custom_question_answer_id", id);
+          for (const value of scenario.stageValues ?? []) fd.append("custom_question_answer_value", value);
           const actual = await submitSlotVideo(fd);
           assert.deepEqual(actual, { ok: false, message: scenario.message }, scenario.name);
           assert.equal(guardCalls, 1, scenario.name);
