@@ -1680,6 +1680,21 @@ if (runUnderRootTsx(import.meta.url)) {
       ["/api/admin-read/ops/health/checks/", HEALTH_CHECK_IDS],
       ["/api/admin-read/ops/integrity/", INTEGRITY_CHECK_IDS],
     ];
+    // Three CURRENT health checks are static receipts; they must never
+    // attempt a diagnostic D1 read. Fourteen use Promise.all for count/sample,
+    // so a failed first query does not cancel an already-started sibling.
+    const staticHealth = new Set([
+      "video_statistics_columns", "chapter_non_chapter_marker", "public_api_event_flag",
+    ]);
+    const parallelHealth = new Set([
+      "primary_event_sync", "orphan_event_ref", "orphan_video_ref",
+      "available_slot_with_video", "submitted_slot_without_video",
+      "public_video_without_youtube_id", "voided_video_visible",
+      "missing_video_youtube_metadata", "videos_outro_comment_legacy",
+      "orphan_video_member", "notification_processing_stuck",
+      "notification_failed_volume", "open_moderation_cases_overdue",
+      "x_id_merge_pending_stale",
+    ]);
     // Count actual prepare attempts separately from successful harness reads.
     // The first prepared statement is the real session lookup. Fail the
     // requested diagnostic on execution (including Drizzle's raw() path).
@@ -1712,12 +1727,12 @@ if (runUnderRootTsx(import.meta.url)) {
       assert.equal(receipt.stats.writes, 0);
       assert.doesNotMatch(receipt.text, /synthetic-private-provider-error|tok-carol|SELECT\b/);
     };
-    const unavailable = (receipt, fault, failAt, context) => {
+    const unavailable = (receipt, fault, expectedAttempts, context) => {
       assert.equal(receipt.status, 503, context);
       assert.deepEqual(receipt.body, { error: "unavailable" }, context);
-      assert.equal(fault.attempts(), failAt, context);
+      assert.equal(fault.attempts(), expectedAttempts, context);
       assert.equal(fault.failures(), 1, context);
-      assert.equal(receipt.stats.statements, failAt - 1, context);
+      assert.equal(receipt.stats.statements, expectedAttempts - 1, context);
       noStore(receipt);
     };
     assert.equal(HEALTH_CHECK_IDS.length, 22);
@@ -1727,7 +1742,29 @@ if (runUnderRootTsx(import.meta.url)) {
       for (const [index, id] of ids.entries()) {
         const path = prefix + encodeURIComponent(id);
         const fault = faultAt(2, index % 2 === 0);
-        unavailable(await call(path, ADMIN, { d1: fault.d1 }), fault, 2, id);
+        const actual = await call(path, ADMIN, { d1: fault.d1 });
+        const health = ids === HEALTH_CHECK_IDS;
+        if (health && staticHealth.has(id)) {
+          assert.equal(actual.status, 200, id);
+          assert.equal(actual.body.error, null, id);
+          assert.equal(actual.body.results.length, 1, id);
+          assert.deepEqual(
+            { id: actual.body.results[0].id, status: actual.body.results[0].status,
+              count: actual.body.results[0].count, samples: actual.body.results[0].samples },
+            { id, status: "ok", count: 0, samples: [] }, id,
+          );
+          assert.equal(fault.attempts(), 1, id);
+          assert.equal(fault.failures(), 0, id);
+          assert.equal(actual.stats.statements, 1, id);
+          noStore(actual);
+        } else {
+          unavailable(actual, fault, health && parallelHealth.has(id) ? 3 : 2, id);
+          if (health && parallelHealth.has(id)) {
+            // The other half may fail too: no successful partial diagnosis.
+            const second = faultAt(3, index % 2 !== 0);
+            unavailable(await call(path, ADMIN, { d1: second.d1 }), second, 3, id + ": sibling failure");
+          }
+        }
         const token = deniedTokens[index % deniedTokens.length];
         const deniedFault = faultAt(2);
         const denied = await call(path, token, { d1: deniedFault.d1 });
