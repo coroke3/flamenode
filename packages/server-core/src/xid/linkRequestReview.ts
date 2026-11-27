@@ -3,6 +3,7 @@ import type { BatchItem } from "drizzle-orm/batch";
 import { users, xIdentityRequests, xUserAccountLinks, xUsers } from "@flamenode/db/schema";
 import { buildXIdentityDecisionFields } from "@flamenode/domain/xid";
 import type { ServerCoreDb } from "../db.ts";
+import type { NotificationActor } from "../notifications/actor.ts";
 import type { AtomicAuditMutationInput } from "../audit/mutate.ts";
 import { expectedRowCondition } from "../audit/expectedRowCondition.ts";
 
@@ -345,4 +346,41 @@ export function buildXIdRequestApprovalAudit(input: {
     context: "x-identity-request",
     retention_class: "long_audit",
   };
+}
+
+type ReviewNotificationStatement = Readonly<{ statement: BatchItem<"sqlite"> }>;
+
+type ReviewNotificationChannel = {
+  resolveActor: (authUserId: string) => Promise<NotificationActor | null>;
+  overlayRequester?: (actor: NotificationActor | null) => NotificationActor | null;
+  build: (
+    requester: NotificationActor | null,
+    operator: NotificationActor | null,
+  ) => Promise<ReviewNotificationStatement | null>;
+};
+
+/**
+ * SA-090/091: prepare the DM before loading the ops-channel host, then read
+ * requester and operator in CURRENT order. Hosts retain their lazy template
+ * imports, exact payload/dedupe policy and atomic batch/wake ownership.
+ * Never await a raw Drizzle statement: builders return an envelope.
+ */
+export async function prepareXIdReviewNotifications(input: {
+  requesterUserId: string;
+  operatorUserId: string;
+  buildDm: () => Promise<ReviewNotificationStatement | null>;
+  loadChannel: () => Promise<ReviewNotificationChannel>;
+}): Promise<{
+  notification: ReviewNotificationStatement | null;
+  channelNotification: ReviewNotificationStatement | null;
+}> {
+  const notification = await input.buildDm();
+  const channel = await input.loadChannel();
+  const requester = await channel.resolveActor(input.requesterUserId);
+  const projectedRequester = channel.overlayRequester
+    ? channel.overlayRequester(requester)
+    : requester;
+  const operator = await channel.resolveActor(input.operatorUserId);
+  const channelNotification = await channel.build(projectedRequester, operator);
+  return { notification, channelNotification };
 }

@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { drizzle } from "drizzle-orm/d1";
 import { and, eq, getTableColumns } from "drizzle-orm";
-import { buildXIdRequestApprovalAudit, planXIdAccountLinkInsert, planXIdAliasApproval, planXIdCanonicalApproval, planXIdInitialActiveSelection, planXIdLinkRejection, planXIdSiblingCancellation } from "../src/xid/linkRequestReview.ts";
+import { buildXIdRequestApprovalAudit, planXIdAccountLinkInsert, planXIdAliasApproval, planXIdCanonicalApproval, planXIdInitialActiveSelection, planXIdLinkRejection, planXIdSiblingCancellation, prepareXIdReviewNotifications } from "../src/xid/linkRequestReview.ts";
 import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
 import { assertChanges } from "../src/audit/mutate.ts";
 import { users, xIdentityRequests, xUserAccountLinks, xUsers } from "@flamenode/db/schema";
@@ -711,5 +711,75 @@ test("SA-090 final approval audit preserves the full CURRENT row and committed s
         } finally { sqlite.close(); }
       }
     }
+  }
+});
+
+test("SA-090/091 notification preparation preserves CURRENT order and deferred statement envelopes", async () => {
+  const actor = { userId: "requester", discordId: null, discordName: null,
+    activeXId: null, activeXName: null };
+  const operator = { ...actor, userId: "operator", activeXId: "operator-x" };
+  for (const overlay of [false, true]) {
+    for (const hasDm of [false, true]) {
+      for (const hasChannel of [false, true]) {
+        const calls = [];
+        const neverAwait = { then() { assert.fail("raw statement awaited"); } };
+        const dm = hasDm ? { statement: neverAwait } : null;
+        const channel = hasChannel ? { statement: neverAwait } : null;
+        const projected = { ...actor, activeXId: "candidate" };
+        const result = await prepareXIdReviewNotifications({
+          requesterUserId: "requester", operatorUserId: "operator",
+          buildDm: async () => { calls.push("dm"); return dm; },
+          loadChannel: async () => {
+            calls.push("load");
+            return {
+              resolveActor: async id => {
+                calls.push(id);
+                return id === "requester" ? actor : operator;
+              },
+              ...(overlay ? { overlayRequester: value => {
+                calls.push("overlay");
+                assert.strictEqual(value, actor);
+                return projected;
+              } } : {}),
+              build: async (requester, reviewer) => {
+                calls.push("channel");
+                assert.strictEqual(requester, overlay ? projected : actor);
+                assert.strictEqual(reviewer, operator);
+                return channel;
+              },
+            };
+          },
+        });
+        assert.deepEqual(calls, ["dm", "load", "requester",
+          ...(overlay ? ["overlay"] : []), "operator", "channel"]);
+        assert.strictEqual(result.notification, dm);
+        assert.strictEqual(result.channelNotification, channel);
+      }
+    }
+  }
+});
+
+test("SA-090/091 notification preparation stops at the original failed boundary", async () => {
+  const phases = ["dm", "load", "requester", "overlay", "operator", "channel"];
+  for (const phase of phases) {
+    const calls = [];
+    const error = new Error(phase);
+    const hit = name => {
+      calls.push(name);
+      if (name === phase) throw error;
+    };
+    await assert.rejects(prepareXIdReviewNotifications({
+      requesterUserId: "requester", operatorUserId: "operator",
+      buildDm: async () => { hit("dm"); return null; },
+      loadChannel: async () => {
+        hit("load");
+        return {
+          resolveActor: async id => { hit(id); return null; },
+          overlayRequester: actor => { hit("overlay"); return actor; },
+          build: async () => { hit("channel"); return null; },
+        };
+      },
+    }), value => value === error);
+    assert.deepEqual(calls, phases.slice(0, phases.indexOf(phase) + 1));
   }
 });

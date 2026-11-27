@@ -14,7 +14,7 @@ import {
   or,
   sql,
 } from "drizzle-orm";
-import { buildXIdRequestApprovalAudit, planXIdAccountLinkInsert, planXIdAliasApproval, planXIdCanonicalApproval, planXIdInitialActiveSelection, planXIdLinkRejection, planXIdSiblingCancellation } from "@flamenode/server-core/xid/linkRequestReview";
+import { buildXIdRequestApprovalAudit, planXIdAccountLinkInsert, planXIdAliasApproval, planXIdCanonicalApproval, planXIdInitialActiveSelection, planXIdLinkRejection, planXIdSiblingCancellation, prepareXIdReviewNotifications } from "@flamenode/server-core/xid/linkRequestReview";
 import { canManageXIdLinkRequests } from "@/lib/auth/ownership";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import type { DB } from "@/lib/db/client";
@@ -972,61 +972,74 @@ async function approveXIdLinkRequestOnce(
   expected.push(1);
   audits.push(approvalAudit);
 
-  const {
-    buildXIdApprovedNotification,
-    buildXIdAliasApprovedNotification,
-  } = await import("@/lib/notifications/templates/xid");
-  const notification = await buildNotificationOutboxStatement(db, {
-    recipientUserId: requestedAuthUserId,
-    type: request.request_type === "alias" ? "x_id_alias_approved" : "x_id_approved",
-    payload:
-      request.request_type === "alias"
-        ? buildXIdAliasApprovedNotification({
-            xUserId: submittedXUserId,
-            requestId: request.id,
-          })
-        : buildXIdApprovedNotification({
-            xUserId: notificationXUserId,
-            requestId: request.id,
-          }),
-    dedupeKey: `xid_approved:${request.id}`,
-  });
-  const {
-    overlayNotificationActorActiveX,
-    resolveNotificationActor,
-  } = await import("@/lib/notifications/actor");
-  const {
-    buildChannelXIdApprovedNotification,
-    buildXIdApproveThreadName,
-  } = await import("@/lib/notifications/templates/xidChannel");
-  const { buildOpsChannelWebhookStatement } = await import(
-    "@/lib/notifications/opsWebhook"
-  );
-  const requester = overlayNotificationActorActiveX(
-    await resolveNotificationActor(db, requestedAuthUserId),
-    requesterPostApprovalActiveX,
-  );
-  const operatorActor = await resolveNotificationActor(db, operatorAuthUserId);
-  const approveXIdLabel =
-    submittedXUserId ??
-    request.requested_x_id ??
-    request.source_x_user_id ??
-    "不明";
-  const channelNotification = await buildOpsChannelWebhookStatement(db, {
-    target: "account",
-    threadName: buildXIdApproveThreadName(approveXIdLabel, requester),
-    actorUserId: operatorAuthUserId,
-    payload: buildChannelXIdApprovedNotification({
-      requestId: request.id,
-      requestType: request.request_type,
-      requestedXId: request.requested_x_id,
-      sourceXUserId: request.source_x_user_id,
-      targetXUserId: request.target_x_user_id,
-      requester,
-      operator: operatorActor,
-      approvedAt: now,
-    }),
-    dedupeKey: `xid_approve_webhook:${request.id}`,
+  const reviewRequestType = request.request_type;
+  const approvedSubmittedXId = submittedXUserId;
+  const approvedNotificationXId = notificationXUserId;
+  const { notification, channelNotification } = await prepareXIdReviewNotifications({
+    requesterUserId: requestedAuthUserId,
+    operatorUserId: operatorAuthUserId,
+    buildDm: async () => {
+      const {
+        buildXIdApprovedNotification,
+        buildXIdAliasApprovedNotification,
+      } = await import("@/lib/notifications/templates/xid");
+      return buildNotificationOutboxStatement(db, {
+        recipientUserId: requestedAuthUserId,
+        type: reviewRequestType === "alias" ? "x_id_alias_approved" : "x_id_approved",
+        payload:
+          reviewRequestType === "alias"
+            ? buildXIdAliasApprovedNotification({
+                xUserId: approvedSubmittedXId,
+                requestId: request.id,
+              })
+            : buildXIdApprovedNotification({
+                xUserId: approvedNotificationXId,
+                requestId: request.id,
+              }),
+        dedupeKey: `xid_approved:${request.id}`,
+      });
+    },
+    loadChannel: async () => {
+      const {
+        overlayNotificationActorActiveX,
+        resolveNotificationActor,
+      } = await import("@/lib/notifications/actor");
+      const {
+        buildChannelXIdApprovedNotification,
+        buildXIdApproveThreadName,
+      } = await import("@/lib/notifications/templates/xidChannel");
+      const { buildOpsChannelWebhookStatement } = await import(
+        "@/lib/notifications/opsWebhook"
+      );
+      return {
+        resolveActor: (userId) => resolveNotificationActor(db, userId),
+        overlayRequester: (actor) =>
+          overlayNotificationActorActiveX(actor, requesterPostApprovalActiveX),
+        build: (requester, operatorActor) => {
+          const approveXIdLabel =
+            submittedXUserId ??
+            request.requested_x_id ??
+            request.source_x_user_id ??
+            "不明";
+          return buildOpsChannelWebhookStatement(db, {
+            target: "account",
+            threadName: buildXIdApproveThreadName(approveXIdLabel, requester),
+            actorUserId: operatorAuthUserId,
+            payload: buildChannelXIdApprovedNotification({
+              requestId: request.id,
+              requestType: reviewRequestType,
+              requestedXId: request.requested_x_id,
+              sourceXUserId: request.source_x_user_id,
+              targetXUserId: request.target_x_user_id,
+              requester,
+              operator: operatorActor,
+              approvedAt: now,
+            }),
+            dedupeKey: `xid_approve_webhook:${request.id}`,
+          });
+        },
+      };
+    },
   });
   if (notification) {
     statements.push(notification.statement);
@@ -1208,54 +1221,63 @@ async function rejectXIdLinkRequestOnce(
   }
 
   const now = Math.floor(Date.now() / 1000);
-  const rejectedXIdLabel =
-    request.requested_x_id ?? request.source_x_user_id ?? "不明";
-  const { buildXIdRejectedNotification } = await import(
-    "@/lib/notifications/templates/xid"
-  );
-  const notification = await buildNotificationOutboxStatement(db, {
-    recipientUserId: request.requested_by_auth_user_id,
-    type: "x_id_rejected",
-    payload: buildXIdRejectedNotification({
-      requestedXId: request.requested_x_id ?? rejectedXIdLabel,
-      requestId: request.id,
-      reason: reason || null,
-    }),
-    dedupeKey: `xid_rejected:${request.id}`,
-  });
-  const { resolveNotificationActor } = await import(
-    "@/lib/notifications/actor"
-  );
-  const {
-    buildChannelXIdRejectedNotification,
-    buildXIdRejectThreadName,
-  } = await import("@/lib/notifications/templates/xidChannel");
-  const { buildOpsChannelWebhookStatement } = await import(
-    "@/lib/notifications/opsWebhook"
-  );
-  const requester = await resolveNotificationActor(
-    db,
-    request.requested_by_auth_user_id,
-  );
-  const operatorActor = await resolveNotificationActor(db, operatorAuthUserId);
-  const rejectXIdLabel =
-    request.requested_x_id ?? request.source_x_user_id ?? "不明";
-  const channelNotification = await buildOpsChannelWebhookStatement(db, {
-    target: "account",
-    threadName: buildXIdRejectThreadName(rejectXIdLabel, requester),
-    actorUserId: operatorAuthUserId,
-    payload: buildChannelXIdRejectedNotification({
-      requestId: request.id,
-      requestType: request.request_type,
-      requestedXId: request.requested_x_id,
-      sourceXUserId: request.source_x_user_id,
-      targetXUserId: request.target_x_user_id,
-      requester,
-      operator: operatorActor,
-      reason: reason || null,
-      rejectedAt: now,
-    }),
-    dedupeKey: `xid_reject_webhook:${request.id}`,
+  const reviewRequestType = request.request_type;
+  const { notification, channelNotification } = await prepareXIdReviewNotifications({
+    requesterUserId: request.requested_by_auth_user_id,
+    operatorUserId: operatorAuthUserId,
+    buildDm: async () => {
+      const rejectedXIdLabel =
+        request.requested_x_id ?? request.source_x_user_id ?? "不明";
+      const { buildXIdRejectedNotification } = await import(
+        "@/lib/notifications/templates/xid"
+      );
+      return buildNotificationOutboxStatement(db, {
+        recipientUserId: request.requested_by_auth_user_id,
+        type: "x_id_rejected",
+        payload: buildXIdRejectedNotification({
+          requestedXId: request.requested_x_id ?? rejectedXIdLabel,
+          requestId: request.id,
+          reason: reason || null,
+        }),
+        dedupeKey: `xid_rejected:${request.id}`,
+      });
+    },
+    loadChannel: async () => {
+      const { resolveNotificationActor } = await import(
+        "@/lib/notifications/actor"
+      );
+      const {
+        buildChannelXIdRejectedNotification,
+        buildXIdRejectThreadName,
+      } = await import("@/lib/notifications/templates/xidChannel");
+      const { buildOpsChannelWebhookStatement } = await import(
+        "@/lib/notifications/opsWebhook"
+      );
+      return {
+        resolveActor: (userId) => resolveNotificationActor(db, userId),
+        build: (requester, operatorActor) => {
+          const rejectXIdLabel =
+            request.requested_x_id ?? request.source_x_user_id ?? "不明";
+          return buildOpsChannelWebhookStatement(db, {
+            target: "account",
+            threadName: buildXIdRejectThreadName(rejectXIdLabel, requester),
+            actorUserId: operatorAuthUserId,
+            payload: buildChannelXIdRejectedNotification({
+              requestId: request.id,
+              requestType: reviewRequestType,
+              requestedXId: request.requested_x_id,
+              sourceXUserId: request.source_x_user_id,
+              targetXUserId: request.target_x_user_id,
+              requester,
+              operator: operatorActor,
+              reason: reason || null,
+              rejectedAt: now,
+            }),
+            dedupeKey: `xid_reject_webhook:${request.id}`,
+          });
+        },
+      };
+    },
   });
   const notificationStatements: BatchItem<"sqlite">[] = [];
   if (notification) notificationStatements.push(notification.statement);
