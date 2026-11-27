@@ -773,6 +773,117 @@ test("U01 Active X changed event invalidates old identity before refetch resolve
   }
 });
 
+test("U03h mutation receipts expire on Active X refresh, public snapshot, event and unmount", async () => {
+  const React = (await import("react")).default;
+  const { JSDOM } = await import("jsdom");
+  const { useEventSlotsViewer } = await import("../apps/site/src/components/EventSlotsViewerIsland.ts");
+  const { ACTIVE_X_CHANGED_EVENT } = await import("../src/lib/client/activeXSwitchEvents.ts");
+  const dom = new JSDOM("<!doctype html><div id='root'></div>", { url: "https://flamenode.net/event/e/slots" });
+  const domKeys = ["window", "document", "navigator", "HTMLElement", "Node"];
+  const previousDom = new Map(domKeys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  for (const key of domKeys) {
+    Object.defineProperty(globalThis, key, {
+      configurable: true, writable: true, value: dom.window[key],
+    });
+  }
+  const { createRoot } = await import("react-dom/client");
+  const previousFetch = globalThis.fetch;
+  const previousAct = globalThis.IS_REACT_ACT_ENVIRONMENT;
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const makeOverlay = (id) => ({
+    loggedIn: true, authUnavailable: false, isBanned: false,
+    needsTermsAcceptance: false, canReserveSlot: true, canPost: true,
+    operatorOverrideAllowed: false, viewerXId: id, viewerXIdNotice: null,
+    slots: [{ id: "s", viewer_relation: "active", is_owned_by_viewer: true, x_user_id: id }],
+  });
+  const requests = [];
+  globalThis.fetch = async (_url, init) => new Promise((resolve) => {
+    requests.push({ resolve, signal: init.signal });
+  });
+  let baseSlots = [{ id: "s" }];
+  let eventId = "e";
+  let snapshot;
+  const Harness = () => {
+    snapshot = useEventSlotsViewer(eventId, baseSlots, true);
+    return React.createElement("div");
+  };
+  const root = createRoot(dom.window.document.getElementById("root"));
+  const render = () => React.act(async () => root.render(React.createElement(Harness)));
+  const settle = (index, overlay) => React.act(async () => {
+    requests[index].resolve({ ok: true, json: async () => overlay });
+    await new Promise(resolve => setTimeout(resolve, 10));
+  });
+  try {
+    await render();
+    assert.equal(snapshot.captureMutationReceipt(), null, "pending cannot authorize a UI receipt");
+    await settle(0, makeOverlay("same"));
+    const oldCapture = snapshot.captureMutationReceipt;
+    const first = oldCapture();
+    assert.equal(typeof first, "function");
+    assert.equal(first(), true);
+    await React.act(async () => {
+      dom.window.dispatchEvent(new dom.window.Event(ACTIVE_X_CHANGED_EVENT));
+      assert.equal(first(), false, "invalidate before React commits a refresh");
+      assert.equal(oldCapture(), null, "a stale handler cannot capture the next receipt");
+    });
+    assert.equal(snapshot.captureMutationReceipt(), null);
+    await settle(1, makeOverlay("same"));
+    const second = snapshot.captureMutationReceipt();
+    assert.equal(second(), true);
+    assert.equal(first(), false, "same Active X string must not revive old receipt");
+    assert.equal(oldCapture(), null);
+
+    // A new public array can describe the same slot ID owned by a different viewer.
+    baseSlots = [{ id: "s" }];
+    await render();
+    assert.equal(second(), false);
+    assert.equal(snapshot.captureMutationReceipt(), null);
+    await settle(2, makeOverlay("same"));
+    const third = snapshot.captureMutationReceipt();
+    assert.equal(third(), true);
+
+    // An event can reuse both its slot IDs and the same Active X string.
+    eventId = "other";
+    await render();
+    assert.equal(third(), false);
+    await settle(3, makeOverlay("same"));
+    const other = snapshot.captureMutationReceipt();
+    assert.equal(other(), true);
+    eventId = "e";
+    await render();
+    assert.equal(other(), false);
+    await settle(4, makeOverlay("same"));
+    const returned = snapshot.captureMutationReceipt();
+    assert.equal(returned(), true);
+    assert.equal(third(), false);
+
+    // An explicit refresh fences synchronous old callbacks; a denied result
+    // cannot provide a receipt even when it echoes a prior X ID.
+    await React.act(async () => {
+      snapshot.refresh();
+      assert.equal(returned(), false);
+    });
+    await settle(5, { ...makeOverlay("same"), isBanned: true });
+    assert.equal(snapshot.captureMutationReceipt(), null);
+    await React.act(async () => snapshot.refresh());
+    await settle(6, makeOverlay("same"));
+    const final = snapshot.captureMutationReceipt();
+    assert.equal(final(), true);
+    // Render an empty tree to unmount the hook before the final root cleanup.
+    await React.act(async () => root.render(null));
+    assert.equal(final(), false);
+  } finally {
+    await React.act(async () => root.unmount());
+    for (const [key, descriptor] of previousDom) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+    globalThis.fetch = previousFetch;
+    globalThis.IS_REACT_ACT_ENVIRONMENT = previousAct;
+    dom.window.close();
+  }
+});
+
 test("U01 SSR / JS-disabled public page contains only a safe notice, never reservation controls", async () => {
   const React = (await import("react")).default;
   const { renderToString } = await import("react-dom/server");

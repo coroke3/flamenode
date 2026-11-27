@@ -197,6 +197,8 @@ export interface ViewerSlotsState<T extends ViewerSlotBase> {
   canTakeSlot: boolean;
   canManageOwnSlots: boolean;
   refresh: () => void;
+  /** Capture only from the currently committed authorized viewer snapshot. */
+  captureMutationReceipt: () => (() => boolean) | null;
 }
 
 export function useEventSlotsViewer<T extends ViewerSlotBase>(
@@ -212,10 +214,12 @@ export function useEventSlotsViewer<T extends ViewerSlotBase>(
   const [loading, setLoading] = React.useState(true);
   const [refreshNonce, setRefreshNonce] = React.useState(0);
   const generation = React.useRef(0);
+  const committedMutationScope = React.useRef<{ scope: object } | null>(null);
 
   const refresh = React.useCallback(() => {
     // Invalidate in-flight responses synchronously, even before React's effect cleanup.
     generation.current += 1;
+    committedMutationScope.current = null;
     setOverlayState({ value: EMPTY_OVERLAY, baseSlots: null, eventId: null });
     setLoading(true);
     setRefreshNonce((n) => n + 1);
@@ -255,7 +259,28 @@ export function useEventSlotsViewer<T extends ViewerSlotBase>(
     () => mergeViewerSlotOverlay(baseSlots, value, canManageOwnSlots),
     [baseSlots, value, canManageOwnSlots],
   );
-  return { overlay: value, loading: pending, slots, canTakeSlot, canManageOwnSlots, refresh };
+  // U03h: receipt fencing for the future unmounted mutation host. A new
+  // committed RH-014/RH-020 snapshot, event or permission state supersedes the
+  // previous snapshot, even if the same Active X ID appears again.
+  const mutationScope = React.useMemo(
+    () => canManageOwnSlots ? { eventId, baseSlots, overlay: value, canTakeSlot } : null,
+    [canManageOwnSlots, eventId, baseSlots, value, canTakeSlot],
+  );
+  React.useLayoutEffect(() => {
+    const committed = mutationScope ? { scope: mutationScope } : null;
+    committedMutationScope.current = committed;
+    return () => {
+      if (committedMutationScope.current === committed) committedMutationScope.current = null;
+    };
+  }, [mutationScope]);
+  const captureMutationReceipt = React.useCallback(() => {
+    const committed = committedMutationScope.current;
+    if (!mutationScope || committed?.scope !== mutationScope) return null;
+    return () => committedMutationScope.current === committed;
+  }, [mutationScope]);
+  // This is a UI receipt, not server authorization or a mutation lock.
+  // The host must validate it again before displaying/redirecting a result.
+  return { overlay: value, loading: pending, slots, canTakeSlot, canManageOwnSlots, refresh, captureMutationReceipt };
 }
 
 /** Host-level React wrapper; later U03 supplies SlotGrid controls as a render function. */
