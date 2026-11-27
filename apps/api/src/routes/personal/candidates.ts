@@ -6,47 +6,85 @@ import { MAX_LINKED_X_USERS } from "./sql.ts";
 export const MAX_ICON_CANDIDATES = 12;
 export const MAX_CHANNEL_CANDIDATES = 24;
 
-function normalizeHttpUrl(raw: string | null | undefined, maxLength = 500): string | null {
-  const s = String(raw ?? "").trim();
+function normalizeHttpUrl(
+  raw: string | null | undefined,
+  options: { maxLength?: number } = {},
+): string | null {
+  const original = String(raw ?? "");
+  // WHATWG URL silently strips leading/trailing C0 controls (including NUL),
+  // while trim() also hides CR/LF/TAB. Reject control characters before either step.
+  if (/[\x00-\x1f\x7f\\]/.test(original)) return null;
+  const s = original.trim();
   if (!s) return null;
+  const maxLength = options.maxLength ?? 500;
+  // Non-finite limits bypass numeric comparisons and silently disable the cap.
+  if (!Number.isSafeInteger(maxLength) || maxLength < 0) return null;
   if (s.length > maxLength) return null;
+
   try {
     const url = new URL(s);
     if (url.protocol !== "https:" && url.protocol !== "http:") return null;
-    // Reject userinfo so normalized URLs never expose embedded credentials.
+    // Userinfo must never be serialized into public links or persisted URL fields.
     if (url.username || url.password) return null;
-    return url.toString();
+    // Unicode and other characters may expand when URL is serialized.
+    // Check the value that will actually be stored and displayed as a link.
+    const normalized = url.toString();
+    return normalized.length <= maxLength ? normalized : null;
   } catch {
     return null;
   }
 }
 
-function normalizeYoutubeChannelUrl(raw: string | null | undefined): string | null {
-  const http = normalizeHttpUrl(raw, 500);
+const MAX_CHANNEL_URL_LENGTH = 500;
+
+/** YouTube チャンネル URL を正規化する。チャンネル形式でなければ null。 */
+function normalizeYoutubeChannelUrl(
+  raw: string | null | undefined,
+): string | null {
+  const http = normalizeHttpUrl(raw, { maxLength: MAX_CHANNEL_URL_LENGTH });
   if (!http) return null;
+
   try {
     const url = new URL(http);
     const host = url.hostname.replace(/^www\./, "").replace(/^m\./, "");
     if (host !== "youtube.com") return null;
+
     const segments = url.pathname.split("/").filter(Boolean);
     if (segments.length === 0) return null;
+
     const head = segments[0]!;
-    if (head.startsWith("@")) return `https://www.youtube.com/${head}`;
-    if (head === "channel" || head === "c" || head === "user") {
+    let channelPath: string;
+    if (head.startsWith("@")) {
+      // A bare "@" is not a channel handle.
+      if (head.length === 1) return null;
+      channelPath = head;
+    } else if (head === "channel" || head === "c" || head === "user") {
       const id = segments[1];
       if (!id) return null;
-      return `https://www.youtube.com/${head}/${id}`;
+      channelPath = `${head}/${id}`;
+    } else {
+      return null;
     }
-    return null;
+
+    // Canonicalization expands http://youtube.com into https://www.youtube.com.
+    // Enforce the same storage limit on the final URL, not just on the input.
+    const canonical = `https://www.youtube.com/${channelPath}`;
+    return canonical.length <= MAX_CHANNEL_URL_LENGTH ? canonical : null;
   } catch {
     return null;
   }
 }
 
-export function normalizeYoutubeChannelInput(raw: string | null | undefined): string | null {
+/** 設定保存用: チャンネル URL 優先、それ以外は http(s) URL を許可。 */
+export function normalizeYoutubeChannelInput(
+  raw: string | null | undefined,
+): string | null {
   const trimmed = String(raw ?? "").trim();
   if (!trimmed) return null;
-  return normalizeYoutubeChannelUrl(trimmed) ?? normalizeHttpUrl(trimmed, 500);
+  return (
+    normalizeYoutubeChannelUrl(trimmed) ??
+    normalizeHttpUrl(trimmed, { maxLength: 500 })
+  );
 }
 
 /**
