@@ -1488,6 +1488,16 @@ if (runUnderRootTsx(import.meta.url)) {
     });
     assert.deepEqual(valid.eventIdsByVideo.get("video-1"), ["event-1", "event-2"]);
     assert.deepEqual(valid.eventIdsByVideo.get("video-old"), []);
+    // Exact duplicate release tuples fail closed; distinct rows sharing a primary event remain valid.
+    assert.throws(() => validateSpreadsheetMemberFkReleaseLookupReceipt(plan, {
+      success: true, results: [fk, release("video-1", "event-shared", "primary-shared"),
+        release("video-1", "event-shared", "primary-shared")],
+    }), /invalid_snapshot/);
+    const sharedPrimary = validateSpreadsheetMemberFkReleaseLookupReceipt(plan, {
+      success: true, results: [fk, release("video-1", "event-a", "primary-shared"),
+        release("video-1", "event-b", "primary-shared")],
+    });
+    assert.deepEqual(sharedPrimary.eventIdsByVideo.get("video-1"), ["event-a", "primary-shared", "event-b"]);
     const overflowRows = Array.from({ length: 257 }, (_, i) => release("video-1", "event-" + i));
     assert.throws(() => validateSpreadsheetMemberFkReleaseLookupReceipt(plan, {
       success: true, results: overflowRows,
