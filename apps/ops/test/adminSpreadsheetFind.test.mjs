@@ -213,7 +213,9 @@ test("MIG-0737 U01 Find: child buttons and active editor inputs own their Ctrl+f
     const target = await select(ui, "0:1");
     assert.equal((await press(target.querySelector("button"), "f", { ctrlKey: true })).defaultPrevented, false);
     assert.equal(ui.host.querySelector('input[type="search"]') === null, true);
-    await press(target, "Enter");
+    const edit = target.querySelector("button");
+    assert.ok(edit && !edit.disabled);
+    await React.act(async () => edit.click());
     const editor = target.querySelector('input[type="text"]');
     assert.ok(editor);
     await inputValue(editor, "Uncommitted value");

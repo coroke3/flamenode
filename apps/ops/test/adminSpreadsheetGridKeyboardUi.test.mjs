@@ -79,7 +79,7 @@ test("MIG-0737 U01: read-only grid keyboard shift-range copies selected TSV, no 
   }
 });
 
-test("MIG-0737 U01: Enter opens only mutable columns; missing clipboard permission is reported", async () => {
+test("MIG-0737 U01: Enter navigates, edit buttons open only mutable columns; missing clipboard permission is reported", async () => {
   const previous = Object.getOwnPropertyDescriptor(navigator, "clipboard");
   Object.defineProperty(navigator, "clipboard", { configurable: true, value: {
     writeText: async () => { throw Error("permission denied"); },
@@ -87,11 +87,15 @@ test("MIG-0737 U01: Enter opens only mutable columns; missing clipboard permissi
   const ui = await mount({ allowMutations: true });
   try {
     const pk = ui.host.querySelector('[data-grid-cell="0:0"]');
-    await press(pk, "Enter");
+    assert.equal((await press(pk, "Enter")).defaultPrevented, true);
+    assertNavigation(ui, "1:0");
     assert.equal(ui.host.querySelectorAll('button[aria-label="1行 id を編集"]').length, 0);
     assert.equal(ui.host.querySelectorAll("input").length, 0);
     const title = ui.host.querySelector('[data-grid-cell="0:1"]');
-    await press(title, "Enter");
+    assert.equal((await press(title, "Enter")).defaultPrevented, true);
+    assertNavigation(ui, "1:1");
+    assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 0);
+    await openCellEditor(title);
     assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 1);
     await press(title, "c", { ctrlKey: true });
     await flush();
@@ -150,9 +154,15 @@ async function clickButton(ui, text) {
   assert.equal(button.disabled, false);
   await React.act(async () => { button.click(); });
 }
+async function openCellEditor(cell) {
+  const button = cell.querySelector("button");
+  assert.ok(button, "missing cell edit control");
+  assert.equal(button.disabled, false);
+  await React.act(async () => button.click());
+}
 async function beginTitleSave(ui, value) {
   const cell = await selectCell(ui, "1:1");
-  await press(cell, "Enter");
+  await openCellEditor(cell);
   const input = cell.querySelector("input");
   await React.act(async () => {
     Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value").set.call(input, value);
@@ -245,7 +255,7 @@ test("MIG-0737 U01: selection shortcuts leave input and child-button keys to the
     const button = cell.querySelector("button");
     assert.equal((await press(button, "a", { ctrlKey: true })).defaultPrevented, false);
     assert.deepEqual(selectedCells(ui), ["1:1"]);
-    await press(cell, "Enter");
+    await openCellEditor(cell);
     const input = cell.querySelector("input");
     assert.ok(input);
     for (const target of [input, cell]) {
@@ -515,7 +525,7 @@ test("MIG-0737 U01 header: the interim editor fence retains an unsaved draft and
   });
   try {
     const cell = await selectCell(ui, "1:1");
-    await press(cell, "Enter");
+    await openCellEditor(cell);
     const input = cell.querySelector("input");
     await React.act(async () => {
       input.focus();
@@ -854,7 +864,7 @@ test("MIG-0737 U01 column sizing: resize and autofit exclude the active input an
   });
   try {
     const cell = await selectCell(ui, "0:1");
-    await press(cell, "Enter");
+    await openCellEditor(cell);
     const input = cell.querySelector("input");
     await React.act(async () => {
       Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value").set.call(input, "unsaved");
@@ -1174,7 +1184,7 @@ test("MIG-0737 U01 navigation: live and invalidated drafts keep their value and 
   });
   try {
     const cell = await selectCell(ui, "1:1");
-    await press(cell, "Enter");
+    await openCellEditor(cell);
     const input = cell.querySelector("input");
     assert.ok(input);
     await React.act(async () => {
@@ -1241,14 +1251,14 @@ test("MIG-0737 U01 navigation: descendant controls retain navigation keys and th
   } finally { await ui.cleanup(); }
 });
 
-test("MIG-0737 U01 navigation: excluded F2, Enter and text keys retain the previous nonediting behavior", async () => {
+test("MIG-0737 U01 navigation: excluded F2 and text keys retain the previous nonediting behavior", async () => {
   // This checks only the existing uncancelled grid event boundary for excluded keys.
   const ui = await mount({ data: rangeData });
   const scrolls = watchNavigationScroll(ui);
   try {
     await selectCell(ui, "1:1");
     scrolls.length = 0;
-    for (const key of ["Enter", "F2", "Escape", "x", "Homebrew"]) {
+    for (const key of ["F2", "Escape", "x", "Homebrew"]) {
       assert.equal((await press(document.activeElement, key)).defaultPrevented, false, key);
       assertNavigation(ui, "1:1");
       assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 0);
@@ -1495,5 +1505,110 @@ test("MIG-0737 U01 Tab navigation: child buttons and live drafts keep their exis
       assert.deepEqual(selectedCells(ui), ["1:1"]);
     }
     assert.deepEqual(effects, []);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 Enter navigation: all modifiers advance the row and collapse selection without editing", async () => {
+  for (const variant of [
+    { mode: "editable", allowMutations: true, primaryKeys: ["id"] },
+    { mode: "readonly", allowMutations: true, primaryKeys: ["id"] },
+    { mode: "editable", allowMutations: false, primaryKeys: ["id"] },
+    { mode: "editable", allowMutations: true, primaryKeys: [] },
+  ]) {
+    const effects = [];
+    const ui = await mount({ data: { ...rangeData, def: { ...rangeData.def, mode: variant.mode },
+      primaryKeys: variant.primaryKeys }, allowMutations: variant.allowMutations,
+    fetchFn: async () => { effects.push("request"); throw Error("Enter must not request"); },
+    onRefresh: () => { effects.push("refresh"); } });
+    const scrolls = watchNavigationScroll(ui);
+    try {
+      for (let bits = 0; bits < 16; bits++) {
+        const options = { ctrlKey: !!(bits & 1), metaKey: !!(bits & 2),
+          altKey: !!(bits & 4), shiftKey: !!(bits & 8) };
+        await selectNavigationRange(ui, "0:0", "1:1");
+        scrolls.length = 0;
+        assert.equal((await press(document.activeElement, "Enter", options)).defaultPrevented, true);
+        assertNavigation(ui, "2:1");
+        assert.deepEqual(scrolls, [{ position: "2:1", options: { block: "nearest", inline: "nearest" } }]);
+        assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 0);
+      }
+      await selectNavigationRange(ui, "0:0", "2:1");
+      scrolls.length = 0;
+      assert.equal((await press(document.activeElement, "Enter", { shiftKey: true })).defaultPrevented, true);
+      assertNavigation(ui, "2:1");
+      assert.deepEqual(scrolls, []);
+      assert.deepEqual(effects, []);
+    } finally { await ui.cleanup(); }
+  }
+});
+
+test("MIG-0737 U01 Enter navigation: one row consumes and clamps without editing or scrolling", async () => {
+  const ui = await mount({ data: { ...rangeData, rows: rangeData.rows.slice(0, 1) }, allowMutations: true });
+  const scrolls = watchNavigationScroll(ui);
+  try {
+    await selectNavigationRange(ui, "0:0", "0:1");
+    scrolls.length = 0;
+    assert.equal((await press(document.activeElement, "Enter")).defaultPrevented, true);
+    assertNavigation(ui, "0:1");
+    assert.deepEqual(scrolls, []);
+    assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 0);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 Enter navigation: child and same-batch/live draft retain event ownership", async () => {
+  const effects = [];
+  const ui = await mount({ data: rangeData, allowMutations: true,
+    fetchFn: async () => { effects.push("request"); throw Error("TD Enter must not save draft"); },
+    onRefresh: () => { effects.push("refresh"); } });
+  try {
+    const cell = await selectCell(ui, "1:1");
+    const button = cell.querySelector("button");
+    button.focus();
+    assert.equal((await press(button, "Enter", { ctrlKey: true })).defaultPrevented, false);
+    assert.ok(document.activeElement === button);
+    const following = new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    await React.act(async () => { button.click(); cell.dispatchEvent(following); });
+    assert.equal(following.defaultPrevented, false);
+    const input = cell.querySelector("input");
+    assert.ok(input);
+    for (let bits = 0; bits < 16; bits++) {
+      assert.equal((await press(cell, "Enter", { ctrlKey: !!(bits & 1), metaKey: !!(bits & 2),
+        altKey: !!(bits & 4), shiftKey: !!(bits & 8) })).defaultPrevented, false);
+      assert.ok(document.activeElement === input);
+      assert.equal(input.value, "Beta");
+      assert.deepEqual(selectedCells(ui), ["1:1"]);
+    }
+    assert.deepEqual(effects, []);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 Enter navigation: ordinary pending save permits movement, matching history lock does not", async () => {
+  const requests = [];
+  const ui = await mount({ data: rangeData, allowMutations: true,
+    fetchFn: (_, init) => new Promise(resolve => requests.push({ init, resolve })),
+    onRefresh: () => {} });
+  try {
+    const cell = await beginTitleSave(ui, "Changed");
+    assert.equal(requests.length, 1);
+    assert.equal((await press(cell, "Enter")).defaultPrevented, true);
+    assertNavigation(ui, "2:1");
+    await React.act(async () => requests[0].resolve(successfulWrite()));
+    await flush();
+    await selectCell(ui, "1:1");
+    const following = new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    await React.act(async () => {
+      cell.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "z", ctrlKey: true, bubbles: true }));
+      cell.dispatchEvent(following);
+    });
+    assert.equal(requests.length, 2);
+    assert.equal(following.defaultPrevented, false);
+    assertNavigation(ui, "1:1");
+    assert.equal((await press(cell, "Enter")).defaultPrevented, false);
+    assertNavigation(ui, "1:1");
+    await React.act(async () => requests[1].resolve(successfulWrite()));
+    await flush();
+    assert.equal((await press(cell, "Enter")).defaultPrevented, true);
+    assertNavigation(ui, "2:1");
+    assert.equal(requests.length, 2);
   } finally { await ui.cleanup(); }
 });

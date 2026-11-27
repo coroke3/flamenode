@@ -30,6 +30,7 @@ export function moveSpreadsheetFocus(
   else if (key === "PageDown") row += 10;
   else if (key === "Tab") col += 1;
   else if (key === "ShiftTab") col -= 1;
+  else if (key === "Enter") row += 1;
   else return current;
   return {
     row: Math.max(0, Math.min(rowCount - 1, row)),

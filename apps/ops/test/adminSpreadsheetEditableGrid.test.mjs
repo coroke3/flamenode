@@ -254,11 +254,8 @@ test("MIG-0737 U01: keyboard edit retains original PK and value through unchange
   try {
     const cell = ui.host.querySelector('[data-grid-cell="0:1"]');
     assert.ok(cell);
-    await React.act(async () => {
-      cell.focus();
-      cell.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
-    });
-    await flush();
+    cell.focus();
+    await click(ui, "1行 title を編集");
     await input(ui, "title を編集", "draft");
     await ui.render({ ...props, data: { ...original, rows: [{ ...original.rows[0], secret: "updated unrelated value" }] } });
     assert.equal(ui.host.querySelector('[role="alert"]'), null);
