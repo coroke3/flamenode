@@ -1241,14 +1241,14 @@ test("MIG-0737 U01 navigation: descendant controls retain navigation keys and th
   } finally { await ui.cleanup(); }
 });
 
-test("MIG-0737 U01 navigation: excluded Tab, F2, Enter and text keys retain the previous nonediting behavior", async () => {
-  // JSDOM does not execute native Tab traversal; this checks only the existing uncancelled grid event boundary.
+test("MIG-0737 U01 navigation: excluded F2, Enter and text keys retain the previous nonediting behavior", async () => {
+  // This checks only the existing uncancelled grid event boundary for excluded keys.
   const ui = await mount({ data: rangeData });
   const scrolls = watchNavigationScroll(ui);
   try {
     await selectCell(ui, "1:1");
     scrolls.length = 0;
-    for (const key of ["Tab", "Enter", "F2", "Escape", "x", "Homebrew"]) {
+    for (const key of ["Enter", "F2", "Escape", "x", "Homebrew"]) {
       assert.equal((await press(document.activeElement, key)).defaultPrevented, false, key);
       assertNavigation(ui, "1:1");
       assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 0);
@@ -1427,5 +1427,73 @@ test("MIG-0737 U01 navigation: shrinking and empty pages retain the bounded Tab 
     await selectCell(ui, "0:1");
     assert.equal((await press(document.activeElement, "End")).defaultPrevented, true);
     assertNavigation(ui, "0:1");
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 Tab navigation: modifier combinations collapse the selection and preserve the displayed row", async () => {
+  const effects = [];
+  const ui = await mount({ data: navigationData, allowMutations: true,
+    fetchFn: async () => { effects.push("request"); throw Error("Tab must not request"); },
+    onRefresh: () => { effects.push("refresh"); },
+  });
+  const scrolls = watchNavigationScroll(ui);
+  try {
+    for (const shiftKey of [false, true]) {
+      for (const ctrlKey of [false, true]) {
+        for (const metaKey of [false, true]) {
+          for (const altKey of [false, true]) {
+            await selectNavigationRange(ui, "12:0", "12:2");
+            scrolls.length = 0;
+            const end = shiftKey ? "12:1" : "12:3";
+            const event = await press(document.activeElement, "Tab", { shiftKey, ctrlKey, metaKey, altKey });
+            assert.equal(event.defaultPrevented, true);
+            assertNavigation(ui, end);
+            assert.deepEqual(scrolls, [{ position: end, options: { block: "nearest", inline: "nearest" } }]);
+            assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 0);
+          }
+        }
+      }
+    }
+    assert.deepEqual(effects, []);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 Tab navigation: clamped edges consume without wrapping or scrolling", async () => {
+  const ui = await mount({ data: navigationData });
+  const scrolls = watchNavigationScroll(ui);
+  try {
+    for (const [anchor, end, shiftKey] of [["12:0", "12:4", false], ["12:4", "12:0", true]]) {
+      await selectNavigationRange(ui, anchor, end);
+      scrolls.length = 0;
+      assert.equal((await press(document.activeElement, "Tab", { shiftKey })).defaultPrevented, true);
+      assertNavigation(ui, end);
+      assert.deepEqual(scrolls, []);
+    }
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 Tab navigation: child buttons and live drafts keep their existing event ownership", async () => {
+  const effects = [];
+  const ui = await mount({ data: rangeData, allowMutations: true,
+    fetchFn: async () => { effects.push("request"); throw Error("Tab must not save a draft from its TD"); },
+    onRefresh: () => { effects.push("refresh"); },
+  });
+  try {
+    const cell = await selectCell(ui, "1:1");
+    const button = cell.querySelector("button");
+    button.focus();
+    assert.equal((await press(button, "Tab")).defaultPrevented, false);
+    assert.ok(document.activeElement === button);
+    assert.deepEqual(selectedCells(ui), ["1:1"]);
+    await clickButton(ui, "2行 title を編集");
+    const input = cell.querySelector("input");
+    assert.ok(input);
+    for (const shiftKey of [false, true]) {
+      assert.equal((await press(cell, "Tab", { shiftKey })).defaultPrevented, false);
+      assert.ok(document.activeElement === input);
+      assert.equal(input.value, "Beta");
+      assert.deepEqual(selectedCells(ui), ["1:1"]);
+    }
+    assert.deepEqual(effects, []);
   } finally { await ui.cleanup(); }
 });

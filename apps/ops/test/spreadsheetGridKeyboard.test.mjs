@@ -120,9 +120,32 @@ test("MIG-0737 U01 navigation pure: new jump keys retain the existing invalid-di
   }
 });
 
-test("MIG-0737 U01 navigation pure: Enter, Tab, editing and unknown keys remain outside this helper scope", () => {
+test("MIG-0737 U01 navigation pure: Enter, editing and unknown keys remain outside this helper scope", () => {
   const position = { row: 2, col: 1 };
-  for (const key of ["Enter", "Tab", "ShiftTab", "F2", "a", "Dead", "Homebrew", "ArrowOther"]) {
+  for (const key of ["Enter", "F2", "a", "Dead", "Homebrew", "ArrowOther"]) {
     assert.deepEqual(moveSpreadsheetFocus(position, key, 25, 5), position, key);
+  }
+});
+
+test("MIG-0737 U01 Tab navigation pure: moves one column, clamps without wrapping and keeps the row", () => {
+  for (let rows = 1; rows <= 5; rows++) {
+    for (let columns = 1; columns <= 5; columns++) {
+      for (let row = 0; row < rows; row++) {
+        for (let col = 0; col < columns; col++) {
+          const from = Object.freeze({ row, col });
+          assert.deepEqual(moveSpreadsheetFocus(from, "Tab", rows, columns),
+            { row, col: Math.min(columns - 1, col + 1) });
+          assert.deepEqual(moveSpreadsheetFocus(from, "ShiftTab", rows, columns),
+            { row, col: Math.max(0, col - 1) });
+        }
+      }
+    }
+  }
+});
+
+test("MIG-0737 U01 Tab navigation pure: invalid dimensions retain the input", () => {
+  const from = { row: 2, col: 1 };
+  for (const [rows, columns] of [[0, 4], [4, 0], [-1, 4], [NaN, 4], [Infinity, 4], [4, 1.5]]) {
+    for (const key of ["Tab", "ShiftTab"]) assert.equal(moveSpreadsheetFocus(from, key, rows, columns), from);
   }
 });

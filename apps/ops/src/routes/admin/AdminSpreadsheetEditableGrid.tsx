@@ -489,11 +489,12 @@ export function AdminSpreadsheetEditableGrid({
       if (startCellEdit(rowIndex, colIndex)) event.preventDefault();
       return;
     }
-    if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"].includes(event.key)) return;
+    if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown", "Tab"].includes(event.key)) return;
     const historyBusy = inFlight.current !== null && historyInFlight.current === inFlight.current;
     if (identityChanged || !isCurrent() || liveSelection.current !== null || historyBusy ||
         rows.length === 0 || columns.length === 0) return;
-    const navigation = shortcut && !event.key.startsWith("Page") ? `Ctrl${event.key}` : event.key;
+    const navigation = event.key === "Tab" ? (event.shiftKey ? "ShiftTab" : "Tab")
+      : shortcut && !event.key.startsWith("Page") ? `Ctrl${event.key}` : event.key;
     const moved = moveSpreadsheetFocus({ row: rowIndex, col: colIndex }, navigation, rows.length, columns.length);
     event.preventDefault();
     if (!(event.shiftKey && navigation.startsWith("Arrow"))) setAnchorCell(moved);
