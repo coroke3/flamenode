@@ -15,6 +15,8 @@ import "./styles/forms-a.css";
 import "./styles/shared-social.css";
 import "./styles/cost-guard-banner.css";
 import "./styles/video-form.css";
+import "./styles/status-panel.css";
+import "./styles/entry-unslotted.css";
 import { App } from "./App.js";
 
 const rootElement = document.getElementById("root");

@@ -20,6 +20,8 @@ export const MODULES = [
   ["cdlg", "src/components/ui/ConfirmDialog.module.css", "apps/app/src/styles/shared-social.css"],
   ["sqicon", "src/components/media/SquareIconEditor.module.css", "apps/app/src/styles/shared-social.css"],
   ["vform", "src/components/forms/VideoForm.module.css", "apps/app/src/styles/video-form.css"],
+  ["status-panel", "src/components/ui/StatusPanel.module.css", "apps/app/src/styles/status-panel.css"],
+  ["entry-unslotted", "app/(auth)/entry/unslotted/page.module.css", "apps/app/src/styles/entry-unslotted.css"],
 ];
 
 export function portCssModule(css, prefix) {

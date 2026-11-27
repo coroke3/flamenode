@@ -4,9 +4,13 @@
  *
  * Status mapping (apps/api requireAuth + personalRoutes.onError):
  *   200 -> ok(body)   401 -> anonymous   403 -> banned   anything else / network / bad JSON -> unavailable
+ * MIG-0716 slotted only: canonical 404 -> not_found; other reads retain the mapping above.
  * "unavailable" must never be shown as logout or as a role change (UX-AUTH-005).
  */
-import { EntryIndexResponseSchema, type EntryIndexResponse } from "@flamenode/contracts";
+import {
+  EntryIndexResponseSchema, SlottedEntryResponseSchema, UnslottedEntryResponseSchema,
+  type EntryIndexResponse, type SlottedEntryResponse, type UnslottedEntryResponse,
+} from "@flamenode/contracts";
 import { createXidRequestsApi, type XidRequestsApi } from "./xidRequests.js";
 import { createXidProfileApi, type XidProfileApi } from "./xidProfile.js";
 import type {
@@ -54,6 +58,9 @@ export interface PersonalApi {
   getSettings(query: SettingsQuery, signal?: AbortSignal): Promise<ApiResult<SettingsResponse>>;
   getOnboarding(signal?: AbortSignal): Promise<ApiResult<OnboardingResponse>>;
   getEntryIndex(signal?: AbortSignal, offset?: number): Promise<ApiResult<EntryIndexResponse>>;
+  /** Initial responses only; continuation and trusted host ownership belong to MIG-0716 U01b. */
+  getSlottedEntry(slot: string, signal?: AbortSignal): Promise<ApiResult<SlottedEntryResponse> | { status: "not_found" }>;
+  getUnslottedEntry(eventQuery: string, signal?: AbortSignal): Promise<ApiResult<UnslottedEntryResponse>>;
 }
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -103,6 +110,37 @@ export function createPersonalApi(fetchFn: FetchLike = (input, init) => fetch(in
     getSettings: (q, signal) =>
       read(fetchFn, url("settings", { tab: q.tab, x: q.x, onboarding: q.onboarding }), signal),
     getOnboarding: (signal) => read(fetchFn, url("onboarding"), signal),
+    async getSlottedEntry(slot, signal) {
+      let response: Response;
+      try {
+        response = await fetchFn(url("entry/slotted", { slot }), {
+          method: "GET", credentials: "same-origin", cache: "no-store",
+          headers: { accept: "application/json" }, signal,
+        });
+      } catch {
+        return { status: "unavailable" };
+      }
+      if (response.status === 401) return { status: "anonymous" };
+      if (response.status === 403) return { status: "banned" };
+      if (response.status !== 200 && response.status !== 404) return { status: "unavailable" };
+      try {
+        const body: unknown = await response.json();
+        if (response.status === 404) {
+          return body !== null && typeof body === "object" && "error" in body && body.error === "not_found"
+            ? { status: "not_found" } : { status: "unavailable" };
+        }
+        const parsed = SlottedEntryResponseSchema.safeParse(body);
+        return parsed.success ? { status: "ok", data: parsed.data } : { status: "unavailable" };
+      } catch {
+        return { status: "unavailable" };
+      }
+    },
+    async getUnslottedEntry(eventQuery, signal) {
+      const result = await read<unknown>(fetchFn, url("entry/unslotted", { event_q: eventQuery }), signal);
+      if (result.status !== "ok") return result;
+      const parsed = UnslottedEntryResponseSchema.safeParse(result.data);
+      return parsed.success ? { status: "ok", data: parsed.data } : { status: "unavailable" };
+    },
     async getEntryIndex(signal, offset) {
       const result = await read<unknown>(fetchFn, url("entry", { offset: offset == null ? undefined : String(offset) }), signal);
       if (result.status !== "ok") return result;

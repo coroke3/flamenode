@@ -1,0 +1,31 @@
+.entry-unslotted-eventSearchForm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 0;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+}
+
+.entry-unslotted-eventSearchLabel {
+  margin: 0;
+}
+
+.entry-unslotted-eventSearchInput {
+  flex: 1 1 220px;
+  max-width: 420px;
+}
+
+.entry-unslotted-eventSearchMeta {
+  font-size: 11.5px;
+}
+
+@media (max-width: 640px) {
+  .entry-unslotted-eventSearchForm .fn-btn {
+    min-height: var(--fn-control-h-touch);
+    justify-content: center;
+  }
+}
