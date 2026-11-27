@@ -649,6 +649,94 @@ test("MIG-0717 U01c: session A-B-A with both X IDs null rejects late private rea
   assert.equal(container.querySelector("form"), null);
 });
 
+test("MIG-0717 U01c: test-only trusted host versions null-X identity scopes across A-B-A", async (t) => {
+  const calls = [];
+  const api = createVideoEditApi((path, { signal }) =>
+    new Promise((resolve) => calls.push({ path, signal, resolve })));
+  const container = dom.window.document.createElement("div");
+  const root = createRoot(container);
+  t.after(() => act(async () => root.unmount()));
+
+  const identityKeys = [];
+  let changeIdentity = () => {};
+  function TestOnlyTrustedHost() {
+    const [identity, setIdentity] = React.useState({ session: "discord-A", activeXId: null });
+    const [generation, setGeneration] = React.useState(0);
+    const identityKey = JSON.stringify([generation, identity.session, identity.activeXId]);
+    identityKeys.push(identityKey);
+    changeIdentity = (next) => {
+      setIdentity(next);
+      setGeneration((value) => value + 1);
+    };
+    return React.createElement(MemoryRouter, null, React.createElement(Edit, {
+      api, videoId: "video-1", search: "?privileged=admin", identityKey,
+    }));
+  }
+
+  await act(async () => {
+    flushSync(() => root.render(React.createElement(TestOnlyTrustedHost)));
+  });
+  const transition = async (session) => act(async () =>
+    changeIdentity({ session, activeXId: null }));
+  const finish = async (index, payload) =>
+    act(async () => calls[index].resolve(json(payload)));
+  const privatePage = (owner, title) => editPage({
+    user: user({ role: "admin" }),
+    access: access({ privilegeMode: "admin" }),
+    video: { ...editPage().video, title },
+    permissionSummary: permissionSummary({ displayNames: owner + " private collaborators" }),
+  });
+  const assertLoading = () => {
+    assert.match(container.textContent, /読み込み中/);
+    assert.doesNotMatch(container.textContent, /PRIVATE-|private collaborators/);
+    assert.equal(overview(container), null);
+    assert.equal(adminMenu(container), null);
+    assert.equal(container.querySelector("form, #video-collab-perms"), null);
+  };
+
+  const firstAKey = identityKeys.at(-1);
+  await transition("discord-B");
+  const bKey = identityKeys.at(-1);
+  await transition("discord-A");
+  const returnedAKey = identityKeys.at(-1);
+  assert.notEqual(firstAKey, returnedAKey, "the host generation must distinguish A -> B -> A even with null X");
+  assert.notEqual(bKey, returnedAKey);
+  assert.equal(calls.length, 3, "each committed identity generation starts one page request");
+  assert.equal(calls[0].signal.aborted, true);
+  assert.equal(calls[1].signal.aborted, true);
+  assertLoading();
+
+  await finish(0, privatePage("A stale", "PRIVATE-A-STALE"));
+  await finish(1, privatePage("B stale", "PRIVATE-B-STALE"));
+  assertLoading();
+  assert.equal(calls.length, 3, "retired page receipts cannot start options requests");
+
+  await finish(2, privatePage("A", "PRIVATE-A"));
+  assert.equal(calls.length, 4, "current A page starts its options request");
+  await transition("discord-B");
+  assert.equal(calls[3].signal.aborted, true);
+  assertLoading();
+  await finish(4, privatePage("B", "PRIVATE-B"));
+  assert.equal(calls.length, 6, "B page starts its options request");
+
+  await transition("discord-A");
+  assert.equal(calls[5].signal.aborted, true);
+  assertLoading();
+  await finish(3, options({ truncated: true, nextOffset: 1 }));
+  await finish(5, options({ truncated: true, nextOffset: 1 }));
+  assertLoading();
+  assert.equal(calls.length, 7, "retired A/B options cannot continue pagination or publish private UI");
+
+  await finish(6, privatePage("A current", "PRIVATE-A-CURRENT"));
+  assert.equal(calls.length, 8, "the current A page alone starts the final options request");
+  await finish(7, options());
+  assert.match(container.textContent, /PRIVATE-A-CURRENT/);
+  assert.match(container.textContent, /A current private collaborators/);
+  assert.doesNotMatch(container.textContent, /PRIVATE-A-STALE|PRIVATE-B-STALE|PRIVATE-B|B private collaborators/);
+  assert.ok(adminMenu(container), "the current complete admin page may publish its private menu");
+  assert.equal(container.querySelector("form"), null, "this checkpoint still does not mount VideoForm");
+});
+
 test("MIG-0717 U02b2b preserves the CURRENT neutral EmptyState structure and spacing for not_found", async (t) => {
   const api = createVideoEditApi(async () => json({ error: "not_found" }, 404));
   const { container } = await mountEdit(t, api);
