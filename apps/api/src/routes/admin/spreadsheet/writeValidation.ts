@@ -972,12 +972,22 @@ export async function planSpreadsheetGuardedCrud(
   // Both UPDATE and DELETE require one fresh, complete, PK-matching before
   // snapshot; reserve that D1 statement from the shared S3 read budget.
   if (remainingReadBudget < 1) throw new Error("batch_too_large");
-  const pk = normalizeSpreadsheetPrimaryKey(ctx.primaryKeys, body.primaryKey);
-  if (body.method === "DELETE") {
-    // Reject blocked physical deletion before any database read.
-    if (isSpreadsheetPhysicalDeleteBlocked(ctx.def.table)) {
-      throw new Error("physical_delete_requires_visibility_status");
+  // CURRENT DELETE checks physical-delete policy before interpreting the key.
+  // CURRENT PATCH checks column existence/editability before validating it.
+  if (body.method === "DELETE" && isSpreadsheetPhysicalDeleteBlocked(ctx.def.table)) {
+    throw new Error("physical_delete_requires_visibility_status");
+  }
+  if (body.method === "PATCH") {
+    if (!ctx.columnNames.includes(body.column)) throw new Error("unknown_column");
+    if (!isSpreadsheetColumnEditable(ctx.def, body.column)) {
+      throw new Error("column_not_editable");
     }
+  }
+  const pk = normalizeSpreadsheetPrimaryKey(ctx.primaryKeys, body.primaryKey);
+  // CURRENT CRUD entrypoints explicitly validate normalized PK values.
+  // Keep the lower-level snapshot helper focused on row identity.
+  validateSpreadsheetInputValues(ctx, pk);
+  if (body.method === "DELETE") {
     const before = await fetchSpreadsheetRawSnapshot(db, ctx, pk, 1);
     return buildSpreadsheetAuditedDelete(ctx, pk, before, operatorId);
   }

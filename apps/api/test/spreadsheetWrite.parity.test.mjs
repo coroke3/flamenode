@@ -392,6 +392,55 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(allAudits(honoSqlite).length, honoCountBefore);
   });
 
+  test("MIG-0638 RH-004/006: CURRENT column policy and normalized PK validation precedence", async () => {
+    resetAllCaches();
+    const { curSqlite, honoSqlite, curD1, honoD1, callHono, callCurrent } = createFixture();
+    const snapshot = db => ({
+      catalog: db.prepare("SELECT * FROM software_catalog ORDER BY id").all(),
+      events: db.prepare("SELECT * FROM events ORDER BY id").all(),
+      audit: allAudits(db),
+      queue: allQueueRows(db),
+    });
+    const beforeCur = snapshot(curSqlite);
+    const beforeHono = snapshot(honoSqlite);
+    const writesCur = curD1.stats.writes;
+    const writesHono = honoD1.stats.writes;
+    const batchesCur = curD1.stats.batches;
+    const batchesHono = honoD1.stats.batches;
+    const longKey = "x".repeat(100_001);
+    const cases = [
+      ["PATCH", { table: "software_catalog", primaryKey: {}, column: "nope_col", value: "X" }, 400, "unknown_column"],
+      ["PATCH", { table: "events", primaryKey: {}, column: "visibility_status", value: "private" }, 400, "column_not_editable"],
+      ["DELETE", { table: "events", primaryKey: {} }, 400, "physical_delete_requires_visibility_status"],
+      ["PATCH", { table: "software_catalog", primaryKey: { id: longKey }, column: "name", value: "X" }, 400, "value_too_long"],
+      ["DELETE", { table: "software_catalog", primaryKey: { id: longKey } }, 400, "value_too_long"],
+      ["PATCH", { table: "software_catalog", primaryKey: { id: "" }, column: "name", value: "X" }, 400, "missing_primary_key"],
+      ["PATCH", { table: "software_catalog", primaryKey: { id: "missing" }, column: "name", value: "X" }, 404, "row_not_found"],
+      ["DELETE", { table: "software_catalog", primaryKey: { id: "missing" } }, 404, "row_not_found"],
+    ];
+    try {
+      for (const [method, payload, status, error] of cases) {
+        const current = await callCurrent(currentDataRoute, method, "/data", payload);
+        const target = await callHono(method, "/data", payload);
+        assert.equal(current.status, status, method + " CURRENT " + error);
+        assert.deepEqual(current.body, { error });
+        assert.equal(target.status, status, method + " TARGET " + error);
+        assert.deepEqual(target.body, current.body);
+        assert.match(target.headers.get("cache-control"), /private.*no-store/);
+      }
+      assert.equal(curD1.stats.writes, writesCur);
+      assert.equal(honoD1.stats.writes, writesHono);
+      assert.equal(curD1.stats.batches, batchesCur);
+      assert.equal(honoD1.stats.batches, batchesHono);
+      assert.deepEqual(snapshot(curSqlite), beforeCur);
+      assert.deepEqual(snapshot(honoSqlite), beforeHono);
+    } finally {
+      resetAllCaches();
+      curSqlite.close();
+      honoSqlite.close();
+    }
+  });
+
   test("MIG-0638 T02: import dryRun + apply parity, nonce replay, and partial-failure full rollback", async () => {
     resetAllCaches();
     const { curSqlite, honoSqlite, callHono, callCurrent } = createFixture();
