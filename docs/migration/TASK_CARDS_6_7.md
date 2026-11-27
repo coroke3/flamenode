@@ -669,6 +669,7 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 - 読む: `apps/api/src/middleware/writeOrigin.ts`、`costGuard.ts`、`adminGuards.test.mjs`、`OPEN_DECISIONS.md` D-19-2、`ZERO_1102.md` §3/§5。
 - 変更: Origin + session 後の fresh request-local joined readでToS/actor/active-Xとdefault CostGuard/audit settingsを取得。settings欠損はuser欠損と区別。joined read failure時はToSを先に再読し、identity通過後だけCostGuardを独立再読して既存の503分類を維持。global cacheなし。#714の`auth/session.ts`は変更しない。
 - 試験: adminGuardsの成功read数1、missing settings→maintenance_mode、joined/ToS/CostGuard provider failure分類、identity denial後にCostGuard fallbackを読まない、active-X順序、actor/audit byte parity。実cookie Honoと全routeのread/bind/batchは依存PRで確認。
+- U03: 既存7 suite の共有admission read-count互換修正のみを[Lead scope](https://github.com/coroke3/flamenode/pull/901#issuecomment-7213469681)に従い統合。既存golden本体・resource handler・first owner・権限/監査assertionは保持。実cookie route/S3/CPUは別途必須。
 - DONE: exact-head dual CI、独立review、failure/ordering parity、実cookie Hono測定。共有snapshotだけでS3全経路PASSとはしない。各resource handlerの<=3 prereads + 1 atomic batchとworkerd warm max<8msは#893で個別実証。
 
 ### MIG-0706 — Phase 7 Gate (2 SPAs)
