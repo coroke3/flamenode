@@ -4,7 +4,8 @@ import type { AdminNotificationsResponse } from "@flamenode/contracts";
 import { useSearchParams } from "react-router-dom";
 import { adminReadRedirect } from "../../api/adminTop.js";
 import {
-  createAdminNotificationsApi, notificationFilterHref, truncateNotificationSearch, type AdminNotificationsApi, type NotificationFilters,
+  createAdminNotificationsApi, notificationFilterHref, truncateNotificationSearch,
+  type AdminNotificationsApi, type NotificationFilters, type NotificationWriteResult,
 } from "../../api/adminNotifications.js";
 import { NotificationOutboxSummary } from "../../components/notifications/NotificationOutboxSummary.js";
 import {
@@ -308,24 +309,90 @@ export function AdminNotificationsView({ data, filters, api, onSuccess, onSearch
   );
 }
 
-export function AdminNotifications({ api = defaultApi }: { api?: AdminNotificationsApi }): React.ReactElement {
+const navigateNotifications = (path: string) => window.location.assign(path);
+
+export function AdminNotifications({ api = defaultApi, onNavigate = navigateNotifications }: {
+  api?: AdminNotificationsApi;
+  onNavigate?: (path: string) => void;
+}): React.ReactElement {
   const [params, setParams] = useSearchParams();
   const filters = readNotificationFilters(params);
   const [refresh, setRefresh] = React.useState(0);
-  // The successful write's message must outlive the fail-closed reload below, which
-  // unmounts the row buttons (CURRENT router.refresh() kept the client message).
   const [notice, setNotice] = React.useState<string | null>(null);
-  // A failed admin refresh must not keep previously displayed notification payloads
-  // or mutation buttons mounted while the new authoritative read is unavailable.
+  // Once an admin write conclusively loses identity, no delayed read or POST
+  // may restore notification payloads until a full page navigation.
+  const revokedRef = React.useRef<"/entry" | "/dashboard" | null>(null);
+  const [revokedPath, setRevokedPath] = React.useState<"/entry" | "/dashboard" | null>(null);
+  // A 403 without a usable JSON body is ambiguous (maintenance_mode shares
+  // status 403). Unmount private data while a fresh authenticated GET resolves.
+  const suspendedRef = React.useRef(false);
+  const [suspended, setSuspended] = React.useState(false);
+  const revoke = React.useCallback((path: "/entry" | "/dashboard") => {
+    if (revokedRef.current) return;
+    revokedRef.current = path;
+    suspendedRef.current = true;
+    setNotice(null);
+    setRevokedPath(path);
+  }, []);
+  const suspendUntilVerified = React.useCallback(() => {
+    if (revokedRef.current) return;
+    suspendedRef.current = true;
+    setSuspended(true);
+    setNotice(null);
+    setRefresh((value) => value + 1);
+  }, []);
+  const guardedApi = React.useMemo<AdminNotificationsApi>(() => {
+    const call = async (write: () => Promise<NotificationWriteResult>): Promise<NotificationWriteResult> => {
+      if (revokedRef.current || suspendedRef.current) {
+        return { ok: false, message: "権限を再確認しています。" };
+      }
+      const result = await write();
+      if (result.anonymous || result.forbidden) {
+        revoke(result.anonymous ? "/entry" : "/dashboard");
+        return { ok: false };
+      }
+      if (result.verifyAccess) {
+        suspendUntilVerified();
+        return { ok: false };
+      }
+      return revokedRef.current || suspendedRef.current ? { ok: false } : result;
+    };
+    return {
+      ...api,
+      retry: (id) => call(() => api.retry(id)),
+      cancel: (id, reason) => call(() => api.cancel(id, reason)),
+      forceResend: (id) => call(() => api.forceResend(id)),
+      retryFailed: () => call(() => api.retryFailed()),
+    };
+  }, [api, revoke, suspendUntilVerified]);
+
   const key = "admin-notifications:" + notificationFilterHref(filters) + ":refresh=" + refresh;
   const state = useApiResult((signal) => api.list(filters, signal), key);
-  const redirect = state.status === "loading" ? null : adminReadRedirect(state);
+  // A fresh 200 following an ambiguous 403 restores the view; a denied or
+  // unavailable read stays fail-closed and cannot resurrect old payloads.
   React.useEffect(() => {
-    if (redirect) window.location.assign(redirect);
-  }, [redirect]);
+    if (suspended && state.status === "ok" && !revokedRef.current) {
+      suspendedRef.current = false;
+      setSuspended(false);
+    }
+  }, [suspended, state.status]);
+  const redirect = revokedPath ?? (state.status === "loading" ? null : adminReadRedirect(state));
+  React.useEffect(() => {
+    if (redirect) onNavigate(redirect);
+  }, [redirect, onNavigate]);
 
-  if (state.status === "loading" || state.status === "anonymous" || state.status === "forbidden") {
+  if (revokedRef.current || state.status === "loading" || state.status === "anonymous" || state.status === "forbidden") {
     return <div role="status" aria-busy="true">読み込み中...</div>;
+  }
+  if (suspended) {
+    return (
+      <div role="alert" className="fn-alert fn-alert--danger" style={{ marginTop: 20 }}>
+        通知管理の権限を確認中です。確認できるまで非公開データと書き込みを表示しません。{" "}
+        {state.status === "unavailable" ? (
+          <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm" onClick={() => setRefresh((v) => v + 1)}>再試行</button>
+        ) : null}
+      </div>
+    );
   }
   if (state.status !== "ok") {
     return (
@@ -341,9 +408,17 @@ export function AdminNotifications({ api = defaultApi }: { api?: AdminNotificati
       <AdminNotificationsView
         data={state.data}
         filters={filters}
-        api={api}
-        onSuccess={(message) => { setNotice(message ?? null); setRefresh((v) => v + 1); }}
-        onSearch={(next) => { setNotice(null); setParams(next); }}
+        api={guardedApi}
+        onSuccess={(message) => {
+          if (revokedRef.current || suspendedRef.current) return;
+          setNotice(message ?? null);
+          setRefresh((v) => v + 1);
+        }}
+        onSearch={(next) => {
+          if (revokedRef.current || suspendedRef.current) return;
+          setNotice(null);
+          setParams(next);
+        }}
       />
     </>
   );
