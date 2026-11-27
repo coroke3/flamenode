@@ -906,22 +906,22 @@ if (runUnderRootTsx(import.meta.url)) {
     const originalPrepare = honoD1.prepare;
     const originalError = console.error;
     const validRow = { videoId: "av-pending-1", eventId: "a-open", primaryEventId: "a-ended" };
-    const fkRow = { kind: "fk", value: "av-pending-1", videoId: null, eventId: null, primaryEventId: null };
+    const fkRow = (fkIndex, value) => ({ kind: "fk", fkIndex, value, videoId: null, eventId: null, primaryEventId: null });
     // Canonical video_members PATCH, DELETE and signed import all use the
     // tagged FK + release CTE. Keep a valid FK receipt so release-field faults
     // reach their own checks after the FK-first validation stage.
-    const releaseRow = (_combined, row = validRow) => ({ kind: "release", value: null, ...row });
-    const receiptWithRows = (_combined, rows) => ({ success: true, results: [fkRow, ...rows] });
+    const releaseRow = (row = validRow) => ({ kind: "release", fkIndex: null, value: null, ...row });
+    const receiptWithRows = (fkRows, rows) => ({ success: true, results: [...fkRows, ...rows] });
     const invalid = [
       () => ({ success: true }),
-      combined => ({ ...receiptWithRows(combined, [releaseRow(combined)]), success: false }),
+      fkRows => ({ ...receiptWithRows(fkRows, [releaseRow()]), success: false }),
       () => ({ success: true, results: null }),
       () => ({ success: true, results: "not-an-array" }),
-      combined => receiptWithRows(combined, [releaseRow(combined, { videoId: "av-pending-1", eventId: "a-open" })]),
-      combined => receiptWithRows(combined, [releaseRow(combined, { ...validRow, videoId: "unrequested" })]),
-      combined => receiptWithRows(combined, [releaseRow(combined, { ...validRow, eventId: 42 })]),
-      combined => receiptWithRows(combined, [Object.assign(Object.create(releaseRow(combined)), combined ? { kind: "release" } : {})]),
-      combined => receiptWithRows(combined, [Object.defineProperty(releaseRow(combined, { ...validRow }), "eventId", {
+      fkRows => receiptWithRows(fkRows, [releaseRow({ videoId: "av-pending-1", eventId: "a-open" })]),
+      fkRows => receiptWithRows(fkRows, [releaseRow({ ...validRow, videoId: "unrequested" })]),
+      fkRows => receiptWithRows(fkRows, [releaseRow({ ...validRow, eventId: 42 })]),
+      fkRows => receiptWithRows(fkRows, [Object.assign(Object.create(releaseRow()), { kind: "release" })]),
+      fkRows => receiptWithRows(fkRows, [Object.defineProperty(releaseRow(), "eventId", {
         get() { throw new Error("preview_required"); },
       })]),
       () => Object.defineProperty({ success: true }, "results", {
@@ -942,16 +942,19 @@ if (runUnderRootTsx(import.meta.url)) {
         ["DELETE", "/data", deleteBody],
         ["POST", "/import", apply],
       ]) {
-        const combined = true;
-        const expectedBinds = ["av-pending-1", "av-pending-1"];
+        const fkRows = method === "POST"
+          ? [fkRow(0, "av-pending-1")]
+          : [fkRow(0, "alice_x"), fkRow(1, "av-pending-1")];
+        const expectedBinds = method === "POST"
+          ? ["av-pending-1", "av-pending-1"]
+          : ["alice_x", "av-pending-1", "av-pending-1"];
         for (const fault of faults) {
           resetAllCaches();
           const prior = injected;
           honoD1.prepare = sql => {
             const releaseLookup = sql.includes('LEFT JOIN "video_events" ve ON ve."video_id" = v."id"');
-            const combinedLookup = sql.startsWith("WITH fk AS (");
-            const standaloneLookup = sql.startsWith('SELECT v."id" AS videoId,');
-            if (!releaseLookup || !(combined ? combinedLookup : standaloneLookup)) return originalPrepare(sql);
+            const combinedLookup = sql.startsWith("WITH fk AS (") || sql.startsWith("WITH fk_0 AS (");
+            if (!releaseLookup || !combinedLookup) return originalPrepare(sql);
             if (fault.stage === "prepare") { injected++; throw fault.error; }
             const stmt = originalPrepare(sql);
             return {
@@ -964,7 +967,7 @@ if (runUnderRootTsx(import.meta.url)) {
                   async all() {
                     injected++;
                     if (fault.error) throw fault.error;
-                    return fault.receipt(combined);
+                    return fault.receipt(fkRows);
                   },
                 };
               },
@@ -1422,54 +1425,81 @@ if (runUnderRootTsx(import.meta.url)) {
   });
 
   test("MIG-0638 T06: bounded member FK/release SELECT plan (#893)", async () => {
-    const { buildSpreadsheetMemberFkReleaseLookup } = await import("../src/routes/admin/spreadsheet/write.ts");
+    const { buildSpreadsheetMemberFkReleaseLookup, validateSpreadsheetMemberFkReleaseLookupReceipt } = await import("../src/routes/admin/spreadsheet/write.ts");
     const { assertSpreadsheetForeignKeyLookup } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
     const { DatabaseSync } = await import("node:sqlite");
     const db = new DatabaseSync(":memory:");
     try {
       // Minimal isolated schema; mounted HTTP tests remain separate.
       db.exec("CREATE TABLE videos (id TEXT PRIMARY KEY, primary_event_id TEXT);" +
-        "CREATE TABLE video_events (video_id TEXT, event_id TEXT, PRIMARY KEY(video_id,event_id));");
+        "CREATE TABLE video_events (video_id TEXT, event_id TEXT, PRIMARY KEY(video_id,event_id));" +
+        "CREATE TABLE x_users (id TEXT PRIMARY KEY);" +
+        "CREATE TABLE users (id TEXT PRIMARY KEY);");
       const addVideo = db.prepare("INSERT INTO videos VALUES (?, ?)");
       const addEvent = db.prepare("INSERT INTO video_events VALUES (?, ?)");
+      const addXUser = db.prepare("INSERT INTO x_users VALUES (?)");
+      const addUser = db.prepare("INSERT INTO users VALUES (?)");
       for (const id of ["linked", "unlinked", "old", " spaced ", "spaced", "quote'--"]) {
         addVideo.run(id, id === "linked" ? "primary" : null);
       }
+      for (const id of ["x-linked", "x-unlinked"]) addXUser.run(id);
+      for (const id of ["u-linked", "u-unlinked"]) addUser.run(id);
       addEvent.run("linked", "extra");
       addEvent.run("old", "old-event");
       addEvent.run("spaced", "trimmed-event");
       const fk = { column: "video_id", referencedTable: "videos", referencedColumn: "id" };
       const other = { column: "x_user_id", referencedTable: "x_users", referencedColumn: "id" };
+      const userFk = { column: "user_id", referencedTable: "users", referencedColumn: "id" };
       const audit = (before, after) => ({
         table_name: "video_members",
         before: before === null ? null : { video_id: before },
         after: after === null ? null : { video_id: after },
       });
       const execute = (values, audits, fks = [fk]) => {
-        const plan = buildSpreadsheetMemberFkReleaseLookup(fks, values.map(video_id => ({ video_id })), audits);
+        const rows = values.map(value => typeof value === "string" ? { video_id: value } : value);
+        const plan = buildSpreadsheetMemberFkReleaseLookup(fks, rows, audits);
         assert.ok(plan);
         const receipts = db.prepare(plan.statement).all(...plan.binds);
-        const fkRows = receipts.filter(row => row.kind === "fk").map(row => ({ value: row.value }));
+        const fkRowsByIndex = plan.fkLookups.map((_, index) =>
+          receipts.filter(row => row.kind === "fk" && row.fkIndex === index).map(row => ({ value: row.value })));
         const releaseRows = receipts.filter(row => row.kind === "release");
-        return { plan, fkRows, releaseRows };
+        return { plan, receipts, fkRowsByIndex, releaseRows };
       };
-      const linked = execute(["linked", "unlinked", "linked"], [audit("old", "linked"), audit(null, "unlinked")], [other, fk]);
-      assert.deepEqual(linked.plan.binds, ["linked", "unlinked", "old", "linked", "unlinked"]);
-      assertSpreadsheetForeignKeyLookup(linked.plan.fkLookup, linked.fkRows);
+      const linked = execute([
+        { video_id: "linked", x_user_id: "x-linked", user_id: "u-linked" },
+        { video_id: "unlinked", x_user_id: "x-unlinked", user_id: "u-unlinked" },
+        { video_id: "linked", x_user_id: "x-linked", user_id: "u-linked" },
+      ], [audit("old", "linked"), audit(null, "unlinked")], [other, fk, userFk]);
+      assert.equal(linked.plan.fkLookups.length, 3);
+      assert.match(linked.plan.statement, /WITH fk_0 AS/);
+      assert.match(linked.plan.statement, /fk_1 AS/);
+      assert.match(linked.plan.statement, /fk_2 AS/);
+      assert.deepEqual(linked.plan.binds,
+        ["x-linked", "x-unlinked", "linked", "unlinked", "u-linked", "u-unlinked", "old", "linked", "unlinked"]);
+      linked.plan.fkLookups.forEach((lookup, index) =>
+        assertSpreadsheetForeignKeyLookup(lookup, linked.fkRowsByIndex[index]));
+      const linkedValidated = validateSpreadsheetMemberFkReleaseLookupReceipt(linked.plan, {
+        success: true, results: linked.receipts,
+      });
+      assert.deepEqual(linkedValidated.eventIdsByVideo.get("linked"), ["extra", "primary"]);
       assert.deepEqual(linked.releaseRows.map(row => [row.videoId, row.eventId, row.primaryEventId]).sort(),
         [["linked", "extra", "primary"], ["old", "old-event", null], ["unlinked", null, null]]);
       const spaced = execute([" spaced "], [audit(null, " spaced ")]);
-      assertSpreadsheetForeignKeyLookup(spaced.plan.fkLookup, spaced.fkRows);
+      assertSpreadsheetForeignKeyLookup(spaced.plan.fkLookups[0], spaced.fkRowsByIndex[0]);
       assert.deepEqual(spaced.plan.binds, [" spaced ", "spaced"]);
       assert.equal(spaced.releaseRows[0].eventId, "trimmed-event");
       const missing = execute(["missing"], [audit("old", "missing")]);
-      assert.throws(() => assertSpreadsheetForeignKeyLookup(missing.plan.fkLookup, missing.fkRows), /foreign_key_violation/);
+      assert.throws(() => assertSpreadsheetForeignKeyLookup(missing.plan.fkLookups[0], missing.fkRowsByIndex[0]), /foreign_key_violation/);
       assert.equal(missing.releaseRows.length, 1);
       const quoted = execute(["quote'--"], [audit(null, "quote'--")]);
-      assertSpreadsheetForeignKeyLookup(quoted.plan.fkLookup, quoted.fkRows);
+      assertSpreadsheetForeignKeyLookup(quoted.plan.fkLookups[0], quoted.fkRowsByIndex[0]);
       assert.ok(!quoted.plan.statement.includes("quote'--"));
       const plan = buildSpreadsheetMemberFkReleaseLookup;
-      assert.equal(plan([fk, other], [{ video_id: "linked", x_user_id: "x" }], [audit(null, "linked")]), null);
+      const multi = plan([fk, other], [{ video_id: "linked", x_user_id: "x-linked" }], [audit(null, "linked")]);
+      assert.ok(multi);
+      assert.equal(multi.fkLookups.length, 2);
+      assert.deepEqual(multi.binds, ["linked", "x-linked", "linked"]);
+      assert.match(multi.statement, /WITH fk_0 AS/);
       assert.equal(plan([other], [{ x_user_id: "linked" }], [audit(null, "linked")]), null);
       assert.equal(plan([fk], [{ video_id: "linked" }], [{ ...audit(null, "linked"), table_name: "videos" }]), null);
       assert.equal(plan([fk], [{ video_id: "linked" }], []), null);
@@ -1478,10 +1508,11 @@ if (runUnderRootTsx(import.meta.url)) {
       const ids = Array.from({ length: 7 }, (_, i) => "v" + i);
       const max = plan([fk], ids.map(video_id => ({ video_id })), ids.map(id => audit("old-" + id, id)));
       assert.equal(max.binds.length, 21);
+      assert.equal(max.fkLookups.length, 1);
       assert.match(max.statement, /LIMIT 265$/);
       for (let i = 0; i < 257; i++) addEvent.run("linked", "event-" + i);
       const overflow = execute(["linked"], [audit(null, "linked")]);
-      assertSpreadsheetForeignKeyLookup(overflow.plan.fkLookup, overflow.fkRows);
+      assertSpreadsheetForeignKeyLookup(overflow.plan.fkLookups[0], overflow.fkRowsByIndex[0]);
       assert.equal(overflow.releaseRows.length, 257);
       assert.match(overflow.plan.statement, /LIMIT 259$/);
     } finally {
@@ -1492,18 +1523,27 @@ if (runUnderRootTsx(import.meta.url)) {
   test("MIG-0638 T06: bounded member FK/release receipt fails closed and preserves FK precedence", async () => {
     const { validateSpreadsheetMemberFkReleaseLookupReceipt } = await import("../src/routes/admin/spreadsheet/write.ts");
     const plan = {
-      fkLookup: { statement: "SELECT ?", binds: ["video-1"], values: ["video-1"] },
+      fkLookups: [{ statement: "SELECT ?", binds: ["video-1"], values: ["video-1"] }],
       releaseIds: ["video-1", "video-old"],
     };
-    const fk = { kind: "fk", value: "video-1", videoId: null, eventId: null, primaryEventId: null };
+    const fk = { kind: "fk", fkIndex: 0, value: "video-1", videoId: null, eventId: null, primaryEventId: null };
     const release = (videoId, eventId = null, primaryEventId = null) => ({
-      kind: "release", value: null, videoId, eventId, primaryEventId,
+      kind: "release", fkIndex: null, value: null, videoId, eventId, primaryEventId,
     });
     const valid = validateSpreadsheetMemberFkReleaseLookupReceipt(plan, {
       success: true, results: [fk, release("video-1", " event-1 ", "event-2"), release("video-old")],
     });
     assert.deepEqual(valid.eventIdsByVideo.get("video-1"), ["event-1", "event-2"]);
     assert.deepEqual(valid.eventIdsByVideo.get("video-old"), []);
+    assert.throws(() => validateSpreadsheetMemberFkReleaseLookupReceipt(plan, {
+      success: true, results: [{ ...fk, fkIndex: 1 }],
+    }), /invalid_snapshot/);
+    assert.throws(() => validateSpreadsheetMemberFkReleaseLookupReceipt(plan, {
+      success: true, results: [{ kind: "fk", value: "video-1", videoId: null, eventId: null, primaryEventId: null }],
+    }), /invalid_snapshot/);
+    assert.throws(() => validateSpreadsheetMemberFkReleaseLookupReceipt(plan, {
+      success: true, results: [fk, { ...release("video-1"), fkIndex: 0 }],
+    }), /invalid_snapshot/);
     // Exact duplicate release tuples fail closed; distinct rows sharing a primary event remain valid.
     assert.throws(() => validateSpreadsheetMemberFkReleaseLookupReceipt(plan, {
       success: true, results: [fk, release("video-1", "event-shared", "primary-shared"),

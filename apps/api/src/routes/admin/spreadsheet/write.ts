@@ -632,86 +632,134 @@ function spreadsheetVideoReleaseSelectSql(count: number): string {
 }
 
 /**
- * #893 T06, unmounted: combine only the video_members -> videos.id FK
- * lookup and the release lookup. Return null for any other FK plan; never
- * skip an FK or change its validation order to obtain a smaller counter.
- * The caller must pass the complete effective FK rows and final audit
- * snapshots from the existing planner, after the guarded row pre-read.
+ * #893 T06: combine all supported video_members FK lookup groups and the
+ * release lookup in one bounded statement. Unsupported/over-limit plans use
+ * the caller's original FK-first fallback; no FK is skipped.
+ * The caller passes complete effective FK rows and audit snapshots after the
+ * guarded before-image read.
  */
+const SPREADSHEET_MEMBER_FK_RELEASE_MAX_BINDS = 100;
+
 export function buildSpreadsheetMemberFkReleaseLookup(
   foreignKeys: readonly SpreadsheetForeignKey[],
   rows: readonly Record<string, string | null>[],
   audits: readonly SpreadsheetReleaseAudit[],
-): { statement: string; binds: readonly (string | number | null)[]; fkLookup: SpreadsheetForeignKeyLookup; releaseIds: readonly string[] } | null {
+): {
+  statement: string;
+  binds: readonly (string | number | null)[];
+  fkLookups: readonly SpreadsheetForeignKeyLookup[];
+  releaseIds: readonly string[];
+} | null {
   if (audits.length < 1 || audits.length > SPREADSHEET_IMPORT_APPLY_MAX_ROWS ||
       audits.some(audit => audit.table_name !== "video_members")) return null;
+
   const lookups = buildSpreadsheetForeignKeyLookups(foreignKeys, rows);
-  if (lookups.length !== 1) return null;
+  if (lookups.length < 1 || lookups.length > SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES) return null;
+
   const videoFk = foreignKeys.filter(fk => fk.column === "video_id" &&
     fk.referencedTable === "videos" && fk.referencedColumn === "id");
   if (videoFk.length !== 1) return null;
-  const [fkLookup] = buildSpreadsheetForeignKeyLookups(videoFk, rows);
-  if (!fkLookup || fkLookup.values.length > SPREADSHEET_IMPORT_APPLY_MAX_ROWS ||
-      fkLookup.statement !== lookups[0]!.statement ||
-      fkLookup.binds.length !== lookups[0]!.binds.length ||
-      fkLookup.binds.some((bind, i) => bind !== lookups[0]!.binds[i])) return null;
+  const videoLookups = buildSpreadsheetForeignKeyLookups(videoFk, rows);
+  const sameLookup = (left: SpreadsheetForeignKeyLookup, right: SpreadsheetForeignKeyLookup): boolean =>
+    left.statement === right.statement &&
+    left.binds.length === right.binds.length &&
+    left.binds.every((bind, index) => bind === right.binds[index]) &&
+    left.values.length === right.values.length &&
+    left.values.every((value, index) => value === right.values[index]);
+  if (videoLookups.length < 1 ||
+      !videoLookups.every(videoLookup => lookups.some(lookup => sameLookup(lookup, videoLookup)))) {
+    return null;
+  }
+
   const releaseIds = spreadsheetReleaseVideoIds(audits);
   if (releaseIds.length < 1 || releaseIds.length > 2 * SPREADSHEET_IMPORT_APPLY_MAX_ROWS ||
       releaseIds.some(id => id.includes("\0"))) return null;
-  // Separate CTE limits: a many-event join cannot masquerade as duplicate
-  // FK rows, and an overflow cannot hide a missing FK. Keep raw FK binds
-  // separate from CURRENT's trimmed release IDs, even when they differ.
-  const statement = `WITH fk AS (${fkLookup.statement}), release AS (${spreadsheetVideoReleaseSelectSql(releaseIds.length)})
-SELECT 'fk' AS kind, value, NULL AS videoId, NULL AS eventId, NULL AS primaryEventId FROM fk
-UNION ALL
-SELECT 'release', NULL, videoId, eventId, primaryEventId FROM release
-LIMIT ${fkLookup.values.length + 1 + SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT + 1}`;
+
+  const totalBinds = lookups.reduce((total, lookup) => total + lookup.binds.length, 0) + releaseIds.length;
+  if (!Number.isSafeInteger(totalBinds) || totalBinds > SPREADSHEET_MEMBER_FK_RELEASE_MAX_BINDS) return null;
+
+  // Preserve the existing single-FK CTE name. Multi-FK plans use generated
+  // ordinals, never request-controlled identifiers, and each CTE retains its
+  // own lookup sentinel LIMIT so one FK cannot hide another FK's overflow.
+  const cteNames = lookups.map((_, index) => lookups.length === 1 ? "fk" : "fk_" + index);
+  const ctes = lookups.map((lookup, index) => cteNames[index] + " AS (" + lookup.statement + ")");
+  ctes.push("release AS (" + spreadsheetVideoReleaseSelectSql(releaseIds.length) + ")");
+  const fkSelects = lookups.map((_, index) =>
+    "SELECT 'fk' AS kind, " + index + " AS fkIndex, value, NULL AS videoId, NULL AS eventId, NULL AS primaryEventId FROM " + cteNames[index]);
+  const releaseSelect =
+    "SELECT 'release' AS kind, NULL AS fkIndex, NULL AS value, videoId, eventId, primaryEventId FROM release";
+  const fkRowLimit = lookups.reduce((total, lookup) => total + lookup.values.length + 1, 0);
+  const totalRowLimit = fkRowLimit + SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT + 1;
+  const statement = "WITH " + ctes.join(", ") + "\n" +
+    [...fkSelects, releaseSelect].join("\nUNION ALL\n") +
+    "\nLIMIT " + totalRowLimit;
+
+  const frozenLookups = Object.freeze(lookups.map(lookup => Object.freeze({
+    ...lookup,
+    binds: Object.freeze([...lookup.binds]),
+    values: Object.freeze([...lookup.values]),
+  })));
   return {
     statement,
-    binds: Object.freeze([...fkLookup.binds, ...releaseIds]),
-    fkLookup: Object.freeze({ ...fkLookup, binds: Object.freeze([...fkLookup.binds]), values: Object.freeze([...fkLookup.values]) }),
+    binds: Object.freeze([...lookups.flatMap(lookup => lookup.binds), ...releaseIds]),
+    fkLookups: frozenLookups,
     releaseIds: Object.freeze(releaseIds),
   };
 }
 
 /**
  * Validate the tagged result of the bounded member FK/release CTE.
- * FK validation deliberately precedes release overflow/row validation so a
- * missing FK retains CURRENT's error precedence over an oversized release set.
+ * Every FK group is validated in original planner order before release
+ * overflow/row validation, preserving CURRENT's FK-first error precedence.
  */
 export function validateSpreadsheetMemberFkReleaseLookupReceipt(
-  plan: { fkLookup: SpreadsheetForeignKeyLookup; releaseIds: readonly string[] },
+  plan: { fkLookups: readonly SpreadsheetForeignKeyLookup[]; releaseIds: readonly string[] },
   result: { success: boolean; results: unknown[] },
 ): { eventIdsByVideo: Map<string, string[]> } {
-  const fkRows: Array<{ value: string | number | null }> = [];
+  const fkRowsByIndex: Array<Array<{ value: string | number | null }>> = [];
   const releaseRows: unknown[] = [];
   // Provider receipt access (including accessors/proxy traps) is not a
   // domain decision. Never let it forge a preview, FK or constraint error.
   try {
-    if (!plan || !plan.fkLookup || !Array.isArray(plan.releaseIds) ||
-        !result || result.success !== true) {
+    if (!plan || !Array.isArray(plan.fkLookups) ||
+        plan.fkLookups.length < 1 ||
+        plan.fkLookups.length > SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES ||
+        !Array.isArray(plan.releaseIds) || !result || result.success !== true) {
       throw new Error("invalid_snapshot");
     }
+    const fkRowLimit = plan.fkLookups.reduce((total, lookup) => {
+      if (!lookup || !Array.isArray(lookup.values) ||
+          lookup.values.length < 1 || lookup.values.length > 99) {
+        throw new Error("invalid_snapshot");
+      }
+      return total + lookup.values.length + 1;
+    }, 0);
     const rows = result.results;
-    if (!Array.isArray(rows) ||
-        rows.length > plan.fkLookup.values.length + 1 + SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT + 1) {
-      throw new Error("invalid_snapshot");
-    }
+    const maxRows = fkRowLimit + SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT + 1;
+    if (!Array.isArray(rows) || rows.length > maxRows) throw new Error("invalid_snapshot");
+    for (let index = 0; index < plan.fkLookups.length; index++) fkRowsByIndex.push([]);
+
     for (const row of rows) {
-      if (!row || typeof row !== "object" || Array.isArray(row) || !Object.hasOwn(row, "kind")) {
+      if (!row || typeof row !== "object" || Array.isArray(row) ||
+          !Object.hasOwn(row, "kind") || !Object.hasOwn(row, "fkIndex") ||
+          !Object.hasOwn(row, "value") || !Object.hasOwn(row, "videoId") ||
+          !Object.hasOwn(row, "eventId") || !Object.hasOwn(row, "primaryEventId")) {
         throw new Error("invalid_snapshot");
       }
       const kind = (row as { kind?: unknown }).kind;
+      const fkIndex = (row as { fkIndex?: unknown }).fkIndex;
+      const value = (row as { value?: unknown }).value;
       if (kind === "fk") {
-        if (!Object.hasOwn(row, "value") || !Object.hasOwn(row, "videoId") ||
-            !Object.hasOwn(row, "eventId") || !Object.hasOwn(row, "primaryEventId") ||
+        if (typeof fkIndex !== "number" || !Number.isSafeInteger(fkIndex) ||
+            fkIndex < 0 || fkIndex >= fkRowsByIndex.length ||
             (row as { videoId: unknown }).videoId !== null ||
             (row as { eventId: unknown }).eventId !== null ||
             (row as { primaryEventId: unknown }).primaryEventId !== null) {
           throw new Error("invalid_snapshot");
         }
-        fkRows.push({ value: (row as { value: string | number | null }).value });
+        fkRowsByIndex[fkIndex]!.push({ value: value as string | number | null });
       } else if (kind === "release") {
+        if (fkIndex !== null || value !== null) throw new Error("invalid_snapshot");
         releaseRows.push(row);
       } else {
         throw new Error("invalid_snapshot");
@@ -721,10 +769,11 @@ export function validateSpreadsheetMemberFkReleaseLookupReceipt(
     throw new Error("invalid_snapshot");
   }
 
-  // Preserve old two-query ordering: FK violations precede release overflow.
-  // fkRows now contains only locally constructed rows; genuine FK errors
-  // must remain distinguishable from malformed provider data.
-  assertSpreadsheetForeignKeyLookup(plan.fkLookup, fkRows);
+  // Local arrays preserve the canonical lookup order. A genuine missing FK
+  // remains distinguishable from malformed provider data and release overflow.
+  for (let index = 0; index < plan.fkLookups.length; index++) {
+    assertSpreadsheetForeignKeyLookup(plan.fkLookups[index]!, fkRowsByIndex[index]!);
+  }
   if (releaseRows.length > SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT) {
     throw new Error(SPREADSHEET_STATIC_REBUILD_SPLIT_REQUIRED);
   }
