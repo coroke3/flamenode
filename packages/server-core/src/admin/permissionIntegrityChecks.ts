@@ -30,20 +30,20 @@ function finalizeJsCheck(
   title: string,
   severity: IntegrityCheckResult["severity"],
   description: string,
+  count: number,
   issues: IntegrityIssue[],
   recommendation: string,
 ): IntegrityCheckResult | null {
-  if (issues.length === 0) return null;
-  const visibleIssues = issues.slice(0, DISPLAY_LIMIT);
+  if (count === 0) return null;
   return {
     id,
     title,
     area: "event_staff",
     severity,
     description,
-    count: issues.length,
-    issues: visibleIssues,
-    moreCount: Math.max(0, issues.length - visibleIssues.length),
+    count,
+    issues,
+    moreCount: Math.max(0, count - issues.length),
     recommendation,
   };
 }
@@ -165,6 +165,11 @@ export async function buildPermissionIntegrityChecks(
   const ownerIssues: IntegrityIssue[] = [];
   const managerIssues: IntegrityIssue[] = [];
   const invalidCustomIssues: IntegrityIssue[] = [];
+  // Count every match in the existing returned rows, but only format the
+  // displayed prefix. The database row cap is unchanged, not a full count.
+  let ownerCount = 0;
+  let managerCount = 0;
+  let invalidCustomCount = 0;
 
   // Per-ID requests must not parse custom permission JSON or build issues
   // for checks the caller did not select. Keep the shared CURRENT query and
@@ -175,17 +180,16 @@ export async function buildPermissionIntegrityChecks(
   for (const row of staffRows) {
     const preset = text(row.permission_preset) as EventStaffPreset;
     if (selectedPreset !== null && preset !== selectedPreset) continue;
-    const id = text(row.id);
-    const eventId = text(row.event_id);
     const customJson = preset === "custom" ? row.custom_permission_keys_json ?? null : null;
 
     if (preset === "custom" && customJson && customJson.trim() !== "[]") {
       const parsed = safeParseCustomPermissionKeys(customJson, {
         allowAdminOnly: true,
       });
-      if (parsed.length === 0) {
+      if (parsed.length === 0 && ++invalidCustomCount <= DISPLAY_LIMIT) {
+        const eventId = text(row.event_id);
         invalidCustomIssues.push({
-          id,
+          id: text(row.id),
           title: `@${text(row.x_user_id) || "—"}`,
           description: `JSON 不正 event:${eventId}`,
           adminHref: staffHref(eventId),
@@ -195,21 +199,23 @@ export async function buildPermissionIntegrityChecks(
     }
 
     if (preset === "owner" && ownerMissingPermissions.length > 0) {
-      ownerIssues.push({
-        id,
-        title: `@${text(row.x_user_id) || "—"}`,
-        description: `不足: ${ownerMissingPermissions.join(", ")}`,
-        adminHref: staffHref(eventId),
-      });
+      if (++ownerCount <= DISPLAY_LIMIT) {
+        ownerIssues.push({
+          id: text(row.id),
+          title: `@${text(row.x_user_id) || "—"}`,
+          description: `不足: ${ownerMissingPermissions.join(", ")}`,
+          adminHref: staffHref(text(row.event_id)),
+        });
+      }
       continue;
     }
 
-    if (preset === "manager" && managerDangerousPermissions.length > 0) {
+    if (preset === "manager" && managerDangerousPermissions.length > 0 && ++managerCount <= DISPLAY_LIMIT) {
       managerIssues.push({
-        id,
+        id: text(row.id),
         title: `@${text(row.x_user_id) || "—"}`,
         description: `危険権限: ${managerDangerousPermissions.join(", ")}`,
-        adminHref: staffHref(eventId),
+        adminHref: staffHref(text(row.event_id)),
       });
     }
   }
@@ -221,6 +227,7 @@ export async function buildPermissionIntegrityChecks(
       "owner なのに必要権限が不足",
       "danger",
       "owner プリセットに必要な権限キーが解決できません。",
+      ownerCount,
       ownerIssues,
       "プリセット定義を確認してください。",
     ),
@@ -229,6 +236,7 @@ export async function buildPermissionIntegrityChecks(
       "manager なのに危険権限あり",
       "warning",
       "manager に危険権限が含まれています。",
+      managerCount,
       managerIssues,
       "危険権限を外してください。",
     ),
@@ -237,6 +245,7 @@ export async function buildPermissionIntegrityChecks(
       "custom JSON がパース不能",
       "warning",
       "custom_permission_keys_json が壊れています。",
+      invalidCustomCount,
       invalidCustomIssues,
       "JSON を修正してください。",
     ),

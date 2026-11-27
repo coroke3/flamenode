@@ -1899,6 +1899,53 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(queries, 3);
   });
 
+  test("MIG-0626 U05: staff diagnostic counts all returned matches but formats only its visible prefix", async () => {
+    const { buildPermissionIntegrityChecks } = await import("@flamenode/server-core/admin/permissionIntegrityChecks");
+    // Direct exported helper probe with accessors counting display-only work.
+    // This characterizes the existing 500-row SQL input, NOT a full DB count.
+    for (const preset of ["custom", "manager"]) {
+      for (const total of [0, 1, 49, 50, 51, 500]) {
+        let displayReads = 0;
+        let jsonReads = 0;
+        const rows = Array.from({ length: total }, (_, i) => ({
+          permission_preset: preset,
+          get id() { displayReads++; return "id-" + i; },
+          get event_id() { displayReads++; return "ev 1"; },
+          get x_user_id() { displayReads++; return "x-" + i; },
+          get custom_permission_keys_json() {
+            jsonReads++;
+            return "{not json";
+          },
+        }));
+        const db = { select: () => ({ from: () => ({ where: () => ({
+          limit: async (limit) => {
+            assert.equal(limit, 500);
+            return rows;
+          },
+        }) }) }) };
+        const checkId = preset === "custom" ? "staff_custom_json_invalid" : "staff_manager_has_dangerous_permissions";
+        const result = await buildPermissionIntegrityChecks(db, checkId);
+        const visible = Math.min(total, 50);
+        assert.equal(displayReads, visible * 3, preset + " " + total);
+        assert.equal(jsonReads, preset === "custom" ? total : 0);
+        if (total === 0) {
+          assert.deepEqual(result, []);
+          continue;
+        }
+        assert.equal(result.length, 1);
+        assert.equal(result[0].id, checkId);
+        assert.equal(result[0].count, total);
+        assert.equal(result[0].moreCount, total - visible);
+        assert.deepEqual(result[0].issues, Array.from({ length: visible }, (_, i) => ({
+          id: "id-" + i,
+          title: "@x-" + i,
+          description: preset === "custom" ? "JSON 不正 event:ev 1" : "危険権限: video.permissions",
+          adminHref: "/manage/events/ev%201/staff",
+        })));
+      }
+    }
+  });
+
   test("MIG-0626 U05: characterize staff permission diagnostic parsing and the remaining 500-row transfer gap", async () => {
     // Explicit characterization of CURRENT; 500 is NOT an accepted S2
     // limit or a complete database-wide integrity count.
