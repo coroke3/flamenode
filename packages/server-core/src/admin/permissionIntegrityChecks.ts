@@ -67,7 +67,7 @@ export async function buildPermissionIntegrityChecks(
     managerResolved.has(key),
   );
 
-  const [sqlChecks, duplicateX, staffRows] = await Promise.all([
+  const [sqlChecks, duplicateX, staffRows, ownerRows, managerRows] = await Promise.all([
     Promise.all([
       (!selectedId || selectedId === "staff_missing_subject_ids") ? makeCheck({
         db,
@@ -149,7 +149,10 @@ export async function buildPermissionIntegrityChecks(
       .groupBy(sql`event_id`, sql`x_user_id`)
       .having(sql`COUNT(*) > 1`)
       .limit(DISPLAY_LIMIT) : Promise.resolve([]),
-    (!selectedId || ["staff_owner_missing_permissions", "staff_manager_has_dangerous_permissions", "staff_custom_json_invalid"].includes(selectedId)) ? db
+    // The custom JSON diagnostic deliberately retains the canonical JS parser
+    // until its alias/depth/NUL data policy is settled. Its legacy 500-row
+    // input cap remains an explicit S2 blocker, not an accepted bound.
+    (!selectedId || selectedId === "staff_custom_json_invalid") ? db
       .select({
         id: sql<string>`id`,
         event_id: sql<string>`event_id`,
@@ -158,25 +161,58 @@ export async function buildPermissionIntegrityChecks(
         custom_permission_keys_json: sql<string | null>`custom_permission_keys_json`,
       })
       .from(sql`event_staff`)
-      .where(sql`permission_preset IN ('owner', 'manager', 'custom')`)
+      .where(selectedId === "staff_custom_json_invalid"
+        ? sql`permission_preset = 'custom'`
+        : sql`permission_preset IN ('owner', 'manager', 'custom')`)
       .limit(500) : Promise.resolve([]),
+    // Lead-approved U05 exception: preset-only checks need no custom JSON.
+    // Count all matching rows in D1 and transfer only 50 stable issue samples.
+    selectedId === "staff_owner_missing_permissions" && ownerMissingPermissions.length > 0 ? db
+      .select({
+        id: sql<string>`id`,
+        event_id: sql<string>`event_id`,
+        x_user_id: sql<string>`x_user_id`,
+        total_count: sql<number>`COUNT(*) OVER()`,
+      })
+      .from(sql`event_staff`)
+      .where(sql`permission_preset = 'owner'`)
+      .orderBy(sql`id`)
+      .limit(DISPLAY_LIMIT) : Promise.resolve([]),
+    selectedId === "staff_manager_has_dangerous_permissions" && managerDangerousPermissions.length > 0 ? db
+      .select({
+        id: sql<string>`id`,
+        event_id: sql<string>`event_id`,
+        x_user_id: sql<string>`x_user_id`,
+        total_count: sql<number>`COUNT(*) OVER()`,
+      })
+      .from(sql`event_staff`)
+      .where(sql`permission_preset = 'manager'`)
+      .orderBy(sql`id`)
+      .limit(DISPLAY_LIMIT) : Promise.resolve([]),
   ]);
 
-  const ownerIssues: IntegrityIssue[] = [];
-  const managerIssues: IntegrityIssue[] = [];
+  const ownerIssues: IntegrityIssue[] = ownerRows.map((row) => ({
+    id: text(row.id),
+    title: `@${text(row.x_user_id) || "—"}`,
+    description: `不足: ${ownerMissingPermissions.join(", ")}`,
+    adminHref: staffHref(text(row.event_id)),
+  }));
+  const managerIssues: IntegrityIssue[] = managerRows.map((row) => ({
+    id: text(row.id),
+    title: `@${text(row.x_user_id) || "—"}`,
+    description: `危険権限: ${managerDangerousPermissions.join(", ")}`,
+    adminHref: staffHref(text(row.event_id)),
+  }));
   const invalidCustomIssues: IntegrityIssue[] = [];
-  // Count every match in the existing returned rows, but only format the
-  // displayed prefix. The database row cap is unchanged, not a full count.
-  let ownerCount = 0;
-  let managerCount = 0;
+  // SQL preset checks return a full COUNT(*) OVER() plus at most 50 ordered
+  // samples. The full Next compatibility helper below retains CURRENT logic.
+  let ownerCount = Number(ownerRows[0]?.total_count ?? 0);
+  let managerCount = Number(managerRows[0]?.total_count ?? 0);
   let invalidCustomCount = 0;
 
-  // Per-ID requests must not parse custom permission JSON or build issues
-  // for checks the caller did not select. Keep the shared CURRENT query and
-  // its row limit unchanged until the SQL/coverage decision is resolved.
-  const selectedPreset = selectedId === "staff_owner_missing_permissions" ? "owner"
-    : selectedId === "staff_manager_has_dangerous_permissions" ? "manager"
-    : selectedId === "staff_custom_json_invalid" ? "custom" : null;
+  // Per-ID custom JSON still uses the canonical JS resolver; unrelated presets
+  // are excluded by SQL. The no-selection compatibility path remains unchanged.
+  const selectedPreset = selectedId === "staff_custom_json_invalid" ? "custom" : null;
   for (const row of staffRows) {
     const preset = text(row.permission_preset) as EventStaffPreset;
     if (selectedPreset !== null && preset !== selectedPreset) continue;
