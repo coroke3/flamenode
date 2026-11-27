@@ -1234,3 +1234,55 @@ test("MIG-0737 U01 double click: same-cell batched cancel/reopen restores focus 
     assertNoEffects(ui);
   } finally { await ui.cleanup(); }
 });
+
+test("MIG-0737 U01 double click: explicit save, undo and redo retain opened row identity and original value", async () => {
+  for (const [position, original, id, next] of [
+    ["1:1", "Beta", "b", "Changed"],
+    ["2:1", null, "c", "New title"],
+    ["0:1", "Alpha", "a", "NULL"],
+  ]) {
+    const requests = [];
+    let refreshes = 0;
+    const fixture = { ...data, rows: [data.rows[0], data.rows[1], { ...data.rows[2], title: null }] };
+    const ui = await mount({ data: fixture, allowMutations: true,
+      fetchFn: async (url, init) => {
+        requests.push({ url, init });
+        return new Response(JSON.stringify({ ok: true }), { headers: { "content-type": "application/json" } });
+      },
+      onRefresh: () => { refreshes++; },
+    });
+    try {
+      const td = await select(ui, position);
+      const surface = td.querySelector("[data-grid-cell-content]");
+      await doubleClickCell(surface);
+      const input = td.querySelector("input");
+      assert.ok(input && document.activeElement === input);
+      assert.equal(input.value, original ?? "");
+      await setInput(input, next);
+      const other = cell(ui, position === "0:1" ? "1:1" : "0:1");
+      await doubleClickCell(other.querySelector("[data-grid-cell-content]"));
+      assert.ok(td.querySelector("input") === input);
+      assert.equal(other.querySelector("input"), null);
+      assert.deepEqual(selected(ui), [position]);
+      assert.equal(requests.length, 0);
+      const save = button(ui, "セルを保存");
+      await React.act(async () => { save.click(); save.click(); });
+      assert.equal(requests.length, 1);
+      assert.equal(refreshes, 1);
+      assert.equal(td.querySelector("input"), null);
+      await select(ui, position);
+      assert.equal((await key(td, "z", { ctrlKey: true })).defaultPrevented, true);
+      assert.equal(requests.length, 2);
+      assert.equal(refreshes, 2);
+      await select(ui, position);
+      assert.equal((await key(td, "z", { ctrlKey: true, shiftKey: true })).defaultPrevented, true);
+      assert.equal(requests.length, 3);
+      assert.equal(refreshes, 3);
+      const after = next === "NULL" ? null : next;
+      assert.deepEqual(requests.map(({ url, init }) => [url, init.method, JSON.parse(init.body)]),
+        [after, original, after].map(value => ["/api/admin/spreadsheet/data", "PATCH",
+          { table: "videos", primaryKey: { id }, column: "title", value }]));
+      assert.ok(requests.every(({ init }) => !init.signal.aborted));
+    } finally { await ui.cleanup(); }
+  }
+});
