@@ -96,7 +96,7 @@ test("S3 budget: real-cookie routes use <= 3 pre-reads and exactly 1 batch", asy
 
 test("missing CostGuard settings row preserves the authenticated user and fails as maintenance", async () => {
   const { sqlite, request, stats } = setup({ cookieSession: true });
-  sqlite.prepare('DELETE FROM system_settings WHERE id = "default"').run();
+  sqlite.prepare("DELETE FROM system_settings WHERE id = 'default'").run();
   const response = await request("POST", "/api/admin/announcements", { ...VALID, id: "missing-settings" });
   assert.equal(response.status, 503);
   assert.equal((await response.json()).reason, "maintenance_mode");
