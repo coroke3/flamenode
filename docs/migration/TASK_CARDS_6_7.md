@@ -305,7 +305,7 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 ### MIG-0645 — legacy import Route Handler
 - 読む: `app/api/admin/import/legacy/route.ts`、`src/lib/import/legacy/*`。
 - 変更: `apps/api/src/routes/admin/legacyImport.ts`、純粋関数の core 移動。
-- 試験: preview → commit、途中失敗の全件 rollback、CPU budget。
+- 試験: preview → commit、未commit D1 batchのrollback、先行batch確定後のmarker・後続処理失敗の復旧、step成功後の進捗CAS失敗はcommitted_progress_pendingと同じ資格情報での復旧、CPU budget（全インポート・全HTTP stepの原子性は前提にしない）。
 - DONE: RH-002 の parity。
 
 ### MIG-0646 — media Route Handlers

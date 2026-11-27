@@ -11,15 +11,8 @@ import { EntryIndex } from "./entry/EntryIndex.js";
 import { CostGuardBanner } from "./CostGuardBanner.js";
 import type { createOperationModeBannerApi } from "../api/operationMode.js";
 
-/** Routes owned by MIG-0701 (CURRENT_ROUTES.md Personal). Other Personal routes are later MIG tasks. */
-export const PERSONAL_READ_PATHS = [
-  "/dashboard",
-  "/dashboard/library",
-  "/dashboard/settings",
-  "/dashboard/youtube-playlists",
-  "/onboarding",
-  "/entry",
-] as const;
+/** Mounted Personal routes shared with post-mutation navigation. */
+export { PERSONAL_READ_PATHS } from "./personalPaths.js";
 
 /** CURRENT app/(auth)/error.tsx equivalent: `reset` clears the failure and re-renders. */
 export class RouteErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {

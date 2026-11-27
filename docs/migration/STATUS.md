@@ -433,11 +433,11 @@ MIG-0608 は Phase 8 の Auth.js 移行を待たずに、認証付き Hono API �
 | MIG-0711 | `/entry` index screen (read-only, Discord login via the Auth.js HTTP flow) | DONE | MIG-0611, MIG-0623 |
 | MIG-0712 | Personal SPA video form part A: sub-fields port (custom questions, social links, icon picker, description preview, channel picker) | DONE | MIG-0623, MIG-0630 |
 | MIG-0713 | Personal SPA video form part B: `VideoMembersField` port with injected search / permission adapters | DONE | MIG-0623, MIG-0630 |
-| MIG-0714 | Personal SPA video form part C: `VideoForm` + `UnslottedPostForm` port with injected submit adapter | READY | MIG-0712, MIG-0713, MIG-0738 |
+| MIG-0714 | Personal SPA video form part C: `VideoForm` + `UnslottedPostForm` port with injected submit adapter | DONE | MIG-0712, MIG-0713, MIG-0738 |
 | MIG-0738 | Personal SPA video form helper modules + `ErrorCallout` + `PublicReflectionDelayNotice` (ex MIG-0714 U01) | DONE | MIG-0701, MIG-0713 |
 | MIG-0715 | `/dashboard/edit/:id/permissions` screen (SA-082..084; merge gate MIG-0650) | READY | MIG-0630 |
-| MIG-0716 | `/entry/slotted` + `/entry/unslotted` screens (SA-086, SA-088; merge gate MIG-0651, MIG-0648, MIG-0650) | BLOCKED | MIG-0714 |
-| MIG-0717 | `/dashboard/edit/:id` screen (SA-089; merge gate MIG-0651, MIG-0648, MIG-0650) | BLOCKED | MIG-0714 |
+| MIG-0716 | `/entry/slotted` + `/entry/unslotted` screens (SA-086, SA-088; merge gate MIG-0651, MIG-0648, MIG-0650) | READY | MIG-0714 |
+| MIG-0717 | `/dashboard/edit/:id` screen (SA-089; merge gate MIG-0651, MIG-0648, MIG-0650) | READY | MIG-0714 |
 | MIG-0718 | Personal SPA CostGuardBanner (merge gate MIG-0661, MIG-0701) | DONE | MIG-0611 |
 | MIG-0719 | Ops Manage shell (guard, sidebar, banner), `/manage`, review redirect, `apps/ops/wrangler.toml` (merge gate MIG-0707, MIG-0661, MIG-0628, D-17) | DONE | MIG-0624, MIG-0608 |
 | MIG-0720 | `/manage/events/:id` overview + `/audience` (SA-035; merge gate MIG-0707, MIG-0719, MIG-0655) | DONE | MIG-0624 |
