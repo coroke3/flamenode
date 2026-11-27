@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { flushSync } from "react-dom";
 import Link from "next/link";
 import { Icon } from "@/components/ui/Icon";
 import { SlotGrid, type SlotRow } from "@/components/event/SlotGrid";
@@ -27,8 +28,18 @@ const EMPTY_OVERLAY: SlotViewerOverlayDto = {
   slots: [],
 };
 
+type ViewerOverlayScope = {
+  eventId: string;
+  baseSlots: readonly SlotRow[];
+  refreshNonce: number;
+};
+
 type ViewerOverlayState = {
   value: SlotViewerOverlayDto;
+  /** A distinct receipt for each committed request scope, including A→B→A. */
+  scope: ViewerOverlayScope | null;
+  /** Viewer data belongs to one event, even when slot arrays are reused. */
+  eventId: string | null;
   /** このviewer情報と同時に表示してよいpublic slot base。 */
   baseSlots: readonly SlotRow[] | null;
 };
@@ -156,12 +167,24 @@ export function EventSlotsViewerPanel({
 }): React.ReactElement {
   const [overlayState, setOverlayState] = React.useState<ViewerOverlayState>({
     value: EMPTY_OVERLAY,
+    scope: null,
+    eventId: null,
     baseSlots: null,
   });
   const [loading, setLoading] = React.useState(true);
   const [refreshNonce, setRefreshNonce] = React.useState(0);
+  // Invalidate stale GET completions synchronously on Active X or BFCache restoration.
+  const overlayGeneration = React.useRef(0);
 
-  const overlayIsCurrent = overlayState.baseSlots === baseSlots;
+  // Event/base equality alone can resurrect an earlier A receipt on A→B→A
+  // before B finishes. A new scope object is created whenever these inputs change.
+  const overlayScope = React.useMemo<ViewerOverlayScope>(
+    () => ({ eventId, baseSlots, refreshNonce }),
+    [eventId, refreshNonce, baseSlots],
+  );
+  const overlayIsCurrent =
+    overlayState.scope === overlayScope &&
+    overlayState.eventId === eventId && overlayState.baseSlots === baseSlots;
   const viewerOverlay = overlayIsCurrent ? overlayState.value : EMPTY_OVERLAY;
   const viewerLoading = loading || !overlayIsCurrent;
 
@@ -173,6 +196,9 @@ export function EventSlotsViewerPanel({
       SLOT_VIEWER_OVERLAY_TIMEOUT_MS,
     );
     const requestBaseSlots = baseSlots;
+    const requestEventId = eventId;
+    const requestScope = overlayScope;
+    const requestGeneration = overlayGeneration.current;
     setLoading(true);
     void fetch(
       `/api/events/${encodeURIComponent(eventId)}/slots/viewer-overlay`,
@@ -198,8 +224,8 @@ export function EventSlotsViewerPanel({
         return { ...EMPTY_OVERLAY, authUnavailable: true };
       })
       .then((value) => {
-        if (!active || !value) return;
-        setOverlayState({ value, baseSlots: requestBaseSlots });
+        if (!active || !value || requestGeneration !== overlayGeneration.current) return;
+        setOverlayState({ value, eventId: requestEventId, baseSlots: requestBaseSlots, scope: requestScope });
         setLoading(false);
       })
       .finally(() => {
@@ -210,17 +236,37 @@ export function EventSlotsViewerPanel({
       window.clearTimeout(timeoutId);
       controller.abort();
     };
-  }, [eventId, refreshNonce, baseSlots]);
+  }, [eventId, refreshNonce, baseSlots, overlayScope]);
 
   React.useEffect(() => {
-    const refresh = () => {
-      // Active X切替直後に旧Xの本人枠・表示名を残さない。
-      setOverlayState({ value: EMPTY_OVERLAY, baseSlots: null });
+    const retirePrivateOverlay = () => {
+      overlayGeneration.current += 1;
+      // Retire private ownership and stale GET receipts before a BFCache snapshot.
+      setOverlayState({ value: EMPTY_OVERLAY, eventId: null, baseSlots: null, scope: null });
       setLoading(true);
+    };
+    const refresh = () => {
+      retirePrivateOverlay();
       setRefreshNonce((value) => value + 1);
     };
+    const onPageHide = (event: PageTransitionEvent) => {
+      if (!event.persisted) return;
+      // React state alone may not commit before the browser freezes this document.
+      flushSync(retirePrivateOverlay);
+    };
+    // A BFCache restore can revive a page whose authenticated cookie changed
+    // while it was suspended. Retire again before requesting fresh viewer data.
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) refresh();
+    };
     window.addEventListener(ACTIVE_X_CHANGED_EVENT, refresh);
-    return () => window.removeEventListener(ACTIVE_X_CHANGED_EVENT, refresh);
+    window.addEventListener("pagehide", onPageHide);
+    window.addEventListener("pageshow", onPageShow);
+    return () => {
+      window.removeEventListener(ACTIVE_X_CHANGED_EVENT, refresh);
+      window.removeEventListener("pagehide", onPageHide);
+      window.removeEventListener("pageshow", onPageShow);
+    };
   }, []);
 
   const mergedSlots = React.useMemo(
@@ -331,6 +377,7 @@ export function EventSlotsViewerPanel({
       <div className={styles.layout}>
         <div className={styles.main}>
           <SlotGrid
+            key={eventId}
             slots={slots}
             viewerXId={viewerOverlay.viewerXId}
             isAuthenticated={

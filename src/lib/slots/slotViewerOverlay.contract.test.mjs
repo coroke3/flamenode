@@ -81,12 +81,13 @@ test("slot viewer routeはnot-foundとruntime unavailableを分離する", () =>
 
 test("base slot/Active X変更時は旧viewer ownershipを即時無効化する", () => {
   assert.match(panel, /type ViewerOverlayState/);
-  assert.match(panel, /overlayState\.baseSlots === baseSlots/);
+  assert.match(panel, /overlayState\.eventId === eventId && overlayState\.baseSlots === baseSlots/);
   assert.match(panel, /overlayIsCurrent \? overlayState\.value : EMPTY_OVERLAY/);
   assert.match(panel, /const requestBaseSlots = baseSlots/);
-  assert.match(panel, /setOverlayState\(\{ value, baseSlots: requestBaseSlots \}\)/);
+  assert.match(panel, /const requestEventId = eventId/);
+  assert.match(panel, /setOverlayState\(\{ value, eventId: requestEventId, baseSlots: requestBaseSlots, scope: requestScope \}\)/);
   assert.match(panel, /\[eventId, refreshNonce, baseSlots\]/);
-  assert.match(panel, /setOverlayState\(\{ value: EMPTY_OVERLAY, baseSlots: null \}\)/);
+  assert.match(panel, /setOverlayState\(\{ value: EMPTY_OVERLAY, eventId: null, baseSlots: null, scope: null \}\)/);
   assert.match(panel, /ACTIVE_X_CHANGED_EVENT/);
 });
 
@@ -106,4 +107,78 @@ test("TOS/BAN/auth unavailableでは本人枠のwrite ownershipだけを無効�
   assert.match(panel, /!viewerOverlay\.authUnavailable/);
   assert.match(panel, /is_owned_by_viewer: false/);
   assert.match(panel, /canManageOwnSlots\s*\? mergedSlots/);
+});
+
+test("BFCache復元時は旧viewer overlay・予約ダイアログの両方を破棄する", async () => {
+  const slotGrid = await readFile(new URL("../../components/event/SlotGrid.tsx", import.meta.url), "utf8");
+  // pageshow fires for a fresh page too; only history-cache restoration retires
+  // already displayed private state and starts a fresh credentialed overlay GET.
+  assert.ok(panel.includes('import { flushSync } from "react-dom"'));
+  assert.ok(panel.includes('const onPageHide = (event: PageTransitionEvent) => {'));
+  assert.ok(panel.includes('flushSync(retirePrivateOverlay)'));
+  assert.ok(panel.includes('window.addEventListener("pagehide", onPageHide)'));
+  assert.ok(panel.includes('window.removeEventListener("pagehide", onPageHide)'));
+  assert.match(panel, /const onPageShow = \(event: PageTransitionEvent\) => \{/);
+  assert.match(panel, /if \(event\.persisted\) refresh\(\)/);
+  assert.match(panel, /window\.addEventListener\("pageshow", onPageShow\)/);
+  assert.match(panel, /window\.removeEventListener\("pageshow", onPageShow\)/);
+  assert.match(panel, /const retirePrivateOverlay = \(\) => \{\s*overlayGeneration\.current \+= 1;[\s\S]*?setOverlayState\(\{ value: EMPTY_OVERLAY, eventId: null, baseSlots: null, scope: null \}\);[\s\S]*?setLoading\(true\);/);
+  assert.match(panel, /const refresh = \(\) => \{\s*retirePrivateOverlay\(\);\s*setRefreshNonce\(/);
+  assert.ok(slotGrid.includes('import { flushSync } from "react-dom"'));
+  assert.ok(slotGrid.includes('if (event.persisted) flushSync(clearViewerPrivateUi)'));
+  assert.ok(slotGrid.includes('window.addEventListener("pagehide", onPageHide)'));
+  assert.ok(slotGrid.includes('window.removeEventListener("pagehide", onPageHide)'));
+  assert.match(slotGrid, /if \(event\.persisted\) clearViewerPrivateUi\(\)/);
+  assert.match(slotGrid, /window\.addEventListener\("pageshow", onPageShow\)/);
+  assert.match(slotGrid, /window\.removeEventListener\("pageshow", onPageShow\)/);
+  assert.match(slotGrid, /const clearViewerPrivateUi = \(\) => \{[\s\S]*?viewerGeneration\.current \+= 1;/);
+  assert.match(slotGrid, /setReserveTarget\(null\)/);
+  assert.match(slotGrid, /setConfirmMerge\(null\)/);
+});
+
+test("old viewer GET is retired synchronously before Active-X or BFCache effect cleanup", () => {
+  assert.match(panel, /const overlayGeneration = React\.useRef\(0\)/);
+  assert.match(panel, /const requestGeneration = overlayGeneration\.current/);
+  assert.match(panel, /if \(!active \|\| !value \|\| requestGeneration !== overlayGeneration\.current\) return/);
+  assert.match(panel, /const retirePrivateOverlay = \(\) => \{\s*overlayGeneration\.current \+= 1/);
+  assert.match(panel, /if \(event\.persisted\) refresh\(\)/);
+  assert.match(panel, /window\.addEventListener\(ACTIVE_X_CHANGED_EVENT, refresh\)/);
+});
+
+// This is a source-contract guard. Mounted route transitions and deferred GET
+// interleavings still require separate runtime acceptance before merge.
+test("eventId change with an identical baseSlots reference cannot authorize an old viewer overlay", () => {
+  assert.match(panel, /eventId: string \| null/);
+  assert.match(panel, /overlayState\.eventId === eventId && overlayState\.baseSlots === baseSlots/);
+  assert.match(panel, /const requestEventId = eventId/);
+  assert.match(panel, /setOverlayState\(\{ value, eventId: requestEventId, baseSlots: requestBaseSlots, scope: requestScope \}\)/);
+  assert.match(panel, /const viewerOverlay = overlayIsCurrent \? overlayState\.value : EMPTY_OVERLAY/);
+  assert.match(panel, /const viewerLoading = loading \|\| !overlayIsCurrent/);
+  assert.match(panel, /\[eventId, refreshNonce, baseSlots\]/);
+});
+
+test("event route change resets mounted slot dialogs and in-flight mutation UI even for null-X viewers", () => {
+  // React key replacement unmounts the prior SlotGrid, retiring its local
+  // reserve/release/extend/merge dialogs and completion state on event changes.
+  assert.match(panel, /<SlotGrid\s+key=\{eventId\}\s+slots=\{slots\}/);
+  assert.match(panel, /overlayState\.eventId === eventId && overlayState\.baseSlots === baseSlots/);
+});
+
+// This is a source-contract guard; mounted async completion assertions still require runtime acceptance.
+test("unmount and viewer identity effect cleanup invalidate pending slot action completions", async () => {
+  const slotGrid = await readFile(new URL("../../components/event/SlotGrid.tsx", import.meta.url), "utf8");
+  assert.match(slotGrid, /return \(\) => \{\s*\/\/ Unmount\/identity-key replacement[\s\S]*?viewerGeneration\.current \+= 1;\s*window\.removeEventListener\(ACTIVE_X_CHANGED_EVENT/);
+  for (const action of ["reserveSlot", "releaseOwnSlot", "extendOwnSlotGroup", "mergeOwnSlotGroups"]) {
+    assert.match(slotGrid, new RegExp(`runSlotAction\\(\\(\\) => ${action}\\(fd\\)`));
+  }
+  assert.ok((slotGrid.match(/submittedGeneration !== viewerGeneration\.current/g) ?? []).length >= 8);
+  assert.match(panel, /<SlotGrid\s+key=\{eventId\}\s+slots=\{slots\}/);
+});
+
+test("a repeated event and baseSlots reference cannot revive a previous request scope", () => {
+  assert.match(panel, /const overlayScope = React\.useMemo<ViewerOverlayScope>/);
+  assert.match(panel, /overlayState\.scope === overlayScope/);
+  assert.match(panel, /const requestScope = overlayScope/);
+  assert.match(panel, /setOverlayState\(\{ value, eventId: requestEventId, baseSlots: requestBaseSlots, scope: requestScope \}\)/);
+  assert.match(panel, /\[eventId, refreshNonce, baseSlots, overlayScope\]/);
 });
