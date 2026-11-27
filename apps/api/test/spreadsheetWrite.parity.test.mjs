@@ -1066,6 +1066,97 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(honoD1.stats.batches, beforeBatches + 1);
   });
 
+  test("MIG-0638 U01/U02: malformed catalog projections never become cached schema or absent foreign keys", async () => {
+    resetAllCaches();
+    const { honoSqlite, honoD1, callHono } = createFixture();
+    const upsert = {
+      table: "software_catalog", mode: "upsert",
+      rows: [{ id: "sw-base", name: "Catalog recovered", normalized_name: "base soft", created_at: "100", updated_at: "101" }],
+    };
+    const preview = await callHono("POST", "/import", { ...upsert, dryRun: true });
+    assert.equal(preview.status, 200);
+    contracts.AdminSpreadsheetImportDryRunResponseSchema.parse(preview.body);
+    const apply = { ...upsert, previewToken: preview.body.previewToken };
+    const patch = { table: "slots", primaryKey: { id: "slot-base" }, column: "event_id", value: "a-open" };
+    const snapshot = () => ({
+      software: honoSqlite.prepare("SELECT * FROM software_catalog ORDER BY id").all(),
+      slots: honoSqlite.prepare("SELECT * FROM slots ORDER BY id").all(),
+      nonces: honoSqlite.prepare("SELECT * FROM spreadsheet_import_runs ORDER BY nonce").all(),
+      audits: allAudits(honoSqlite), queue: allQueueRows(honoSqlite),
+    });
+    const before = snapshot();
+    const beforeWrites = honoD1.stats.writes;
+    const beforeBatches = honoD1.stats.batches;
+    const originalPrepare = honoD1.prepare;
+    const originalError = console.error;
+    const replaceFk = (rows, value) => rows.map(row => ({ ...row, foreign_keys_json: value }));
+    const faults = [
+      rows => replaceFk(rows, null),
+      rows => replaceFk(rows, ""),
+      rows => replaceFk(rows, "["),
+      rows => replaceFk(rows, "{}"),
+      rows => replaceFk(rows, "[null]"),
+      rows => replaceFk(rows, JSON.stringify([{ column: rows[0].name, referencedTable: "events" }])),
+      rows => replaceFk(rows, JSON.stringify([{ column: rows[0].name, referencedTable: "events", referencedColumn: null }])),
+      rows => replaceFk(rows, JSON.stringify([{ column: "not_a_catalog_column", referencedTable: "events", referencedColumn: "id" }])),
+      rows => replaceFk(rows, JSON.stringify([{ column: rows[0].name, referencedTable: "invalid table", referencedColumn: "id" }])),
+      rows => rows.map((row, i) => i === 1 ? { ...row, foreign_keys_json: "invalid" } : row),
+      rows => rows.map((row, i) => i === 0 ? Object.defineProperty({ ...row }, "foreign_keys_json", {
+        get() { throw new Error("preview_required"); },
+      }) : row),
+      rows => rows.map((row, i) => i === 0 ? Object.create(row) : row),
+      rows => [rows[0], rows[0], ...rows.slice(1)],
+      rows => rows.map((row, i) => i === 0 ? { ...row, not_null: "1" } : row),
+    ];
+    const logs = [];
+    let injected = 0;
+    try {
+      console.error = (...args) => logs.push(args);
+      for (const [method, path, body] of [["PATCH", "/data", patch], ["POST", "/import", apply]]) {
+        for (const fault of faults) {
+          resetAllCaches();
+          const prior = injected;
+          honoD1.prepare = sql => {
+            const stmt = originalPrepare(sql);
+            if (!sql.includes("FROM pragma_table_xinfo(?) AS x")) return stmt;
+            return { ...stmt, bind(...params) {
+              const bound = stmt.bind(...params);
+              return { ...bound, async all() {
+                const receipt = await bound.all();
+                injected++;
+                return { ...receipt, results: fault(receipt.results) };
+              } };
+            } };
+          };
+          const res = await callHono(method, path, body);
+          assert.equal(injected, prior + 1);
+          assert.equal(res.status, 500, method + " " + path);
+          assert.deepEqual(res.body, { error: "internal_error" });
+          assert.match(res.headers.get("cache-control"), /private.*no-store/);
+        }
+      }
+      assert.equal(injected, faults.length * 2);
+      assert.deepEqual(logs, Array.from({ length: injected }, () => ["[spreadsheet] WRITE_FAILED"]));
+    } finally {
+      honoD1.prepare = originalPrepare;
+      console.error = originalError;
+    }
+    assert.equal(honoD1.stats.writes, beforeWrites);
+    assert.equal(honoD1.stats.batches, beforeBatches);
+    assert.deepEqual(snapshot(), before);
+    // No cache reset: a malformed catalog was never cached. The same signed
+    // token must still authorize its original import after a healthy read.
+    const recovered = await callHono("POST", "/import", apply);
+    assert.equal(recovered.status, 200);
+    contracts.AdminSpreadsheetImportApplyResponseSchema.parse(recovered.body);
+    assert.equal(recovered.body.updated, 1);
+    assert.equal(honoSqlite.prepare("SELECT name FROM software_catalog WHERE id = 'sw-base'").get().name, "Catalog recovered");
+    const missing = await callHono("PATCH", "/data", { ...patch, value: "not-present" });
+    assert.equal(missing.status, 400);
+    assert.deepEqual(missing.body, { error: "foreign_key_violation" });
+    assert.equal(honoD1.stats.batches, beforeBatches + 1);
+  });
+
   test("MIG-0638 T06: D1 statement budget (S2 reads <= 3, S3 writes pre-reads + 1 atomic batch)", async () => {
     resetAllCaches();
     const { honoD1, callHono } = createFixture();

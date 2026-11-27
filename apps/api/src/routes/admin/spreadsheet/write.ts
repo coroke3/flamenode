@@ -131,6 +131,63 @@ type WriteColumnRow = {
   foreign_keys_json: string | null;
 };
 
+// Snapshot catalog rows before exposing schema facts to the write planners.
+// json_group_array over an empty FK list is "[]", not null or missing data.
+function snapshotSpreadsheetWriteCatalog(rows: unknown): {
+  rows: WriteColumnRow[];
+  foreignKeys: SpreadsheetForeignKey[];
+} {
+  if (!Array.isArray(rows)) throw new Error("invalid_snapshot");
+  const columns: WriteColumnRow[] = [];
+  const names = new Set<string>();
+  let fkJson: string | undefined;
+  const count = rows.length;
+  for (let i = 0; i < count; i++) {
+    const row = rows[i];
+    if (!row || typeof row !== "object" || Array.isArray(row) ||
+        !["name", "type", "not_null", "pk", "dflt_value", "hidden", "foreign_keys_json"]
+          .every(key => Object.hasOwn(row, key))) {
+      throw new Error("invalid_snapshot");
+    }
+    const { name, type, not_null, pk, dflt_value, hidden, foreign_keys_json } = row;
+    if (typeof name !== "string" || !isValidSqliteTableName(name) || names.has(name) ||
+        (type !== null && typeof type !== "string") ||
+        (not_null !== 0 && not_null !== 1) ||
+        (pk !== null && (!Number.isSafeInteger(pk) || pk < 0)) ||
+        (dflt_value !== null && typeof dflt_value !== "string") ||
+        (hidden !== null && (!Number.isSafeInteger(hidden) || hidden < 0 || hidden > 3)) ||
+        typeof foreign_keys_json !== "string" ||
+        (fkJson !== undefined && foreign_keys_json !== fkJson)) {
+      throw new Error("invalid_snapshot");
+    }
+    names.add(name);
+    fkJson = foreign_keys_json;
+    columns.push({ name, type, not_null, pk, dflt_value, hidden, foreign_keys_json });
+  }
+  const foreignKeys: SpreadsheetForeignKey[] = [];
+  if (fkJson !== undefined) {
+    const parsed: unknown = JSON.parse(fkJson);
+    if (!Array.isArray(parsed)) throw new Error("invalid_snapshot");
+    for (const fk of parsed) {
+      if (!fk || typeof fk !== "object" || Array.isArray(fk) ||
+          !Object.hasOwn(fk, "column") || !Object.hasOwn(fk, "referencedTable") ||
+          !Object.hasOwn(fk, "referencedColumn")) {
+        throw new Error("invalid_snapshot");
+      }
+      const { column, referencedTable, referencedColumn } = fk;
+      // The existing planner only accepts explicit, safe SQL identifiers.
+      // Unsupported or malformed FK metadata must never become an empty list.
+      if (typeof column !== "string" || !names.has(column) ||
+          typeof referencedTable !== "string" || !isValidSqliteTableName(referencedTable) ||
+          typeof referencedColumn !== "string" || !isValidSqliteTableName(referencedColumn)) {
+        throw new Error("invalid_snapshot");
+      }
+      foreignKeys.push({ column, referencedTable, referencedColumn });
+    }
+  }
+  return { rows: columns, foreignKeys };
+}
+
 export async function resolveSpreadsheetWriteTableContext(
   db: D1Database,
   table: string,
@@ -154,16 +211,18 @@ export async function resolveSpreadsheetWriteTableContext(
 
   // Only the catalog query crosses this provider boundary. A SELECT failure
   // cannot prove a client validation error or a mutation constraint conflict.
-  let result: D1Result<WriteColumnRow>;
+  let catalog: ReturnType<typeof snapshotSpreadsheetWriteCatalog>;
   try {
-    result = await db
+    const result = await db
       .prepare(TABLE_WRITE_COLUMNS_SQL)
       .bind(def.table, def.table, def.table)
       .all<WriteColumnRow>();
+    if (result.success !== true) throw new Error("invalid_snapshot");
+    catalog = snapshotSpreadsheetWriteCatalog(result.results);
   } catch {
     throw new Error("spreadsheet_catalog_read_failed");
   }
-  const rows = result.results ?? [];
+  const { rows, foreignKeys } = catalog;
   const enumCache = SPREADSHEET_COLUMN_ENUMS;
   const raw: (AdminSpreadsheetColumnMeta & { pk: number })[] = rows.map((row) => {
     const enumValues = enumCache[`${def.table}.${row.name}`];
@@ -181,35 +240,6 @@ export async function resolveSpreadsheetWriteTableContext(
   const primaryKeys = primaryKeysFromColumns(raw);
   if (raw.length === 0 || primaryKeys.length === 0 || raw.some((column) => column.generated)) {
     throw new SpreadsheetError(SPREADSHEET_ERROR.UNKNOWN_TABLE);
-  }
-
-  let foreignKeys: SpreadsheetForeignKey[] = [];
-  const rawFkJson = rows[0]?.foreign_keys_json;
-  if (typeof rawFkJson === "string" && rawFkJson.trim()) {
-    try {
-      const parsed = JSON.parse(rawFkJson) as unknown;
-      if (Array.isArray(parsed)) {
-        foreignKeys = parsed
-          .filter(
-            (fk): fk is SpreadsheetForeignKey =>
-              Boolean(fk) &&
-              typeof fk === "object" &&
-              typeof (fk as SpreadsheetForeignKey).column === "string" &&
-              (fk as SpreadsheetForeignKey).column.length > 0 &&
-              typeof (fk as SpreadsheetForeignKey).referencedTable === "string" &&
-              (fk as SpreadsheetForeignKey).referencedTable.length > 0 &&
-              typeof (fk as SpreadsheetForeignKey).referencedColumn === "string" &&
-              (fk as SpreadsheetForeignKey).referencedColumn.length > 0,
-          )
-          .map((fk) => ({
-            column: fk.column,
-            referencedTable: fk.referencedTable,
-            referencedColumn: fk.referencedColumn,
-          }));
-      }
-    } catch {
-      throw new Error("invalid_snapshot");
-    }
   }
 
   const ctx: SpreadsheetWriteTableContext = {
