@@ -1774,3 +1774,124 @@ test("MIG-0737 U01 F2: mixed keyboard and edit-button entry cannot retarget a li
     assert.equal(requests.length, 1);
   } finally { await ui.cleanup(); }
 });
+
+test("MIG-0737 U01 direct typing: delivered printable keys replace only the initial draft and preserve range collapse", async () => {
+  const effects = [];
+  const ui = await mount({ data: rangeData, allowMutations: true,
+    fetchFn: async () => { effects.push("request"); throw Error("typing must not save"); },
+    onRefresh: () => { effects.push("refresh"); } });
+  try {
+    for (const [key, options] of [["a", {}], ["A", { shiftKey: true }], ["7", {}],
+      ["!", { shiftKey: true }], [" ", {}], ["あ", {}], ["é", {}]]) {
+      await selectNavigationRange(ui, "0:0", "1:1");
+      const cell = gridCell(ui, "1:1");
+      assert.equal((await press(cell, key, options)).defaultPrevented, true, key);
+      const input = cell.querySelector('input[type="text"]');
+      assert.ok(input && document.activeElement === input);
+      assert.equal(input.value, key);
+      assert.deepEqual(selectedCells(ui), ["1:1"]);
+      assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 1);
+      assert.equal((await press(input, "Escape")).defaultPrevented, true);
+      assertNavigation(ui, "1:1");
+      assert.equal(cell.querySelector("input"), null);
+      assert.equal(cell.querySelector("[data-grid-cell-content]").textContent, "Beta");
+    }
+    assert.deepEqual(effects, []);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 direct typing: denied columns, opt-in, PK and nonprintable or modified keys leave the selection intact", async () => {
+  const variants = [
+    { data: rangeData, allowMutations: false, focus: "1:1" },
+    { data: { ...rangeData, def: { ...rangeData.def, mode: "readonly" } }, allowMutations: true, focus: "1:1" },
+    { data: { ...rangeData, primaryKeys: [] }, allowMutations: true, focus: "1:1" },
+    { data: { ...rangeData, rows: [rangeData.rows[0], { ...rangeData.rows[1], id: null }, rangeData.rows[2]] }, allowMutations: true, focus: "1:1" },
+    { data: rangeData, allowMutations: true, focus: "1:0" },
+    { data: rangeData, allowMutations: true, focus: "1:2" },
+    { data: { ...rangeData, columns: [rangeData.columns[0], { ...rangeData.columns[1], generated: true }, rangeData.columns[2]] }, allowMutations: true, focus: "1:1" },
+  ];
+  for (const variant of variants) {
+    const ui = await mount({ data: variant.data, allowMutations: variant.allowMutations });
+    try {
+      await selectNavigationRange(ui, "0:0", variant.focus);
+      const selection = selectedCells(ui);
+      assert.equal((await press(gridCell(ui, variant.focus), "a")).defaultPrevented, false);
+      assertNavigation(ui, variant.focus, selection);
+      assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 0);
+    } finally { await ui.cleanup(); }
+  }
+  const ui = await mount({ data: rangeData, allowMutations: true });
+  try {
+    await selectNavigationRange(ui, "0:0", "1:1");
+    const selection = selectedCells(ui);
+    for (const [key, options] of [["q", { ctrlKey: true }], ["q", { metaKey: true }],
+      ["q", { altKey: true }], ["😀", {}], ["Process", {}], ["Dead", {}], ["Escape", {}]]) {
+      assert.equal((await press(gridCell(ui, "1:1"), key, options)).defaultPrevented, false, key);
+      assertNavigation(ui, "1:1", selection);
+      assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 0);
+    }
+    assert.equal((await press(gridCell(ui, "1:1"), " ", { shiftKey: true })).defaultPrevented, true);
+    assert.deepEqual(selectedCells(ui), rowCells);
+    assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 0);
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 direct typing: same-batch mixed entry retains original PK/value and undo restores it", async () => {
+  const requests = [];
+  const ui = await mount({ data: rangeData, allowMutations: true,
+    fetchFn: async (_, init) => { requests.push(init); return successfulWrite(); },
+    onRefresh: () => {} });
+  try {
+    const firstCell = await selectCell(ui, "1:1");
+    const secondCell = gridCell(ui, "2:1");
+    const button = secondCell.querySelector("button");
+    assert.equal((await press(firstCell.querySelector("button"), "q")).defaultPrevented, false);
+    const first = new dom.window.KeyboardEvent("keydown", { key: "X", shiftKey: true, bubbles: true, cancelable: true });
+    const second = new dom.window.KeyboardEvent("keydown", { key: "Y", shiftKey: true, bubbles: true, cancelable: true });
+    await React.act(async () => { firstCell.dispatchEvent(first); secondCell.dispatchEvent(second); button.click(); });
+    assert.equal(first.defaultPrevented, true);
+    assert.equal(second.defaultPrevented, false);
+    const input = firstCell.querySelector("input");
+    assert.ok(input && document.activeElement === input);
+    assert.equal(input.value, "X");
+    assert.equal(secondCell.querySelector("input"), null);
+    assert.equal((await press(input, "z")).defaultPrevented, false);
+    assert.equal(requests.length, 0);
+    await clickButton(ui, "セルを保存");
+    await flush();
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].method, "PATCH");
+    assert.deepEqual(JSON.parse(requests[0].body).primaryKey, { id: "b2" });
+    assert.equal(JSON.parse(requests[0].body).value, "X");
+    await selectCell(ui, "1:1");
+    assert.equal((await press(firstCell, "z", { ctrlKey: true })).defaultPrevented, true);
+    await flush();
+    assert.equal(requests.length, 2);
+    assert.deepEqual(JSON.parse(requests[1].body).primaryKey, { id: "b2" });
+    assert.equal(JSON.parse(requests[1].body).value, "Beta");
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01 direct typing: a pending ordinary write or invalidated draft cannot start another edit", async () => {
+  const requests = [];
+  const ui = await mount({ data: rangeData, allowMutations: true,
+    fetchFn: (_, init) => new Promise(resolve => requests.push({ init, resolve })),
+    onRefresh: () => {} });
+  try {
+    await beginTitleSave(ui, "Changed");
+    assert.equal(requests.length, 1);
+    await selectNavigationRange(ui, "0:0", "2:1");
+    const selection = selectedCells(ui);
+    assert.equal((await press(gridCell(ui, "2:1"), "q")).defaultPrevented, false);
+    assertNavigation(ui, "2:1", selection);
+    await React.act(async () => requests[0].resolve(successfulWrite()));
+    await flush();
+    const first = await selectCell(ui, "1:1");
+    assert.equal((await press(first, "q")).defaultPrevented, true);
+    await ui.render({ data: { ...rangeData, rows: [rangeData.rows[0], { ...rangeData.rows[1], title: "Server change" }, rangeData.rows[2]] } });
+    assert.match(ui.host.textContent, /編集中の行または列の状態が変更/);
+    assert.equal((await press(gridCell(ui, "2:1"), "r")).defaultPrevented, false);
+    assert.equal(ui.host.querySelectorAll('input[type="text"]').length, 0);
+    assert.equal(requests.length, 1);
+  } finally { await ui.cleanup(); }
+});
