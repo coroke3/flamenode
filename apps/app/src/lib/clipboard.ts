@@ -16,6 +16,8 @@ export async function writeTextToClipboard(text: string): Promise<boolean> {
 
   if (typeof document === "undefined" || !document.body) return false;
 
+  // The legacy copy fallback steals keyboard focus; preserve the trigger.
+  const previouslyFocused = document.activeElement as HTMLElement | null;
   let textarea: HTMLTextAreaElement | null = null;
   try {
     textarea = document.createElement("textarea");
@@ -31,9 +33,19 @@ export async function writeTextToClipboard(text: string): Promise<boolean> {
   } catch {
     return false;
   } finally {
-    if (textarea) {
-      if (typeof textarea.remove === "function") textarea.remove();
-      else textarea.parentNode?.removeChild(textarea);
+    try {
+      if (textarea) {
+        if (typeof textarea.remove === "function") textarea.remove();
+        else textarea.parentNode?.removeChild(textarea);
+      }
+    } finally {
+      // A removed temporary textarea must not leave keyboard users unfocused.
+      // Focus restoration is best-effort and must not change the copy result.
+      try {
+        previouslyFocused?.focus();
+      } catch {
+        // The original element may have been removed or become unfocusable.
+      }
     }
   }
 }

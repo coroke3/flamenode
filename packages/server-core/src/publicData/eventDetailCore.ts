@@ -1,3 +1,4 @@
+import { normalizePublicProfileXId } from "./publicProfileXId.ts";
 import {
   isPublicVideoListable,
   normalizePublicEventVisibility,
@@ -230,7 +231,7 @@ function normalizeEventVideo(value: unknown): StaticEventDetailVideo | null {
   return {
     id,
     title,
-    creator_x_user_id: normalizeNullableString(row.creator_x_user_id),
+    creator_x_user_id: normalizePublicProfileXId(row.creator_x_user_id),
     youtube_video_id: normalizeNullableString(row.youtube_video_id),
     creator_display_name:
       normalizeString(row.creator_display_name) ??
@@ -256,7 +257,7 @@ function normalizePublicStaff(value: unknown): StaticEventDetailStaff | null {
     role: normalizeNullableString(row.role),
     display_name: displayName,
     public_role_label: normalizeNullableString(row.public_role_label),
-    x_user_id: normalizeNullableString(row.x_user_id),
+    x_user_id: normalizePublicProfileXId(row.x_user_id),
     x_name: normalizeNullableString(row.x_name),
     icon_url: normalizeNullableString(row.icon_url),
     has_public_profile:

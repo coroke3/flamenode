@@ -104,8 +104,8 @@ function databaseSessionUnavailableResponse(): Response {
   });
 }
 
-/** Match CURRENT authRouteError.ts: fail closed without leaking config details. */
-async function handleUnmountedAuthRequest(
+/** Shared by the test-only auth router and each auth-complete session attempt. */
+export async function handleUnmountedAuthRequest(
   request: Request,
   input: UnmountedAuthInputs,
 ): Promise<Response> {

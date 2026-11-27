@@ -15,6 +15,7 @@ import {
   sql,
 } from "drizzle-orm";
 import { fetchVideoRowByIdOrYoutube } from "./videoIdLookup";
+import { logEventPlaylistFallback, type EventPlaylistFallbackReason } from "./videoPlaylistFallbackLog";
 import {
   events,
   videoChapters,
@@ -630,13 +631,8 @@ export async function fetchEventPlaylistVideos(
     visibilityGuardMode === "enforce" &&
     (visibilityManifest === null || visibilityManifestEtag === null);
 
-  const logPlaylistFallback = (reason: "r2_missing" | "r2_invalid" | "r2_incomplete" | "r2_error") => {
-    console.warn(JSON.stringify({
-      event: "event_playlist_d1_fallback",
-      reason,
-      event_id: eventId,
-    }));
-  };
+  const logPlaylistFallback = (reason: EventPlaylistFallbackReason) =>
+    logEventPlaylistFallback(eventId, reason);
 
   let object: R2ObjectBody | null = null;
   let readError = false;

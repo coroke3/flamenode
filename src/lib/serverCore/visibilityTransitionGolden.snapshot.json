@@ -4209,7 +4209,7 @@
       {
         "op": "console.warn",
         "args": [
-          "{\"service\":\"visibility_fence\",\"flow\":\"event_visibility_fence_rename\",\"phase\":\"stuck_fence_candidate\",\"entity_type\":\"event\",\"entity_id\":\"evt-new\",\"fence_token\":\"ef_tok\",\"attempt_count\":3,\"error_code\":\"r2 put failed\"}"
+          "{\"service\":\"visibility_fence\",\"flow\":\"event_visibility_fence_rename\",\"phase\":\"stuck_fence_candidate\",\"entity_type\":\"event\",\"entity_id\":\"evt-new\",\"fence_token\":\"ef_tok\",\"attempt_count\":3,\"error_code\":\"visibility_compensation_failed\"}"
         ]
       }
     ],
@@ -4411,7 +4411,7 @@
       {
         "op": "console.warn",
         "args": [
-          "{\"service\":\"visibility_fence\",\"flow\":\"event_visibility_rename_tombstone\",\"phase\":\"stuck_fence_candidate\",\"entity_type\":\"event\",\"entity_id\":\"evt-old\",\"fence_token\":\"ef_tok\",\"attempt_count\":3,\"error_code\":\"r2 put failed\"}"
+          "{\"service\":\"visibility_fence\",\"flow\":\"event_visibility_rename_tombstone\",\"phase\":\"stuck_fence_candidate\",\"entity_type\":\"event\",\"entity_id\":\"evt-old\",\"fence_token\":\"ef_tok\",\"attempt_count\":3,\"error_code\":\"visibility_compensation_failed\"}"
         ]
       }
     ],
@@ -4789,7 +4789,7 @@
       {
         "op": "console.warn",
         "args": [
-          "{\"service\":\"visibility_fence\",\"flow\":\"event_visibility\",\"phase\":\"stuck_fence_candidate\",\"entity_type\":\"event\",\"entity_id\":\"evt-1\",\"fence_token\":\"ef_tok\",\"attempt_count\":3,\"error_code\":\"r2 put failed\"}"
+          "{\"service\":\"visibility_fence\",\"flow\":\"event_visibility\",\"phase\":\"stuck_fence_candidate\",\"entity_type\":\"event\",\"entity_id\":\"evt-1\",\"fence_token\":\"ef_tok\",\"attempt_count\":3,\"error_code\":\"visibility_compensation_failed\"}"
         ]
       }
     ],
@@ -5647,7 +5647,7 @@
       {
         "op": "console.warn",
         "args": [
-          "{\"service\":\"visibility_fence\",\"flow\":\"x_user_visibility\",\"phase\":\"stuck_fence_candidate\",\"entity_type\":\"x_user\",\"entity_id\":\"x_creator\",\"fence_token\":\"xf_tok\",\"attempt_count\":3,\"error_code\":\"r2 put failed\"}"
+          "{\"service\":\"visibility_fence\",\"flow\":\"x_user_visibility\",\"phase\":\"stuck_fence_candidate\",\"entity_type\":\"x_user\",\"entity_id\":\"x_creator\",\"fence_token\":\"xf_tok\",\"attempt_count\":3,\"error_code\":\"visibility_compensation_failed\"}"
         ]
       }
     ],
@@ -5691,7 +5691,7 @@
       {
         "op": "console.warn",
         "args": [
-          "{\"service\":\"visibility_fence\",\"flow\":\"x_user_visibility\",\"phase\":\"stuck_fence_candidate\",\"entity_type\":\"x_user\",\"entity_id\":\"x_creator\",\"fence_token\":\"xf_tok\",\"attempt_count\":3,\"error_code\":\"r2 get failed\"}"
+          "{\"service\":\"visibility_fence\",\"flow\":\"x_user_visibility\",\"phase\":\"stuck_fence_candidate\",\"entity_type\":\"x_user\",\"entity_id\":\"x_creator\",\"fence_token\":\"xf_tok\",\"attempt_count\":3,\"error_code\":\"visibility_compensation_failed\"}"
         ]
       }
     ],

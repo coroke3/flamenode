@@ -129,6 +129,21 @@ test("T03 RH-026: about-stats normalization matches CURRENT normalizeTopStatsSec
       generated_at: 1729000000,
       stats: { public_videos: 120, creators: 42, public_events: 15, private_videos: 9 },
     },
+    {
+      schema_version: 1,
+      generated_at: 1729000000,
+      stats: { public_videos: true, creators: [7], public_events: "0x10" },
+    },
+    {
+      schema_version: 1,
+      generated_at: 1729000000,
+      stats: { public_videos: Infinity, creators: "1e309", public_events: ".15e1" },
+    },
+    {
+      schema_version: 1,
+      generated_at: 1729000000,
+      stats: { public_videos: "12.7", creators: "42.", public_events: "-.5" },
+    },
   ];
   for (const payload of payloads) {
     const current = normalizeTopStatsSection(payload);

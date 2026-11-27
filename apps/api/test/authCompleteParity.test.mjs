@@ -38,6 +38,7 @@ if (runTestWithTsx(import.meta.url)) {
   // Auth-complete's 303 is derived from Cookie/session/ban state, unlike a static redirect.
   // A cache must never reuse the location for a different authenticated user.
   const assertUncachedAuthRedirect = (response) => {
+    assert.match(response.headers.get("cache-control") ?? "", /\bprivate\b/i);
     assert.match(response.headers.get("cache-control") ?? "", /\bno-store\b/i);
     assert.match(response.headers.get("vary") ?? "", /(?:^|,)\s*cookie\s*(?:,|$)/i);
   };
@@ -49,6 +50,42 @@ if (runTestWithTsx(import.meta.url)) {
     authOrigin: origin,
     siteOrigin: AUTH_BASELINE_ENV.NEXT_PUBLIC_SITE_URL,
   });
+
+  const failureSentinel = "PRIVATE_AUTH_COMPLETE_D1_FAILURE";
+  function sessionFailure(d1, mode) {
+    const fault = { enabled: true, count: 0 };
+    const reject = () => {
+      fault.count++;
+      throw new Error(failureSentinel);
+    };
+    return {
+      fault,
+      d1: {
+        ...d1,
+        prepare(sql) {
+          if (fault.enabled && mode === "prepare") reject();
+          const statement = d1.prepare(sql);
+          const operation = sql.toLowerCase().replace(/["`]/g, "");
+          const blocked = mode === "read" ||
+            (mode === "update" && /^\s*update\s+session\b/.test(operation)) ||
+            (mode === "delete" && /^\s*delete\s+from\s+session\b/.test(operation));
+          return {
+            ...statement,
+            bind(...params) {
+              const bound = statement.bind(...params);
+              return Object.fromEntries([
+                ...Object.entries(bound),
+                ...["first", "all", "raw", "run"].map((method) => [method, async (...args) => {
+                  if (fault.enabled && blocked) reject();
+                  return bound[method](...args);
+                }]),
+              ]);
+            },
+          };
+        },
+      },
+    };
+  }
 
   test("U03a: delayed session replay matches CURRENT exact retry/read contract", async () => {
     assert.deepEqual(AUTH_COMPLETE_RETRY_DELAYS_MS, AUTH_COMPLETE_SESSION_RETRY_DELAYS_MS);
@@ -156,7 +193,7 @@ if (runTestWithTsx(import.meta.url)) {
     }
   });
 
-  test("U03a: failed origin config and read failures only navigate to retryable error", async (t) => {
+  test("U03a: failed origin config only navigates to retryable error", async (t) => {
     const { d1 } = createHarness(t);
     const app = createUnmountedAuthCompleteRoutes(
       { ...input(d1), authOrigin: "https://attacker.example/" },
@@ -172,6 +209,85 @@ if (runTestWithTsx(import.meta.url)) {
       "a failed session read must not forward partial authentication cookies");
     assert.equal(unmountedAuthCompleteDestination({ kind: "unavailable", attempts: 4 }, "/dashboard"),
       "/entry?error=auth_temporarily_unavailable");
+  });
+
+  for (const mode of ["prepare", "read", "update", "delete"]) {
+    test(`U02: auth completion ${mode} outage preserves session and recovers on the same router`, async (t) => {
+      const { d1, sqlite } = createHarness(t);
+      const token = SESSIONS.valid.sessionToken;
+      const expiry = Date.now() + (mode === "delete" ? -1 : 2) * 86_400_000;
+      sqlite.prepare('UPDATE "session" SET expires = ? WHERE "sessionToken" = ?').run(expiry, token);
+      const snapshot = () => sqlite.prepare('SELECT * FROM "session" WHERE "sessionToken" = ?').get(token);
+      const before = snapshot();
+      const injected = sessionFailure(d1, mode);
+      const waits = [];
+      const app = createUnmountedAuthCompleteRoutes(input(injected.d1), async (ms) => { waits.push(ms); });
+      const request = () => app.request(origin + "/auth/complete?next=%2Fmanage", {
+        headers: { cookie: BASELINE_COOKIES.sessionToken.name + "=" + token },
+      });
+      const response = await request();
+      assert.equal(response.status, 303);
+      assertUncachedAuthRedirect(response);
+      assert.equal(locationPath(response), "/entry?error=auth_temporarily_unavailable");
+      assert.equal(response.headers.getSetCookie().length, 0, "outage must not forward Auth.js cookies");
+      assert.doesNotMatch(await response.text(), /PRIVATE_AUTH_COMPLETE|AdapterError|SessionTokenError/);
+      assert.equal(injected.fault.count, 4, "each bounded retry must reach the failing provider operation");
+      assert.deepEqual(waits, [80, 160, 320]);
+      assert.deepEqual(snapshot(), before, "failed session reads/renewal/expiry deletion must preserve D1");
+
+      injected.fault.enabled = false;
+      const recovered = await request();
+      assertUncachedAuthRedirect(recovered);
+      assert.equal(locationPath(recovered), mode === "delete" ? "/entry" : "/manage");
+      assert.equal(injected.fault.count, 4, "later requests must not inherit provider failure state");
+      if (mode === "delete") {
+        assert.equal(snapshot(), undefined, "healthy expired-session cleanup is retained");
+      } else {
+        assert.equal(setCookies(recovered)[BASELINE_COOKIES.sessionToken.name]?.value, token);
+        assert.ok(snapshot().expires > expiry, "healthy renewal still extends the database session");
+      }
+    });
+  }
+
+  test("U02: auth completion recovers within the same retry sequence and forwards only healthy cookies", async (t) => {
+    const { d1 } = createHarness(t);
+    const injected = sessionFailure(d1, "read");
+    const waits = [];
+    const app = createUnmountedAuthCompleteRoutes(input(injected.d1), async (ms) => {
+      waits.push(ms);
+      injected.fault.enabled = false;
+    });
+    const token = SESSIONS.valid.sessionToken;
+    const response = await app.request(origin + "/auth/complete?next=%2Fdashboard", {
+      headers: { cookie: BASELINE_COOKIES.sessionToken.name + "=" + token },
+    });
+    assert.equal(response.status, 303);
+    assertUncachedAuthRedirect(response);
+    assert.equal(locationPath(response), "/dashboard");
+    assert.equal(injected.fault.count, 1);
+    assert.deepEqual(waits, [80]);
+    assert.equal(setCookies(response)[BASELINE_COOKIES.sessionToken.name]?.value, token);
+  });
+
+  test("U02: auth completion discards cookies from an earlier missing result if later retries fail", async (t) => {
+    const { d1 } = createHarness(t);
+    const injected = sessionFailure(d1, "read");
+    injected.fault.enabled = false;
+    const waits = [];
+    const app = createUnmountedAuthCompleteRoutes(input(injected.d1), async (ms) => {
+      waits.push(ms);
+      injected.fault.enabled = true;
+    });
+    const response = await app.request(origin + "/auth/complete", {
+      headers: { cookie: BASELINE_COOKIES.sessionToken.name + "=" + SESSIONS.deletedToken },
+    });
+    assert.equal(response.status, 303);
+    assertUncachedAuthRedirect(response);
+    assert.equal(locationPath(response), "/entry?error=auth_temporarily_unavailable");
+    assert.equal(injected.fault.count, 3);
+    assert.deepEqual(waits, [80, 160, 320]);
+    assert.equal(response.headers.getSetCookie().length, 0,
+      "the first missing-session response must not clear the cookie after a later outage");
   });
 
   test("U03a: auth completion route is test-only and cannot perform OAuth actions", async (t) => {

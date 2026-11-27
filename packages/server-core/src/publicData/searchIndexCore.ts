@@ -17,6 +17,7 @@ import {
   type StaticSearchPostingManifest,
   type StaticSearchPostingPage,
 } from "./searchPostingsCore.ts";
+import { isPublicVideoListable } from "./visibility.ts";
 
 export interface StaticSearchIndexPayload {
   generated_at?: unknown;
@@ -36,6 +37,12 @@ export interface StaticSearchIndexVideo {
 export function normalizeSearchVideo(value: unknown): StaticSearchIndexVideo | null {
   if (!value || typeof value !== "object") return null;
   const row = value as Record<string, unknown>;
+  // Legacy public search artifacts may omit either marker, but an explicit
+  // non-public marker must not be reclassified as a public search result.
+  if (
+    (row.status != null && !isPublicVideoListable(row.status)) ||
+    (row.visibility_status != null && !isPublicVideoListable(row.visibility_status))
+  ) return null;
   const id = normalizeString(row.id);
   const title = normalizeString(row.title);
   if (!id || !title) return null;
