@@ -4,6 +4,8 @@ import type { AdminVideoDetailResponse } from "@flamenode/contracts";
 import type { OpsFetch } from "../../api/read.js";
 import {
   adminVideoBackHref,
+  adminVideoThumbnailHref,
+  adminVideoYoutubeId,
   formatAdminVideoUnix,
   loadAdminVideoDetail,
   selectOpenVoidCaseId,
@@ -25,43 +27,13 @@ const STATUS_OPTIONS = ["pending", "public", "private", "voided"] as const;
 const VOID_CATEGORIES = ["x_id_invalid", "duplicate", "withdrawn_by_creator", "operator_decision", "expired"] as const;
 
 
-/** CURRENT src/lib/youtube/id.ts extractYoutubeId() + videoPageHref() parity.
- * This Ops-only helper must be reconciled with MIG-0730's member footer at
- * integration; never treat raw YouTube URLs as a URL path component.
- */
+/** CURRENT videoPageHref parity; keep the existing safe public-link fallback. */
 export function adminVideoPublicHref(video: {
   id: string;
   youtube_video_id?: string | null;
 }): string {
-  const youtubeIdPattern = /^[A-Za-z0-9_-]{11}$/;
-  const supplied = video.youtube_video_id;
-  if (typeof supplied === "string" && supplied) {
-    const trimmed = supplied.trim();
-    if (youtubeIdPattern.test(trimmed)) return `/${trimmed}`;
-    try {
-      const url = new URL(trimmed);
-      if (url.protocol === "http:" || url.protocol === "https:") {
-        const host = url.hostname.toLowerCase().replace(/^www\./, "");
-        if (host === "youtu.be") {
-          const id = url.pathname.split("/").filter(Boolean)[0];
-          if (id && youtubeIdPattern.test(id)) return `/${id}`;
-        }
-        if (host === "youtube.com" || host.endsWith(".youtube.com")) {
-          const queryId = url.searchParams.get("v");
-          if (queryId && youtubeIdPattern.test(queryId)) return `/${queryId}`;
-          const parts = url.pathname.split("/").filter(Boolean);
-          const index = parts.findIndex(part =>
-            ["shorts", "embed", "live", "v"].includes(part));
-          if (index >= 0 && parts[index + 1] &&
-              youtubeIdPattern.test(parts[index + 1]!)) {
-            return `/${parts[index + 1]}`;
-          }
-        }
-      }
-    } catch {
-      // Invalid or hostile video URL: use only a safe same-origin fallback.
-    }
-  }
+  const id = adminVideoYoutubeId(video.youtube_video_id);
+  if (id) return `/${id}`;
   return typeof video.id === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(video.id)
     ? `/${video.id}` : "/list";
 }
@@ -94,10 +66,11 @@ function Field({ name, value }: { name: string; value: React.ReactNode }): React
 function InfoPanel({ data }: { data: AdminVideoDetailResponse }): React.ReactElement {
   const v = data.video;
   const youtubeId = v.youtube_video_id?.trim();
+  const thumbnail = adminVideoThumbnailHref(v.youtube_video_id, "maxresdefault");
   return (
     <section>
-      {youtubeId && /^[a-zA-Z0-9_-]{11}$/.test(youtubeId) ? (
-        <img src={`https://i.ytimg.com/vi/${youtubeId}/maxresdefault.jpg`}
+      {thumbnail ? (
+        <img src={thumbnail}
           alt="" style={{ width: "100%", aspectRatio: "16 / 9", objectFit: "cover" }} />
       ) : v.source_type === "youtube" ? (
         <p>YouTube URL: 未設定（動画情報のみ公開できます。後から追加可能です）</p>

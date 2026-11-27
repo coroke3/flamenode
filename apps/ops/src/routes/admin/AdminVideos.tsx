@@ -2,6 +2,7 @@ import * as React from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import type { AdminVideoRow } from "@flamenode/contracts";
 import type { OpsFetch } from "../../api/read.js";
+import { adminVideoThumbnailHref } from "../../api/adminVideoDetail.js";
 import {
   adminVideoTotalPages,
   adminVideoPageNumbers,
@@ -44,9 +45,7 @@ function VideoRow({ video, event, isReview }: {
     : { label: video.status, badge: "fn-badge-soft" };
   // CURRENT only scopes the review queue's detail navigation by event.
   const href = detailHref(video.id, isReview ? event : "");
-  const thumbnailId = video.youtube_video_id?.trim();
-  const thumbnail = thumbnailId && /^[a-zA-Z0-9_-]{11}$/.test(thumbnailId)
-    ? `https://i.ytimg.com/vi/${thumbnailId}/default.jpg` : null;
+  const thumbnail = adminVideoThumbnailHref(video.youtube_video_id, "default");
   return (
     <tr>
       <td>

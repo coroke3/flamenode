@@ -7,6 +7,7 @@ import { createRoot } from "react-dom/client";
 import { JSDOM } from "jsdom";
 import {
   adminVideoDetailPath,
+  adminVideoThumbnailHref,
   adminVideoBackHref,
   formatAdminVideoUnix,
   selectOpenVoidCaseId,
@@ -926,6 +927,99 @@ test("MIG-0729 U01: CURRENT list status badges and review-only event detail navi
       })));
       assert.equal(dom.window.document.getElementById("current-path").textContent, target, listPath);
       assert.deepEqual(requests, [["/api/admin-read/videos?" + query.toString(), "GET"]], listPath);
+    }
+  } finally {
+    await React.act(async () => root.unmount());
+    dom.window.close();
+    if (saved.window === undefined) delete globalThis.window;
+    else globalThis.window = saved.window;
+    if (saved.document === undefined) delete globalThis.document;
+    else globalThis.document = saved.document;
+    if (saved.act === undefined) delete globalThis.IS_REACT_ACT_ENVIRONMENT;
+    else globalThis.IS_REACT_ACT_ENVIRONMENT = saved.act;
+  }
+});
+
+
+test("MIG-0729 U01/U02: thumbnails use CURRENT same-origin proxy, normalized IDs and safe fallback", async () => {
+  const id = "dQw4w9WgXcQ";
+  const cases = [
+    [id, id],
+    ["  " + id + "  ", id],
+    ["https://youtu.be/" + id + "?t=30", id],
+    ["https://www.youtube.com/watch?v=" + id, id],
+    ["https://m.youtube.com/watch?v=" + id, id],
+    ["http://youtube.com/shorts/" + id, id],
+    ["https://youtube.com/embed/" + id, id],
+    ["https://youtube.com/live/" + id, id],
+    ["https://youtube.com/v/" + id, id],
+    ["https://youtube.com/shorts/" + id + "?v=invalid", id],
+    ["https://youtube.com.evil.test/watch?v=" + id, null],
+    ["https://youtube.com@evil.test/watch?v=" + id, null],
+    ["//youtu.be/" + id, null],
+    ["ftp://youtube.com/watch?v=" + id, null],
+    ["javascript:alert(1)", null],
+    ["https://youtu.be/" + id + ".evil", null],
+    ["https://youtu.be/%2e%2e", null],
+    ["short", null],
+    ["", null],
+    ["   ", null],
+    [null, null],
+  ];
+  const saved = { window: globalThis.window, document: globalThis.document,
+    act: globalThis.IS_REACT_ACT_ENVIRONMENT };
+  const dom = new JSDOM('<!doctype html><div id="root"></div>', {
+    url: "https://flamenode.invalid/admin/videos",
+  });
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const root = createRoot(dom.window.document.getElementById("root"));
+  try {
+    for (const [index, [input, normalized]] of cases.entries()) {
+      for (const [screen, path, size] of [
+        [AdminVideos, "/admin/videos", "default"],
+        [AdminVideoDetail, "/admin/videos/video-1", "maxresdefault"],
+      ]) {
+        const expected = normalized ? "/api/youtube-thumbnail/" + normalized + "/" + size : null;
+        assert.equal(adminVideoThumbnailHref(input, size), expected);
+        const requests = [];
+        const fetchFn = async (requestPath, init) => {
+          requests.push([requestPath, init?.method]);
+          if (screen === AdminVideoDetail) {
+            return json(200, { ...detail, event: null,
+              video: { ...detail.video, youtube_video_id: input } });
+          }
+          return json(200, { q: "", status: "", event: "",
+            paging: { page: 1, pageSize: 50, total: 1 },
+            videos: [{ id: "video-1", title: "Test", source_type: "youtube",
+              youtube_video_id: input, display_name: "Creator", status: "pending",
+              created_at: 1_700_000_000 }],
+            events: [], reviewSummaries: "not_requested", degraded: false });
+        };
+        await React.act(async () => root.render(React.createElement(MemoryRouter, {
+          key: path + ":" + index, initialEntries: [path],
+        }, React.createElement(Routes, null, React.createElement(Route, {
+          path: screen === AdminVideoDetail ? "/admin/videos/:id" : "/admin/videos",
+          element: React.createElement(screen, { fetchFn }),
+        })))));
+        const doc = dom.window.document;
+        assert.match(doc.body.textContent, /Test/, path + " " + input);
+        const images = [...doc.querySelectorAll("img")];
+        assert.deepEqual(images.map(image => image.getAttribute("src")),
+          expected ? [expected] : [], path + " " + input);
+        assert.equal(doc.querySelector('img[src*="ytimg.com"]'), null);
+        if (expected) {
+          assert.equal(new URL(images[0].src).origin, dom.window.location.origin);
+          assert.equal(images[0].getAttribute("alt"), "");
+        } else if (screen === AdminVideoDetail) {
+          assert.match(doc.body.textContent, /YouTube URL: 未設定/);
+        } else {
+          assert.equal(doc.querySelector("tbody tr td")?.textContent, "—");
+        }
+        assert.deepEqual(requests, [[screen === AdminVideoDetail
+          ? "/api/admin-read/videos/video-1" : "/api/admin-read/videos?page=1", "GET"]]);
+      }
     }
   } finally {
     await React.act(async () => root.unmount());
