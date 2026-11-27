@@ -2098,7 +2098,7 @@ test("MIG-0737 U01 formula navigation: outside focus, retired draft, identity re
   } finally { outside.remove(); await ui.cleanup(); }
 });
 
-test("MIG-0737 U01 formula navigation: ordinary pending save allows movement while history blocks it", async () => {
+test("MIG-0737 U01 formula navigation: pending save and Undo/Redo allow movement but not editing or extra writes", async () => {
   const requests = [];
   const ui = await mount({ allowMutations: true,
     fetchFn: (_, init) => new Promise(resolve => requests.push({ init, resolve })),
@@ -2117,13 +2117,53 @@ test("MIG-0737 U01 formula navigation: ordinary pending save allows movement whi
     await React.act(async () => requests[0].resolve(success()));
     await React.act(async () => button(ui, "元に戻す").click());
     assert.equal(requests.length, 2);
-    assert.equal((await key(formula, "Tab")).defaultPrevented, false);
-    assert.deepEqual(selected(ui), ["1:1"]);
-    await React.act(async () => requests[1].resolve(success()));
-    assert.equal((await key(formula, "Tab")).defaultPrevented, true);
-    assert.deepEqual(selected(ui), ["1:2"]);
+    assert.equal(formula.readOnly, true);
+    for (const [pressed, options, endpoint] of [
+      ["Tab", {}, "1:2"],
+      ["Enter", {}, "2:2"],
+      ["Tab", { shiftKey: true }, "2:1"],
+    ]) {
+      assert.equal((await key(formula, pressed, options)).defaultPrevented, true);
+      assert.deepEqual(selected(ui), [endpoint]);
+      assert.equal(cell(ui, endpoint).tabIndex, 0);
+      assert.equal(document.activeElement, formula);
+      assert.equal(ui.host.querySelector("[data-grid-cell] input"), null);
+    }
+    await setInput(formula, "blocked history edit");
+    assert.equal(ui.host.querySelector("[data-grid-cell] input"), null);
+    assertFormula(ui, "B6 (title)", "Gamma");
     assert.equal(requests.length, 2);
+    assert.equal(ui.refreshes, 1);
+    await React.act(async () => requests[1].resolve(success()));
+    await React.act(async () => button(ui, "やり直す").click());
+    assert.equal(requests.length, 3);
+    assert.equal(formula.readOnly, true);
+    for (const [pressed, options, endpoint] of [
+      ["Tab", { shiftKey: true }, "2:0"],
+      ["Enter", {}, "2:0"],
+      ["Tab", {}, "2:1"],
+    ]) {
+      assert.equal((await key(formula, pressed, options)).defaultPrevented, true);
+      assert.deepEqual(selected(ui), [endpoint]);
+      assert.equal(cell(ui, endpoint).tabIndex, 0);
+      assert.equal(document.activeElement, formula);
+      assert.equal(ui.host.querySelector("[data-grid-cell] input"), null);
+    }
+    await setInput(formula, "blocked redo edit");
+    assertFormula(ui, "B6 (title)", "Gamma");
+    assert.equal(ui.host.querySelector("[data-grid-cell] input"), null);
+    assert.equal(requests.length, 3);
     assert.equal(ui.refreshes, 2);
+    await React.act(async () => requests[2].resolve(success()));
+    assert.equal((await key(formula, "Tab")).defaultPrevented, true);
+    assert.deepEqual(selected(ui), ["2:2"]);
+    assert.equal(document.activeElement, formula);
+    assert.deepEqual(requests.map(request => [request.method, JSON.parse(request.body)]), [
+      ["PATCH", { table: "videos", primaryKey: { id: "a" }, column: "title", value: "Unsaved" }],
+      ["PATCH", { table: "videos", primaryKey: { id: "a" }, column: "title", value: "Alpha" }],
+      ["PATCH", { table: "videos", primaryKey: { id: "a" }, column: "title", value: "Unsaved" }],
+    ]);
+    assert.equal(ui.refreshes, 3);
   } finally { await ui.cleanup(); }
 });
 

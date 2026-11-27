@@ -329,7 +329,7 @@ export function AdminSpreadsheetEditableGrid({
         return;
       }
       if (event.key !== "Enter" && event.key !== "Tab") return;
-      if (inFlight.current !== null && historyInFlight.current === inFlight.current) return;
+      // CURRENT formula navigation is independent of historyBusy. Editing/writes remain locked.
       event.preventDefault();
       if (formulaNavigationPending.current) return;
       const navigation = event.key === "Enter" ? "Enter" : event.shiftKey ? "ShiftTab" : "Tab";
