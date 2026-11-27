@@ -151,3 +151,57 @@ export function planStageQuestionDiff<Old extends StageQuestionDefinition, New e
   }
   return { ok: true, obsolete, changed, inserted: [...nextByKey.values()] };
 }
+
+/** SA-023 U03g: immutable snapshots => ordered D1 mutation descriptions.
+ * The CURRENT/Hono adapters still own SQL, CAS, limits on DB reads, strict audits,
+ * and atomic execution. Nothing in this helper performs a database operation. */
+export type StageQuestionMutationStep<Old, New, Answer> =
+  | { kind: "delete_answers"; rows: Answer[]; expected: number }
+  | { kind: "delete_questions"; rows: Old[]; expected: number }
+  | { kind: "update_question"; before: Old; replacement: New; expected: 1 }
+  | { kind: "insert_questions"; rows: New[]; expected: number };
+
+export type StageQuestionMutationPlan<Old, New, Answer> =
+  | { ok: false; reason: "duplicate_existing_key" | "duplicate_next_key" | "answer_limit" | "unrelated_answer" }
+  | {
+      ok: true;
+      operations: StageQuestionMutationStep<Old, New, Answer>[];
+      expectedMutationChanges: number[];
+      obsoleteIds: string[];
+    };
+
+/** Preserve CURRENT order: answer deletes, question deletes, changed-question
+ * updates in old-row order, then inserts in groups of six in submitted order. */
+export function planStageQuestionMutationSteps<
+  Old extends StageQuestionDefinition & { id: string },
+  New extends StageQuestionDefinition,
+  Answer extends { question_id: string },
+>(args: {
+  existing: readonly Old[];
+  next: readonly New[];
+  deletedAnswers: readonly Answer[];
+}): StageQuestionMutationPlan<Old, New, Answer> {
+  const diff = planStageQuestionDiff(args.existing, args.next);
+  if (!diff.ok) return diff;
+  if (args.deletedAnswers.length > 20) return { ok: false, reason: "answer_limit" };
+  const obsoleteIds = diff.obsolete.map(row => row.id);
+  const obsoleteIdSet = new Set(obsoleteIds);
+  if (args.deletedAnswers.some(row => !obsoleteIdSet.has(row.question_id))) {
+    return { ok: false, reason: "unrelated_answer" };
+  }
+  const operations: StageQuestionMutationStep<Old, New, Answer>[] = [];
+  if (args.deletedAnswers.length > 0) {
+    operations.push({ kind: "delete_answers", rows: [...args.deletedAnswers], expected: args.deletedAnswers.length });
+  }
+  if (diff.obsolete.length > 0) {
+    operations.push({ kind: "delete_questions", rows: diff.obsolete, expected: diff.obsolete.length });
+  }
+  for (const { before, replacement } of diff.changed) {
+    operations.push({ kind: "update_question", before, replacement, expected: 1 });
+  }
+  for (let index = 0; index < diff.inserted.length; index += 6) {
+    const rows = diff.inserted.slice(index, index + 6);
+    operations.push({ kind: "insert_questions", rows, expected: rows.length });
+  }
+  return { ok: true, operations, expectedMutationChanges: operations.map(step => step.expected), obsoleteIds };
+}

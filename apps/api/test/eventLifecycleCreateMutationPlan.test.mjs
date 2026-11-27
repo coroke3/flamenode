@@ -1575,3 +1575,60 @@ test("MIG-0652 U03f: stage diff matches frozen CURRENT Map/filter algorithm acro
     assert.deepEqual(planStageQuestionDiff(existing, next), makeExpected(existing, next), "mask " + mask);
   }
 });
+
+test("MIG-0652 U03g: no-op stage reconciliation produces zero D1 mutations", async () => {
+  const { planStageQuestionMutationSteps } = await import("@flamenode/server-core/event/updatePayload");
+  const existing = [makeStageQuestionDiffRow("a")];
+  const next = [makeStageQuestionDiffRow("a", { id: "new-a" })];
+  assert.deepEqual(planStageQuestionMutationSteps({ existing, next, deletedAnswers: [] }),
+    { ok: true, operations: [], expectedMutationChanges: [], obsoleteIds: [] });
+});
+test("MIG-0652 U03g: answer-first stage CAS ordering, exact count and six-row insert chunks", async () => {
+  const { planStageQuestionMutationSteps } = await import("@flamenode/server-core/event/updatePayload");
+  const existing = ["delete2", "update2", "delete1", "update1"].map(makeStageQuestionDiffRow);
+  const next = [makeStageQuestionDiffRow("update1", { required: 1 }),
+    ...Array.from({ length: 13 }, (_, index) => makeStageQuestionDiffRow("new" + index)),
+    makeStageQuestionDiffRow("update2", { label: "changed" })];
+  const answers = [
+    { question_id: "old-delete2", video_id: "v2" },
+    { question_id: "old-delete1", video_id: "v1" },
+  ];
+  const result = planStageQuestionMutationSteps({ existing, next, deletedAnswers: answers });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.operations.map(step => step.kind), [
+    "delete_answers", "delete_questions", "update_question", "update_question",
+    "insert_questions", "insert_questions", "insert_questions",
+  ]);
+  assert.deepEqual(result.expectedMutationChanges, [2, 2, 1, 1, 6, 6, 1]);
+  assert.deepEqual(result.obsoleteIds, ["old-delete2", "old-delete1"]);
+  assert.deepEqual(result.operations[1].rows.map(row => row.question_key), ["delete2", "delete1"]);
+  assert.deepEqual(result.operations.filter(step => step.kind === "update_question").map(step => step.before.question_key), ["update2", "update1"]);
+  assert.deepEqual(result.operations.filter(step => step.kind === "insert_questions")
+    .flatMap(step => step.rows.map(row => row.question_key)), Array.from({ length: 13 }, (_, index) => "new" + index));
+  assert.deepEqual(answers, [
+    { question_id: "old-delete2", video_id: "v2" }, { question_id: "old-delete1", video_id: "v1" },
+  ]);
+});
+test("MIG-0652 U03g: reject unrelated answers before producing any mutation", async () => {
+  const { planStageQuestionMutationSteps } = await import("@flamenode/server-core/event/updatePayload");
+  assert.deepEqual(planStageQuestionMutationSteps({
+    existing: [makeStageQuestionDiffRow("a")], next: [], deletedAnswers: [{ question_id: "foreign" }],
+  }), { ok: false, reason: "unrelated_answer" });
+});
+test("MIG-0652 U03g: deleted answer cap is inclusive at 20", async () => {
+  const { planStageQuestionMutationSteps } = await import("@flamenode/server-core/event/updatePayload");
+  for (const count of [20, 21]) {
+    const result = planStageQuestionMutationSteps({
+      existing: [makeStageQuestionDiffRow("a")], next: [],
+      deletedAnswers: Array.from({ length: count }, () => ({ question_id: "old-a" })),
+    });
+    assert.equal(result.ok, count === 20);
+    if (count === 21) assert.equal(result.reason, "answer_limit");
+  }
+});
+test("MIG-0652 U03g: duplicate stage keys fail closed before mutation planning", async () => {
+  const { planStageQuestionMutationSteps } = await import("@flamenode/server-core/event/updatePayload");
+  assert.deepEqual(planStageQuestionMutationSteps({
+    existing: [], next: [makeStageQuestionDiffRow("a"), makeStageQuestionDiffRow("a")], deletedAnswers: [],
+  }), { ok: false, reason: "duplicate_next_key" });
+});
