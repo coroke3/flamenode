@@ -36,7 +36,9 @@ import {
   type VideoFormData,
 } from "@flamenode/domain/video";
 import { validateActiveXSnapshot } from "@flamenode/domain/xid";
-import { mutateWithAudit } from "@flamenode/server-core/audit/mutate";
+import { assertCondition, mutateWithAudit } from "@flamenode/server-core/audit/mutate";
+import { expectedRowCondition } from "@flamenode/server-core/audit/expectedRowCondition";
+import { sql, type SQL } from "drizzle-orm";
 import type { ServerCoreDb } from "@flamenode/server-core/db";
 import { generateId } from "@flamenode/server-core/id";
 import {
@@ -193,6 +195,48 @@ export async function readSlotSubmissionReceipt(
   const groupRows = results.filter((row) => row.receipt_kind === 1);
   if (groupRows.length > MAX_SLOTS_PER_VIDEO) return { anchor, group: { kind: "overflow" } };
   return { anchor, group: { kind: "ready", rows: groupRows.map(({ receipt_kind: _kind, ...row }) => row) } };
+}
+
+/**
+ * SA-088 U03a: recheck the complete reservation receipt inside the SAME D1
+ * batch, before any resource/slot/audit DML. Use the existing scalar CAS and
+ * assertion helpers; no JSON encoding of arbitrary legacy column values.
+ * Six rows x 14 columns + count + four membership binds <= 89 binds/statement.
+ * At most four statements. The caller must account for all of them in the
+ * real S3 budget and preserve authorization/group validation before this step.
+ * This is not a new route or a complete mutation plan.
+ */
+export function buildSlotSubmissionReceiptAssertions(receipt: SlotSubmissionReceipt): SQL[] {
+  if (receipt.group.kind !== "ready") throw new Error("slot_submission_receipt_invalid");
+  const { anchor } = receipt;
+  const { rows } = receipt.group;
+  const columns = SLOT_RECEIPT_COLUMNS.split(",").map((column) => column.trim()) as (keyof SlotSubmissionReceiptRow)[];
+  const isScalarRow = (row: SlotSubmissionReceiptRow) => Object.keys(row).length === columns.length && columns.every((column) => {
+    const value = row[column];
+    return value === null || typeof value === "string" || (typeof value === "number" && Number.isFinite(value));
+  });
+  if (!isScalarRow(anchor) || rows.length < 1 || rows.length > MAX_SLOTS_PER_VIDEO ||
+      new Set(rows.map((row) => row.id)).size !== rows.length ||
+      rows.some((row) => !isScalarRow(row) || row.event_id !== anchor.event_id || row.reservation_group_id !== anchor.reservation_group_id) ||
+      (!anchor.reservation_group_id && rows.length !== 1) ||
+      !rows.some((row) => row.id === anchor.id && columns.every((column) => row[column] === anchor[column]))) {
+    throw new Error("slot_submission_receipt_invalid");
+  }
+  const membership = anchor.reservation_group_id ? sql`
+    (SELECT COUNT(*) FROM (SELECT id FROM slots
+      WHERE event_id = ${anchor.event_id} AND reservation_group_id = ${anchor.reservation_group_id}
+      LIMIT ${MAX_SLOTS_PER_VIDEO + 1})) = ${rows.length}
+  ` : sql`1 = 1`;
+  const assertions: SQL[] = [];
+  for (let i = 0; i < rows.length; i += 6) {
+    const chunk = rows.slice(i, i + 6);
+    const matches = sql.join(chunk.map((row) => sql`(${expectedRowCondition({ expectedCurrent: row })})`), sql` OR `);
+    assertions.push(assertCondition(sql`
+      (SELECT COUNT(*) FROM slots WHERE ${matches}) = ${chunk.length}
+      AND (${i === 0 ? membership : sql`1 = 1`})
+    `));
+  }
+  return assertions;
 }
 
 type DbReadPreflightInternalResult =

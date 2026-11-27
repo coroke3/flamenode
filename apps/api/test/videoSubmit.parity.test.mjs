@@ -1099,6 +1099,119 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+  test("U03a SA-088: reservation receipt CAS precedes audited mutation in one batch", async () => {
+    const { readSlotSubmissionReceipt, buildSlotSubmissionReceiptAssertions } = await import("../src/routes/videos/submit.ts");
+    const { mutateWithAudit, assertCondition } = await import("@flamenode/server-core/audit/mutate");
+    const { sql } = await import("drizzle-orm");
+    const cases = [
+      { name: "normal group", accept: true },
+      { name: "maximum group and nonnull fields", count: 20, accept: true },
+      { name: "null singleton", count: 1, group: null, accept: true },
+      { name: "empty singleton", count: 1, group: "", accept: true },
+      { name: "legacy singleton", count: 1, accept: true },
+      { name: "other event same group", add: { id: "cross", event_id: "ev_open" }, accept: true },
+      { name: "other group same event", add: { id: "other", reservation_group_id: "other" }, accept: true },
+      { name: "sibling added", add: { id: "extra" } },
+      { name: "sibling removed", remove: "cas_1" },
+      { name: "same-count sibling replacement", remove: "cas_1", add: { id: "replacement" } },
+      { name: "anchor status changes without version bump", change: { status: "submitted" } },
+      { name: "anchor linked video changes without version bump", change: { video_id: null } },
+      { name: "anchor X snapshot changes without version bump", change: { reserved_x_id_snapshot: "x_notos" } },
+      { name: "anchor display name changes without version bump", change: { display_name: "New" } },
+      { name: "last chunk changes", count: 20, target: "cas_19", change: { slot_label: "New" } },
+      { name: "version changes", change: { version: 2 } },
+      { name: "timestamp changes", change: { updated_at: 101 } },
+      { name: "late failure rolls back resource and audit", lateFail: true },
+    ];
+    for (const scenario of cases) {
+      const w = seedWorld();
+      try {
+        const group = Object.hasOwn(scenario, "group") ? scenario.group : "cas_group";
+        insert(w.sqlite, "videos", {
+          id: "v_cas", creator_x_user_id: "x_owner", submitted_by_user_id: "u_owner",
+          creator_display_name: "Owner", title: "Before", visibility_status: "pending",
+          created_at: 100, updated_at: 100,
+        });
+        const add = (id, i, extra = {}) => insert(w.sqlite, "slots", {
+          id, event_id: "ev_closed", reservation_group_id: group, reserved_by_user_id: "u_owner",
+          x_user_id: "x_owner", reserved_x_id_snapshot: "x_owner", display_name: "Owner", slot_label: "slot",
+          start_time: 1000 + i, sort_order: i, status: "reserved", video_id: "v_cas",
+          updated_at: 100, version: 1, ...extra,
+        });
+        for (let i = 0; i < (scenario.count ?? 2); i++) add("cas_" + i, i);
+        const receipt = await readSlotSubmissionReceipt(w.d1, "cas_0");
+        assert.equal(receipt.group.kind, "ready", scenario.name);
+        assert.equal(w.d1.stats.reads, 1, scenario.name);
+        const conditions = buildSlotSubmissionReceiptAssertions(receipt);
+        assert.equal(conditions.length, Math.ceil((scenario.count ?? 2) / 6), scenario.name);
+        if (scenario.remove) w.sqlite.prepare("DELETE FROM slots WHERE id=?").run(scenario.remove);
+        if (scenario.add) add(scenario.add.id, 100, scenario.add);
+        if (scenario.change) {
+          const [column, value] = Object.entries(scenario.change)[0];
+          w.sqlite.prepare("UPDATE slots SET " + column + "=? WHERE id=?").run(value, scenario.target ?? "cas_0");
+        }
+        const before = snapshotDb(w.sqlite);
+        const beforeSlots = w.sqlite.prepare("SELECT * FROM slots ORDER BY id").all();
+        const video = { ...w.sqlite.prepare("SELECT * FROM videos WHERE id='v_cas'").get() };
+        const db = drizzle(w.d1);
+        const write = () => mutateWithAudit(db, {
+          preMutationAssertions: conditions.map((condition) => db.run(condition)),
+          mutationStatements: [db.run(sql`UPDATE videos SET title='After' WHERE id='v_cas'`)],
+          expectedMutationChanges: [1],
+          audits: [{ table_name: "videos", target_id: "v_cas", operation: "UPDATE",
+            before: video, after: { ...video, title: "After" }, actor_user_id: "u_owner",
+            context: "video-save:submit-slot", retention_class: "normal", strict: true }],
+          callerQueryCount: 1,
+          ...(scenario.lateFail ? { postAuditStatements: [db.run(assertCondition(sql`0 = 1`))] } : {}),
+        });
+        if (scenario.accept) {
+          const ids = await write();
+          assert.equal(ids.length, 1, scenario.name);
+          assert.equal(w.sqlite.prepare("SELECT title FROM videos WHERE id='v_cas'").get().title, "After", scenario.name);
+          assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE target_id='v_cas' AND table_name='videos'").get().n, 1, scenario.name);
+        } else {
+          await assert.rejects(write, /malformed JSON/i, scenario.name);
+          assert.deepEqual(snapshotDb(w.sqlite), before, scenario.name);
+        }
+        assert.equal(w.d1.stats.batches, 1, scenario.name);
+        assert.ok(w.d1.stats.maxBinds <= 100, scenario.name);
+        assert.deepEqual(w.sqlite.prepare("SELECT * FROM slots ORDER BY id").all(), beforeSlots, scenario.name);
+        assert.deepEqual(w.bucket.puts, [], scenario.name);
+        assert.deepEqual(w.bucket.deletes, [], scenario.name);
+      } finally {
+        w.sqlite.close();
+      }
+    }
+  });
+
+  test("U03a SA-088: incomplete or ambiguous receipt cannot build batch assertions", async () => {
+    const { readSlotSubmissionReceipt, buildSlotSubmissionReceiptAssertions } = await import("../src/routes/videos/submit.ts");
+    const w = seedWorld();
+    try {
+      for (let i = 0; i < 2; i++) insert(w.sqlite, "slots", {
+        id: "invalid_cas_" + i, event_id: "ev_closed", reservation_group_id: "invalid_cas_group",
+        reserved_by_user_id: "u_owner", x_user_id: "x_owner", reserved_x_id_snapshot: "x_owner",
+        display_name: "Owner", status: "reserved", updated_at: 100, version: 1,
+      });
+      const receipt = await readSlotSubmissionReceipt(w.d1, "invalid_cas_0");
+      const sibling = receipt.group.rows.find((row) => row.id !== receipt.anchor.id);
+      const bad = [
+        { ...receipt, group: { kind: "overflow" } },
+        { ...receipt, group: { kind: "ready", rows: [] } },
+        { ...receipt, group: { kind: "ready", rows: [receipt.anchor, receipt.anchor] } },
+        { ...receipt, group: { kind: "ready", rows: [sibling] } },
+        { ...receipt, anchor: { ...receipt.anchor, display_name: "different" } },
+        { ...receipt, group: { kind: "ready", rows: [receipt.anchor, { ...sibling, event_id: "ev_open" }] } },
+        { ...receipt, group: { kind: "ready", rows: [receipt.anchor, { ...sibling, extra: "unexpected" }] } },
+        { ...receipt, group: { kind: "ready", rows: [receipt.anchor, { ...sibling, display_name: undefined }] } },
+      ];
+      for (const value of bad) assert.throws(() => buildSlotSubmissionReceiptAssertions(value), /slot_submission_receipt_invalid/);
+      assert.equal(w.d1.stats.batches, 0);
+    } finally {
+      w.sqlite.close();
+    }
+  });
+
   test("U03a SA-088: CURRENT reservation group denial order and absolute cap, no writes (including preflight)", async () => {
     const { submitSlotVideo } = await import("../../../src/lib/actions/video/submitSlotVideo.ts");
     const inconsistent = "連続枠の予約者情報が不整合です。運営へ連絡してください。";
