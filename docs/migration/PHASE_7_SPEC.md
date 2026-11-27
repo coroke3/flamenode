@@ -818,7 +818,7 @@ npm run check:project-docs
 - [ ] U02〜U04 が DONE、T01〜T04 が PASS
 - [ ] 部品が network を呼ばない
 #### STOP
-- 1 PR の差分が 3000 行を超えそうなら `UnslottedPostForm` / test / CSS の分割提案を止めて確認する。
+- 2026-11-27 owner decision (#697): A adapter/state/content, B remaining form/Unslotted/CSS, C integration/parity の分割を承認済み。追加の人間承認不要。#696 の既存ownerが実際の差分を確認し、Leadが子ID・Owned paths・依存・Work Orderを登録するか、checkerが許す直列partial merge（親READY維持）を用いる。各PRの差分3000行以内、重複writerなし、親DONEは全U02〜U04/T01〜T04とbrowser gateの完了後。既存suiteを再利用。詳細はOPEN_DECISIONS.mdの2026-11-27 recovery。
 - 投稿の検査を SPA 側だけで決める必要が出たら止める（Hono が正）。
 #### Rollback
 PR を revert（まだどの route からも使われない）。

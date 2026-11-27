@@ -53,3 +53,22 @@ test("totalPagesFor", () => {
   assert.equal(totalPagesFor(51, 50), 2);
   assert.equal(totalPagesFor(100, 30), 4);
 });
+
+
+test("totalPagesFor: non-finite totals and sizes fail closed to one page", () => {
+  for (const total of [NaN, Infinity, -Infinity]) {
+    assert.equal(totalPagesFor(total, 50), 1, "invalid total " + String(total));
+  }
+  for (const pageSize of [NaN, Infinity, -Infinity, 0]) {
+    assert.equal(totalPagesFor(100, pageSize), 1, "invalid page size " + String(pageSize));
+  }
+});
+
+test("totalPagesFor: mathematical overflow does not generate unsafe pagination links", () => {
+  assert.equal(totalPagesFor(Number.MAX_VALUE, Number.MIN_VALUE), 1);
+  assert.equal(totalPagesFor(Number.MAX_SAFE_INTEGER, 0.5), 1);
+  assert.equal(totalPagesFor(Number.MAX_VALUE, Number.MAX_VALUE), 1);
+  assert.equal(totalPagesFor(1_000_000, 1_000), 1_000);
+  assert.equal(totalPagesFor(3, 2), 2);
+  assert.equal(totalPagesFor(1, 0.5), 2, "preserve finite fractional-size behavior");
+});
