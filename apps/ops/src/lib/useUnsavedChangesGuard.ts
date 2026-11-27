@@ -1,7 +1,8 @@
-// Port of CURRENT src/lib/interactions/useUnsavedChangesGuard.ts (MIG-0721). Same output.
+// CURRENT native unload protection plus the Ops Data Router navigation guard (MIG-0721 T03).
 "use client";
 
 import * as React from "react";
+import { useBlocker, type Blocker, type BlockerFunction } from "react-router-dom";
 
 export interface UseUnsavedChangesGuardOptions {
   dirty: boolean;
@@ -11,7 +12,11 @@ export interface UseUnsavedChangesGuardOptions {
 export function useUnsavedChangesGuard({
   dirty,
   message = "入力内容が保存されていません。このページを離れますか？",
-}: UseUnsavedChangesGuardOptions): void {
+}: UseUnsavedChangesGuardOptions): Blocker {
+  const blocker = useBlocker(React.useCallback<BlockerFunction>(({ currentLocation, nextLocation }) =>
+    dirty && (currentLocation.pathname !== nextLocation.pathname ||
+      currentLocation.search !== nextLocation.search), [dirty]));
+
   React.useEffect(() => {
     if (!dirty) return;
 
@@ -23,4 +28,10 @@ export function useUnsavedChangesGuard({
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [dirty, message]);
+
+  React.useEffect(() => {
+    if (!dirty && blocker.state === "blocked") blocker.reset();
+  }, [dirty, blocker]);
+
+  return blocker;
 }

@@ -1,9 +1,10 @@
-// MIG-0721 U01a: byte-for-byte CURRENT hook parity and draft/beforeunload guards.
+// MIG-0721: CURRENT draft parity and Ops native/SPA navigation guards.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import * as React from "react";
 import { createRoot } from "react-dom/client";
+import { createMemoryRouter, RouterProvider, Link } from "react-router-dom";
 import { act } from "react";
 import { JSDOM } from "jsdom";
 import {
@@ -16,8 +17,8 @@ import { useUnsavedChangesGuard } from "../.test-dist/apps/ops/src/lib/useUnsave
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 
-test("U01a preserves CURRENT implementation of both browser-only hooks", () => {
-  for (const name of ["useFormDraft", "useUnsavedChangesGuard"]) {
+test("U01a preserves CURRENT draft implementation; T03 adapts navigation to the Ops router", () => {
+  for (const name of ["useFormDraft"]) {
     const currentPath = `src/lib/interactions/${name}.ts`;
     const current = read(`../../../${currentPath}`);
     const port = read(`../src/lib/${name}.ts`);
@@ -46,21 +47,26 @@ test("U01a unsaved-changes hook registers and removes a beforeunload guard", asy
   globalThis.document = dom.window.document;
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const root = createRoot(dom.window.document.getElementById("root"));
-  function Harness({ dirty }) {
+  let updateDirty;
+  function Harness() {
+    const [dirty, setDirty] = React.useState(true);
+    updateDirty = setDirty;
     useUnsavedChangesGuard({ dirty });
     return null;
   }
+  const router = createMemoryRouter([{ path: "*", element: React.createElement(Harness) }]);
   try {
-    await act(async () => { root.render(React.createElement(Harness, { dirty: true })); });
+    await act(async () => { root.render(React.createElement(RouterProvider, { router })); });
     const blocked = new dom.window.Event("beforeunload", { cancelable: true });
     dom.window.dispatchEvent(blocked);
     assert.equal(blocked.defaultPrevented, true);
-    await act(async () => { root.render(React.createElement(Harness, { dirty: false })); });
+    await act(async () => updateDirty(false));
     const allowed = new dom.window.Event("beforeunload", { cancelable: true });
     dom.window.dispatchEvent(allowed);
     assert.equal(allowed.defaultPrevented, false);
   } finally {
     await act(async () => { root.unmount(); });
+    router.dispose();
     if (previousWindow === undefined) delete globalThis.window; else globalThis.window = previousWindow;
     if (previousDocument === undefined) delete globalThis.document; else globalThis.document = previousDocument;
     if (previousAct === undefined) delete globalThis.IS_REACT_ACT_ENVIRONMENT;
@@ -268,5 +274,81 @@ test("storage failures remain visible without discarding the stored draft", asyn
     await React.act(async () => draft.result().clearDraft());
     assert.match(draft.result().saveError, /下書きの削除に失敗/);
     assert.equal(draft.read(), raw);
+  });
+});
+
+
+async function withNavigationGuard(run) {
+  const dom = new JSDOM('<div id="root"></div>', { url: "https://flamenode.test/edit?template=a" });
+  const globals = { window: dom.window, document: dom.window.document, IS_REACT_ACT_ENVIRONMENT: true };
+  const previous = new Map(Object.keys(globals).map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  for (const [key, value] of Object.entries(globals)) Object.defineProperty(globalThis, key, { configurable: true, value });
+  let blocker, setDirty;
+  function Harness() {
+    const [dirty, updateDirty] = React.useState(true);
+    setDirty = updateDirty;
+    blocker = useUnsavedChangesGuard({ dirty });
+    return React.createElement(Link, { to: "/next" }, "次へ");
+  }
+  const router = createMemoryRouter([{ path: "*", element: React.createElement(Harness) }], {
+    initialEntries: ["/before", "/edit?template=a", "/after"], initialIndex: 1,
+  });
+  const root = createRoot(dom.window.document.getElementById("root"));
+  try {
+    await act(async () => root.render(React.createElement(RouterProvider, { router })));
+    await run({ dom, router, blocker: () => blocker, setDirty: value => act(async () => setDirty(value)) });
+  } finally {
+    await act(async () => root.unmount());
+    router.dispose();
+    for (const [key, descriptor] of previous) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key];
+    }
+    dom.window.close();
+  }
+}
+
+test("T03 dirty Link, PUSH, REPLACE, POP and template transitions can be cancelled or confirmed", async t => {
+  const cases = [
+    { name: "Link", go: ({ dom }) => dom.window.document.querySelector("a").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0 })), path: "/next", action: "PUSH" },
+    { name: "PUSH", go: ({ router }) => router.navigate("/next"), path: "/next", action: "PUSH" },
+    { name: "REPLACE", go: ({ router }) => router.navigate("/next", { replace: true }), path: "/next", action: "REPLACE" },
+    { name: "back", go: ({ router }) => router.navigate(-1), path: "/before", action: "POP" },
+    { name: "forward", go: ({ router }) => router.navigate(1), path: "/after", action: "POP" },
+    { name: "template", go: ({ router }) => router.navigate("/edit?template=b"), path: "/edit", search: "?template=b", action: "PUSH" },
+  ];
+  for (const item of cases) await t.test(item.name, async () => withNavigationGuard(async view => {
+    await act(async () => item.go(view));
+    assert.equal(view.blocker().state, "blocked");
+    assert.equal(view.router.state.location.pathname + view.router.state.location.search, "/edit?template=a");
+    await act(async () => view.blocker().reset());
+    assert.equal(view.blocker().state, "unblocked");
+    assert.equal(view.router.state.location.pathname + view.router.state.location.search, "/edit?template=a");
+    await act(async () => item.go(view));
+    assert.equal(view.blocker().state, "blocked");
+    await act(async () => view.blocker().proceed());
+    assert.equal(view.router.state.location.pathname, item.path);
+    assert.equal(view.router.state.location.search, item.search ?? "");
+    assert.equal(view.router.state.historyAction, item.action);
+  }));
+});
+
+test("T03 hash-only navigation keeps dirty protection, while clean transitions do not block", async () => {
+  await withNavigationGuard(async ({ router, blocker, setDirty, dom }) => {
+    await act(async () => router.navigate("/edit?template=a#section-basic"));
+    assert.equal(blocker().state, "unblocked");
+    assert.equal(router.state.location.hash, "#section-basic");
+    const event = new dom.window.Event("beforeunload", { cancelable: true });
+    dom.window.dispatchEvent(event);
+    assert.equal(event.defaultPrevented, true);
+    await act(async () => router.navigate("/next"));
+    assert.equal(blocker().state, "blocked");
+    await setDirty(false);
+    assert.equal(blocker().state, "unblocked", "cleaning cancels the previous pending intent");
+    assert.equal(router.state.location.pathname, "/edit");
+    await act(async () => router.navigate("/next"));
+    assert.equal(router.state.location.pathname, "/next");
+    const clean = new dom.window.Event("beforeunload", { cancelable: true });
+    dom.window.dispatchEvent(clean);
+    assert.equal(clean.defaultPrevented, false);
   });
 });

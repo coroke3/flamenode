@@ -5,6 +5,7 @@ import test from "node:test";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createRoot } from "react-dom/client";
+import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { JSDOM } from "jsdom";
 import { build } from "esbuild";
 import { fileURLToPath } from "node:url";
@@ -19,6 +20,14 @@ const noop = async () => ({ ok: false });
 const base = { mode: "create", createEvent: noop, updateEvent: noop, router: { push() {}, refresh() {} } };
 const field = (form, name) => form.querySelector('[name="' + name + '"]');
 
+function renderForm(props) {
+  const entry = props.mode === "edit" ? `/manage/events/${encodeURIComponent(props.initial.id)}/edit`
+    : `/admin/events/new${props.templateId ? `?template=${encodeURIComponent(props.templateId)}` : ""}`;
+  const router = createMemoryRouter([{ path: "*", element: React.createElement(EventForm, props) }], { initialEntries: [entry] });
+  try { return renderToStaticMarkup(React.createElement(RouterProvider, { router })); }
+  finally { router.dispose(); }
+}
+
 test("U01 preserves CURRENT JSX, submit flow and generated CSS selectors", () => {
   const current = read("../../../src/components/admin/EventForm.tsx");
   const target = read("../src/components/event/EventForm.tsx");
@@ -28,7 +37,13 @@ test("U01 preserves CURRENT JSX, submit flow and generated CSS selectors", () =>
   assert.ok(block(current).length > 1000);
   assert.equal(block(target), block(current));
   const renderStart = "  const submitLabel =";
-  assert.equal(target.slice(target.indexOf(renderStart)).replace("      <style>{eventFormCss}</style>\n", ""), current.slice(current.indexOf(renderStart)));
+  const targetRender = target.slice(target.indexOf(renderStart))
+    .replace("      <style>{eventFormCss}</style>\n", "")
+    .replace(/      <ConfirmDialog\n[\s\S]*?      \/>\n/, "")
+    .replace("      <ScrollRestoration />\n", "")
+    .replace('<Link key={item.id} to={{ pathname: location.pathname, search: location.search, hash: `#${item.id}` }}>', '<a key={item.id} href={`#${item.id}`}>')
+    .replace("</Link>", "</a>");
+  assert.equal(targetRender, current.slice(current.indexOf(renderStart)));
   assert.equal(eventFormCss, portCssModule(read("../../../src/components/admin/EventForm.module.css"), "ops-event-form"));
   for (const match of target.matchAll(/\bstyles\.([A-Za-z]\w*)/g)) {
     assert.equal(eventFormStyles[match[1]], "ops-event-form-" + match[1]);
@@ -37,13 +52,13 @@ test("U01 preserves CURRENT JSX, submit flow and generated CSS selectors", () =>
 });
 
 test("U01 create mode preserves all section anchors, template and Tokyo timestamp fields", () => {
-  const dom = new JSDOM(renderToStaticMarkup(React.createElement(EventForm, {
+  const dom = new JSDOM(renderForm({
     ...base, templateId: "event-template",
     initial: { title: "Test event", start_time: Date.UTC(2026, 4, 19, 3, 34) / 1000, end_time: null, visibility_status: "archived" }
-  })));
+  }));
   try {
     const form = dom.window.document.querySelector("form");
-    assert.deepEqual([...form.querySelectorAll("nav a")].map(a => a.getAttribute("href")), ["#section-basic", "#section-publish", "#section-questions", "#section-required", "#section-slots"]);
+    assert.deepEqual([...form.querySelectorAll("nav a")].map(a => new URL(a.getAttribute("href"), "https://flamenode.test").hash), ["#section-basic", "#section-publish", "#section-questions", "#section-required", "#section-slots"]);
     assert.equal(field(form, "template_id").value, "event-template");
     assert.equal(field(form, "start_time").value, "2026-05-19T12:34");
     assert.equal(field(form, "end_time").value, "");
@@ -56,11 +71,11 @@ test("U01 create mode preserves all section anchors, template and Tokyo timestam
 });
 
 test("T06 slots-only staff retains denied section values without enabling edits", () => {
-  const dom = new JSDOM(renderToStaticMarkup(React.createElement(EventForm, {
+  const dom = new JSDOM(renderForm({
     ...base, mode: "edit", variant: "manage",
     initial: { id: "event-a", updated_at: 123, title: "Locked title", event_type: "collabo", visibility_status: "public", slot_type: "count", max_slots_per_video: 3 },
     editableSections: { basic: false, publish: false, questions: false, slots: true }
-  })));
+  }));
   try {
     const form = dom.window.document.querySelector("form");
     const data = new dom.window.FormData(form);
@@ -80,19 +95,23 @@ test("T06 slots-only staff retains denied section values without enabling edits"
 
 async function withForm(props, run) {
   const dom = new JSDOM('<div id="root"></div>', { url: "https://flamenode.test/admin/events/new", pretendToBeVisual: true });
-  const keys = ["window", "document", "navigator", "HTMLElement", "HTMLInputElement", "HTMLTextAreaElement", "HTMLSelectElement", "Node", "Event", "MouseEvent", "FormData", "IS_REACT_ACT_ENVIRONMENT"];
+  dom.window.scrollTo = () => {};
+  dom.window.HTMLElement.prototype.scrollIntoView = () => {};
+  const keys = ["window", "document", "sessionStorage", "navigator", "HTMLElement", "HTMLInputElement", "HTMLTextAreaElement", "HTMLSelectElement", "Node", "Event", "MouseEvent", "FormData", "IS_REACT_ACT_ENVIRONMENT"];
   const previous = new Map(keys.map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
   for (const key of keys) Object.defineProperty(globalThis, key, { configurable: true, writable: true, value: key === "IS_REACT_ACT_ENVIRONMENT" ? true : key === "window" ? dom.window : dom.window[key] });
   const node = dom.window.document.getElementById("root");
   const root = createRoot(node);
+  const router = createMemoryRouter([{ path: "*", element: React.createElement(EventForm, { ...base, ...props }) }], { initialEntries: ["/admin/events/new"] });
   try {
-    await React.act(async () => root.render(React.createElement(EventForm, { ...base, ...props })));
+    await React.act(async () => root.render(React.createElement(RouterProvider, { router })));
     const form = node.querySelector("form");
     const submit = () => form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
     await run({ dom, form, submit });
   } finally {
     try { await React.act(async () => root.unmount()); }
     finally {
+      router.dispose();
       for (const [key, descriptor] of previous) {
         if (descriptor) Object.defineProperty(globalThis, key, descriptor);
         else delete globalThis[key];
@@ -164,14 +183,25 @@ const bundle = await build({
   stdin: {
     contents: `import * as React from "react";
       import { createRoot } from "react-dom/client";
+import { createMemoryRouter, RouterProvider } from "react-router-dom";
       import { EventForm } from "./apps/ops/src/components/event/EventForm.tsx";
+      import { createMemoryRouter, RouterProvider } from "react-router-dom";
       const root = createRoot(document.getElementById("root"));
+      const Props = React.createContext({});
+      function RoutedForm() { return React.createElement(EventForm, React.useContext(Props)); }
+      const router = createMemoryRouter([
+        { path: "/left", element: React.createElement("p", null, "Left form") },
+        { path: "/manage/events/:id/edit", element: React.createElement("p", null, "Saved destination") },
+        { path: "*", element: React.createElement(RoutedForm) },
+      ], { initialEntries: ["/admin/events/new"] });
+      const render = (props) => React.createElement(Props.Provider, { value: props }, React.createElement(RouterProvider, { router }));
       window.eventFormTest = {
         act: React.act,
+        navigate: (to, options) => router.navigate(to, options),
+        location: () => router.state.location,
         render: (props, strict) => React.act(async () => root.render(strict
-          ? React.createElement(React.StrictMode, null, React.createElement(EventForm, props))
-          : React.createElement(EventForm, props))),
-        unmount: () => React.act(async () => root.unmount()),
+          ? React.createElement(React.StrictMode, null, render(props)) : render(props))),
+        unmount: () => React.act(async () => { root.unmount(); router.dispose(); }),
       };`,
     resolveDir: repoRoot, loader: "tsx", sourcefile: "event-form-draft-fixture.tsx",
   },
@@ -206,7 +236,13 @@ async function withEventForm({ raw = null, props = {}, storage = {}, strict = fa
   window.MessageChannel = class extends MessageChannel {
     constructor() { super(); channels.push(this); }
   };
+  window.scrollTo = () => {};
+  window.HTMLElement.prototype.scrollIntoView = () => {};
   window.TextEncoder = TextEncoder;
+  window.Request = Request;
+  window.Response = Response;
+  window.Headers = Headers;
+  window.AbortController = AbortController;
   window.IS_REACT_ACT_ENVIRONMENT = true;
   if (raw !== null) localStorage.setItem(draftKey, raw);
   for (const [key, value] of Object.entries(storage)) localStorage.setItem(key, value);
@@ -512,4 +548,73 @@ test("same-owner initial-object refresh preserves edits made after the last save
       await debounce();
       assert.equal(saved().title, "New edit before debounce");
     });
+});
+
+
+test("T03 EventForm confirmation cancels with button/Escape and confirms with old-key flush", async () => {
+  await withEventForm({}, async view => {
+    const { window, document, act, change, click, read } = view;
+    await change('[name="title"]', "Keep this edit");
+    const leave = () => act(async () => window.eventFormTest.navigate("/left"));
+    await leave();
+    assert.ok(document.querySelector('[role="alertdialog"]'));
+    await click("編集を続ける");
+    assert.equal(document.querySelector('[role="alertdialog"]'), null);
+    assert.equal(document.querySelector('[name="title"]').value, "Keep this edit");
+    assert.equal(window.eventFormTest.location().pathname, "/admin/events/new");
+    await leave();
+    await act(async () => document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    assert.equal(document.querySelector('[role="alertdialog"]'), null);
+    assert.equal(window.eventFormTest.location().pathname, "/admin/events/new");
+    await leave();
+    await click("このページを離れる");
+    assert.equal(window.eventFormTest.location().pathname, "/left");
+    assert.equal(document.querySelector("form"), null);
+    assert.equal(JSON.parse(read()).value.title, "Keep this edit");
+  });
+});
+
+test("T03 immediate create success navigates cleanly without re-creating its draft", async () => {
+  await withEventForm({ props: { mode: "create", templateId: "immediate", initial: { title: "Initial" } } }, async view => {
+    const { window, document, change, updateProps, submit, flush } = view;
+    await updateProps({
+      createEvent: async () => ({ ok: true, eventId: "created-now" }),
+      router: { push: href => window.eventFormTest.navigate(href), refresh() { assert.fail("create must push"); } },
+    });
+    await change('[name="title"]', "Saved immediately");
+    await flush();
+    const key = "fn:draft:editor-1:event-create-immediate:event-form-v3";
+    assert.ok(window.localStorage.getItem(key));
+    await submit();
+    assert.equal(window.eventFormTest.location().pathname, "/manage/events/created-now/edit");
+    assert.equal(document.querySelector('[role="alertdialog"]'), null);
+    assert.equal(document.querySelector("form"), null);
+    await flush();
+    assert.equal(window.localStorage.getItem(key), null);
+  });
+});
+
+test("T03 the busy exception accepts departure and request settlement preserves the departing draft", async () => {
+  let resolve;
+  const pending = new Promise(done => { resolve = done; });
+  await withEventForm({ props: { updateEvent: () => pending } }, async view => {
+    const { window, document, act, change, guarded, read } = view;
+    await change('[name="title"]', "Pending edit");
+    await act(async () => { document.querySelector("form").dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true })); });
+    assert.equal(document.querySelector('button[type="submit"]').disabled, true);
+    assert.equal(guarded(), false, "CURRENT dirty && !busy exception remains");
+    await act(async () => window.eventFormTest.navigate("/left"));
+    assert.equal(window.eventFormTest.location().pathname, "/left");
+    assert.equal(document.querySelector('[role="alertdialog"]'), null);
+    // React can entangle this navigation with the pending action: the router
+    // location changes before the old DOM actually leaves. Check persistence
+    // after that departure, not while the old owner is still connected.
+    await act(async () => resolve({ ok: false, message: "Late failure" }));
+    assert.equal(document.querySelector("form"), null);
+    const departed = read();
+    assert.equal(JSON.parse(departed).value.title, "Pending edit");
+    await view.flush();
+    assert.equal(read(), departed);
+    assert.equal(document.body.textContent.includes("Late failure"), false);
+  });
 });

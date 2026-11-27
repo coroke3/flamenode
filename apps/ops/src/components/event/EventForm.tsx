@@ -44,6 +44,8 @@ import {
   useFormDraft,
 } from "../../lib/useFormDraft.js";
 import { useUnsavedChangesGuard } from "../../lib/useUnsavedChangesGuard.js";
+import { ConfirmDialog } from "../shared/ConfirmDialog.js";
+import { Link, ScrollRestoration, useLocation } from "react-router-dom";
 import {
   MAX_SLOTS_PER_VIDEO,
   MIN_SLOTS_PER_VIDEO,
@@ -382,6 +384,7 @@ function EventFormInstance({
   draftAuthUserId,
   variant = "admin",
 }: EventFormProps): React.ReactElement {
+  const location = useLocation();
   const isManage = variant === "manage";
   const initial = initialProp ?? EMPTY_EVENT_FORM_INITIAL;
   const committedInitialRef = React.useRef(initial);
@@ -576,7 +579,7 @@ function EventFormInstance({
       }
     };
   }, [flushDraft]);
-  useUnsavedChangesGuard({ dirty: dirty && !busy });
+  const navigationBlocker = useUnsavedChangesGuard({ dirty: dirty && !busy });
 
   React.useEffect(() => {
     setPreview((current) => ({
@@ -683,9 +686,9 @@ function EventFormInstance({
       {isManage || mode === "create" ? (
         <nav className={styles.manageSectionNav} aria-label="設定セクション">
           {MANAGE_SECTION_NAV.map((item) => (
-            <a key={item.id} href={`#${item.id}`}>
+            <Link key={item.id} to={{ pathname: location.pathname, search: location.search, hash: `#${item.id}` }}>
               {item.label}
-            </a>
+            </Link>
           ))}
         </nav>
       ) : null}
@@ -1160,6 +1163,20 @@ function EventFormInstance({
       ) : (
         <EventSettingsPreview event={preview} />
       )}
+      <ScrollRestoration />
+      <ConfirmDialog
+        open={navigationBlocker.state === "blocked" && dirty && !busy}
+        title="このページを離れますか？"
+        message="入力内容が保存されていません。"
+        confirmLabel="このページを離れる"
+        cancelLabel="編集を続ける"
+        onConfirm={() => {
+          if (navigationBlocker.state === "blocked") navigationBlocker.proceed();
+        }}
+        onCancel={() => {
+          if (navigationBlocker.state === "blocked") navigationBlocker.reset();
+        }}
+      />
     </form>
   );
 }
