@@ -116,7 +116,7 @@ Conservative *bounded exception inventory* for R2 API calls whose first argument
 | `src/lib/import/legacy/previewStore.ts` | `bucket.put(key)` | 5 | Persistent uploaded media or preview object; RETAIN until separately reviewed |
 | `src/lib/import/legacy/previewStore.ts` | `bucket.get(key)` | 2 | Persistent uploaded media or preview object; RETAIN until separately reviewed |
 | `src/lib/video/resolveVideoCreatorIcon.ts` | `bucket.delete(uploadedKey)` | 1 | Generator/producer key; MIG-0907 review required |
-| `src/lib/event/eventIdReuse.ts` | `bucket.head(key)` | 1 | Generator/producer key; MIG-0907 review required |
+| `packages/server-core/src/visibility/eventIdReuse.ts` | `bucket.head(key)` | 1 | Generator/producer key; MIG-0907 review required |
 | `src/lib/admin/staticSharedInputDiagnostics.ts` | `bucket.head(key)` | 1 | Generator/producer key; MIG-0907 review required |
 | `workers/json-generator/memberSuggestionsV2Artifacts.ts` | `bucket.delete(MEMBER_SUGGESTIONS_V2_MANIFEST_OBJECT_KEY)` | 2 | Generator/producer key; MIG-0907 review required |
 | `workers/json-generator/memberSuggestionsV2Artifacts.ts` | `bucket.delete(<complex>)` | 1 | Generator/producer key; MIG-0907 review required |
