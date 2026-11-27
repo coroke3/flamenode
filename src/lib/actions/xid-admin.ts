@@ -14,7 +14,7 @@ import {
   or,
   sql,
 } from "drizzle-orm";
-import { buildXIdRequestApprovalAudit, planXIdAccountLinkInsert, planXIdAliasApproval, planXIdCanonicalApproval, planXIdInitialActiveSelection, planXIdLinkRejection, planXIdSiblingCancellation, prepareXIdReviewNotifications } from "@flamenode/server-core/xid/linkRequestReview";
+import { buildXIdRequestApprovalAudit, planXIdAccountLinkInsert, planXIdAliasApproval, planXIdApprovalPublicRebuildTargets, planXIdCanonicalApproval, planXIdInitialActiveSelection, planXIdLinkRejection, planXIdSiblingCancellation, prepareXIdReviewNotifications } from "@flamenode/server-core/xid/linkRequestReview";
 import { canManageXIdLinkRequests } from "@/lib/auth/ownership";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import type { DB } from "@/lib/db/client";
@@ -1050,23 +1050,13 @@ async function approveXIdLinkRequestOnce(
     expected.push(null);
   }
 
-  if (publicVisibilityChanged && notificationXUserId) {
-    const queue = await buildStaticRebuildQueueBatch(db, [
-      {
-        targetType: "user",
-        targetId: notificationXUserId,
-        reason: "x_id_approved",
-        requestedByUserId: operatorAuthUserId,
-        priority: "normal",
-      },
-      {
-        targetType: "users_index",
-        targetId: "global",
-        reason: "x_id_approved",
-        requestedByUserId: operatorAuthUserId,
-        priority: "low",
-      },
-    ]);
+  const publicRebuildTargets = planXIdApprovalPublicRebuildTargets({
+    publicVisibilityChanged,
+    notificationXUserId,
+    operatorAuthUserId,
+  });
+  if (publicRebuildTargets.length > 0) {
+    const queue = await buildStaticRebuildQueueBatch(db, publicRebuildTargets);
     statements.push(...queue.statements);
     expected.push(...queue.expectedChanges);
     staticRebuildQueued = queue.statements.length > 0;

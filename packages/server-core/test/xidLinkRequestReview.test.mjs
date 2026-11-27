@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { drizzle } from "drizzle-orm/d1";
 import { and, eq, getTableColumns } from "drizzle-orm";
-import { buildXIdRequestApprovalAudit, planXIdAccountLinkInsert, planXIdAliasApproval, planXIdCanonicalApproval, planXIdInitialActiveSelection, planXIdLinkRejection, planXIdSiblingCancellation, prepareXIdReviewNotifications } from "../src/xid/linkRequestReview.ts";
+import { buildXIdRequestApprovalAudit, planXIdAccountLinkInsert, planXIdAliasApproval, planXIdApprovalPublicRebuildTargets, planXIdCanonicalApproval, planXIdInitialActiveSelection, planXIdLinkRejection, planXIdSiblingCancellation, prepareXIdReviewNotifications } from "../src/xid/linkRequestReview.ts";
 import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
 import { assertChanges } from "../src/audit/mutate.ts";
 import { users, xIdentityRequests, xUserAccountLinks, xUsers } from "@flamenode/db/schema";
@@ -781,5 +781,27 @@ test("SA-090/091 notification preparation stops at the original failed boundary"
       },
     }), value => value === error);
     assert.deepEqual(calls, phases.slice(0, phases.indexOf(phase) + 1));
+  }
+});
+
+
+test("SA-090 public rebuild planning preserves CURRENT ordered targets and explicit operator", () => {
+  for (const publicVisibilityChanged of [false, true]) {
+    for (const notificationXUserId of [null, "", "approved-x", "0"]) {
+      for (const operatorAuthUserId of ["operator-a", "operator-b"]) {
+        const input = { publicVisibilityChanged, notificationXUserId, operatorAuthUserId };
+        const expected = publicVisibilityChanged && notificationXUserId ? [
+          { targetType: "user", targetId: notificationXUserId, reason: "x_id_approved", requestedByUserId: operatorAuthUserId, priority: "normal" },
+          { targetType: "users_index", targetId: "global", reason: "x_id_approved", requestedByUserId: operatorAuthUserId, priority: "low" },
+        ] : [];
+        const planned = planXIdApprovalPublicRebuildTargets(Object.freeze(input));
+        assert.deepEqual(planned, expected);
+        assert.notEqual(planned, planXIdApprovalPublicRebuildTargets(input));
+        if (planned.length > 0) {
+          planned[0].targetId = "mutated";
+          assert.deepEqual(planXIdApprovalPublicRebuildTargets(input), expected);
+        }
+      }
+    }
   }
 });
