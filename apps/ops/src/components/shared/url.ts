@@ -11,16 +11,26 @@ export function normalizeHttpUrl(
   raw: string | null | undefined,
   options: { maxLength?: number } = {},
 ): string | null {
-  const s = String(raw ?? "").trim();
+  const original = String(raw ?? "");
+  // WHATWG URL silently strips leading/trailing C0 controls (including NUL),
+  // while trim() also hides CR/LF/TAB. Reject control characters before either step.
+  if (/[\x00-\x1f\x7f\\]/.test(original)) return null;
+  const s = original.trim();
   if (!s) return null;
-  if (s.length > (options.maxLength ?? 500)) return null;
+  const maxLength = options.maxLength ?? 500;
+  // Non-finite limits bypass numeric comparisons and silently disable the cap.
+  if (!Number.isSafeInteger(maxLength) || maxLength < 0) return null;
+  if (s.length > maxLength) return null;
 
   try {
     const url = new URL(s);
     if (url.protocol !== "https:" && url.protocol !== "http:") return null;
-    // Reject userinfo so normalized URLs never expose embedded credentials.
+    // Userinfo must never be serialized into public links or persisted URL fields.
     if (url.username || url.password) return null;
-    return url.toString();
+    // Unicode and other characters may expand when URL is serialized.
+    // Check the value that will actually be stored and displayed as a link.
+    const normalized = url.toString();
+    return normalized.length <= maxLength ? normalized : null;
   } catch {
     return null;
   }
