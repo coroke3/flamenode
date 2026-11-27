@@ -1,9 +1,46 @@
 // MIG-0715 U03: narrow CURRENT notification preview port. No send, network or browser-origin fallback.
+declare const __FLAMENODE_PUBLIC_SITE_URL__: string | undefined;
+declare const __FLAMENODE_RUNTIME_MODE__: string | undefined;
 // Origin must be supplied by the host from the same trusted public configuration as CURRENT.
 export type NotificationUrlEnv = {
   NEXT_PUBLIC_SITE_URL?: string;
   NODE_ENV?: string;
 };
+
+export type NotificationRuntimeMode = "production" | "development" | "test";
+
+/** Build-only adapter. The URL is public configuration, never a request/browser origin. */
+export function notificationUrlEnvFromBuild(input: {
+  publicSiteUrl?: string;
+  runtimeMode: string;
+}): NotificationUrlEnv & { NODE_ENV: NotificationRuntimeMode } {
+  if (
+    input.runtimeMode !== "production" &&
+    input.runtimeMode !== "development" &&
+    input.runtimeMode !== "test"
+  ) {
+    throw new Error("NOTIFICATION_RUNTIME_MODE_MISSING");
+  }
+  return {
+    NEXT_PUBLIC_SITE_URL: input.publicSiteUrl,
+    NODE_ENV: input.runtimeMode,
+  };
+}
+
+/** Vite replaces these public build constants; Node tests fail closed without them. */
+export function getVideoPermissionNotificationUrlEnv(): NotificationUrlEnv & {
+  NODE_ENV: NotificationRuntimeMode;
+} {
+  const publicSiteUrl =
+    typeof __FLAMENODE_PUBLIC_SITE_URL__ === "string"
+      ? __FLAMENODE_PUBLIC_SITE_URL__
+      : undefined;
+  const runtimeMode =
+    typeof __FLAMENODE_RUNTIME_MODE__ === "string"
+      ? __FLAMENODE_RUNTIME_MODE__
+      : "test";
+  return notificationUrlEnvFromBuild({ publicSiteUrl, runtimeMode });
+}
 
 type DiscordBlock = {
   heading?: string;

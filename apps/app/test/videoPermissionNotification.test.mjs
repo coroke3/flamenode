@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
-import { buildVideoEditPermissionGrantedNotification as build } from "../.test-dist/apps/app/src/lib/videoPermissionNotification.js";
+import {
+  buildVideoEditPermissionGrantedNotification as build,
+  getVideoPermissionNotificationUrlEnv,
+  notificationUrlEnvFromBuild,
+} from "../.test-dist/apps/app/src/lib/videoPermissionNotification.js";
 
 const production = { NEXT_PUBLIC_SITE_URL: "https://canonical.example", NODE_ENV: "production" };
 const args = { videoId: "v1", videoTitle: "作品" };
@@ -59,4 +64,42 @@ test("MIG-0715 U03 forbids production loopback and permits CURRENT development o
     assert.throws(() => build(args, { ...production, NEXT_PUBLIC_SITE_URL: origin }), { message: "NEXT_PUBLIC_SITE_URL_LOCALHOST_FORBIDDEN" });
     assert.equal(build(args, { NEXT_PUBLIC_SITE_URL: origin, NODE_ENV: "development" }).url, `${origin}/dashboard/edit/v1`);
   }
+});
+
+
+test("MIG-0715 U03 Personal build maps only the configured public origin and explicit runtime mode", () => {
+  const viteConfig = readFileSync(new URL("../vite.config.ts", import.meta.url), "utf8");
+  assert.match(viteConfig, /__FLAMENODE_PUBLIC_SITE_URL__:\\s*JSON\\.stringify\\(process\\.env\\.NEXT_PUBLIC_SITE_URL\\s*\\?\\?\\s*""\\)/);
+  assert.match(viteConfig, /__FLAMENODE_RUNTIME_MODE__:\\s*JSON\\.stringify\\(command\\s*===\\s*"build"\\s*\\?\\s*"production"\\s*:\\s*"development"\\)/);
+  assert.doesNotMatch(viteConfig, /window\\.location|request\\.url/);
+});
+
+test("MIG-0715 U03 build-origin adapter preserves production/dev mode and fails closed when origin is missing", () => {
+  assert.deepEqual(notificationUrlEnvFromBuild({
+    publicSiteUrl: "https://canonical.example",
+    runtimeMode: "production",
+  }), production);
+
+  const development = notificationUrlEnvFromBuild({
+    publicSiteUrl: "http://localhost:5173",
+    runtimeMode: "development",
+  });
+  assert.deepEqual(development, {
+    NEXT_PUBLIC_SITE_URL: "http://localhost:5173",
+    NODE_ENV: "development",
+  });
+
+  const missing = notificationUrlEnvFromBuild({ runtimeMode: "production" });
+  assert.equal(missing.NEXT_PUBLIC_SITE_URL, undefined);
+  assert.throws(() => build(args, missing), { message: "NEXT_PUBLIC_SITE_URL_MISSING" });
+  assert.throws(() => notificationUrlEnvFromBuild({ runtimeMode: "preview" }), {
+    message: "NOTIFICATION_RUNTIME_MODE_MISSING",
+  });
+});
+
+test("MIG-0715 U03 build env accessor is safe and fail-closed in Node tests without Vite constants", () => {
+  assert.deepEqual(getVideoPermissionNotificationUrlEnv(), {
+    NEXT_PUBLIC_SITE_URL: undefined,
+    NODE_ENV: "test",
+  });
 });
