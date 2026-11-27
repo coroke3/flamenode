@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation, createMemoryRouter, RouterProvider } from "react-router-dom";
 import { JSDOM } from "jsdom";
 import { DeleteEventTemplateButton } from "../.test-dist/apps/ops/src/routes/admin/DeleteEventTemplateButton.js";
 import {
@@ -24,6 +24,8 @@ import {
 } from "../.test-dist/apps/ops/src/api/adminEventGroups.js";
 import { AdminEvents } from "../.test-dist/apps/ops/src/routes/admin/AdminEvents.js";
 import { EventTemplates } from "../.test-dist/apps/ops/src/routes/admin/EventTemplates.js";
+import { EventNew } from "../.test-dist/apps/ops/src/routes/admin/EventNew.js";
+import { buildFormDraftStorageKey } from "../.test-dist/apps/ops/src/lib/useFormDraft.js";
 import { EventGroupsPage } from "../.test-dist/apps/ops/src/routes/admin/EventGroups.js";
 import {
   EventGroupCreatePage,
@@ -68,7 +70,7 @@ const eventNew = {
 async function withDom(url, fn) {
   const dom = new JSDOM("<!doctype html><div id='root'></div>", { url });
   const keys = [
-    "window", "document", "FormData", "Element", "HTMLElement",
+    "window", "document", "sessionStorage", "FormData", "Element", "HTMLElement",
     "HTMLInputElement", "HTMLSelectElement", "HTMLTextAreaElement",
     "Node", "Event", "MouseEvent", "navigator", "ResizeObserver",
     "requestAnimationFrame", "cancelAnimationFrame",
@@ -86,6 +88,8 @@ async function withDom(url, fn) {
   const caf = (id) => clearTimeout(id);
   dom.window.requestAnimationFrame = raf;
   dom.window.cancelAnimationFrame = caf;
+  dom.window.scrollTo = () => {};
+  dom.window.HTMLElement.prototype.scrollIntoView = () => {};
   globalThis.requestAnimationFrame = raf;
   globalThis.cancelAnimationFrame = caf;
   // JSDOM has no ResizeObserver; TableScroll needs only observe/disconnect.
@@ -121,6 +125,279 @@ function LocationProbe() {
   const loc = useLocation();
   return React.createElement("output", { "data-testid": "loc" }, loc.pathname + loc.search);
 }
+
+// These test ports reject any unexpected mutation or navigation; the component
+// itself has no fallback provider. Write behavior is supplied explicitly below.
+const eventNewPorts = {
+  createEvent: async () => assert.fail("unexpected createEvent"),
+  updateEvent: async () => assert.fail("create page must never call updateEvent"),
+  router: {
+    push() { assert.fail("unexpected push"); },
+    refresh() { assert.fail("unexpected refresh"); },
+  },
+};
+const eventDraftKey = (userId, templateId = "t1") => buildFormDraftStorageKey({
+  authUserId: userId, formId: "event-create-" + templateId, schemaVersion: "event-form-v3",
+});
+
+async function withEventNew(props, run, entry = "/admin/events/new?template=t1") {
+  let router;
+  try {
+    return await withDom("https://flamenode.test" + entry, async (view) => {
+      const { dom, container, root } = view;
+      const assigned = [], commits = [];
+      Object.defineProperty(globalThis, "window", { configurable: true, value: new Proxy(dom.window, {
+        get(target, property) {
+          if (property === "location") return {
+            assign: href => assigned.push(href), href: target.location.href, origin: target.location.origin,
+          };
+          const value = Reflect.get(target, property);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      }) });
+      let updateProps;
+      function Host() {
+        const [current, update] = React.useState(props);
+        const location = useLocation();
+        updateProps = update;
+        return React.createElement(React.Profiler, { id: "event-new", onRender() {
+          commits.push({ fetchFn: current.fetchFn, search: location.search,
+            template: container.querySelector('[name="template_id"]')?.value ?? null,
+            title: container.querySelector('[name="title"]')?.value ?? null,
+            hasForm: Boolean(container.querySelector("form")) });
+        } }, React.createElement(EventNew, current), React.createElement(LocationProbe));
+      }
+      router = createMemoryRouter([
+        { path: "/admin/events/new", element: React.createElement(Host) },
+        { path: "*", element: React.createElement("p", null, "Destination") },
+      ], { initialEntries: [entry] });
+      await React.act(async () => root.render(React.createElement(RouterProvider, { router })));
+      const change = (name, value) => React.act(async () => {
+        const input = container.querySelector('[name="' + name + '"]');
+        assert.ok(input, name);
+        Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), "value").set.call(input, value);
+        input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+      });
+      await run({ ...view, router, assigned, commits, change,
+        update: next => React.act(async () => updateProps(previous => ({ ...previous, ...next }))) });
+    });
+  } finally {
+    router?.dispose();
+  }
+}
+
+test("MIG-0721 U03b: CURRENT template markup, query selection and form defaults use the real read boundary", async () => {
+  const encodedId = "pick &/?#日";
+  const cases = [
+    { query: "?template=" + encodeURIComponent(" " + encodedId + " "), id: encodedId, name: "Chosen", settings: eventNew.templateSettingsJson },
+    { query: "", id: "", name: null, settings: null },
+    { query: "?template=%20%20", id: "", name: null, settings: null },
+    { query: "?template=t1&template=t2", id: "", name: null, settings: null },
+    { query: "?template=unknown", id: "unknown", name: null, settings: null },
+    { query: "?template=invalid", id: "invalid", name: "Invalid settings", settings: "{" },
+    { query: "?template=t1", id: "t1", name: "Selected without list", settings: eventNew.templateSettingsJson, guardOk: false },
+  ];
+  for (const item of cases) {
+    const calls = [];
+    const body = { ...eventNew, templateId: item.id, templateName: item.name,
+      templateSettingsJson: item.settings, guardOk: item.guardOk ?? true,
+      templates: item.guardOk === false ? [] : [{ ...templates.templates[0], id: item.id || "t1", name: "Choice" }] };
+    await withEventNew({ ...eventNewPorts, fetchFn: async (url, init) => {
+      calls.push({ url, init }); return json(200, body);
+    } }, async ({ container }) => {
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0].url, "/api/admin-read/events/new" + (item.id ? "?" + new URLSearchParams({ template: item.id }) : ""));
+      assert.equal(calls[0].init.method, "GET");
+      assert.equal(container.querySelector("h1").textContent, "新規イベント作成");
+      assert.match(container.textContent, item.name ? new RegExp("テンプレート「" + item.name + "」") : /イベント本体を作成します/);
+      const form = container.querySelector("form");
+      assert.ok(form);
+      assert.equal(form.querySelector('[name="template_id"]')?.value ?? null, item.id || null);
+      assert.equal(form.querySelector('[name="visibility_status"]').value, "private");
+      for (const name of ["start_time", "end_time", "entry_start_time", "entry_end_time"]) {
+        assert.equal(form.querySelector('[name="' + name + '"]').value, "");
+      }
+      assert.equal(form.querySelector('[name="explanation"]').value, item.settings === eventNew.templateSettingsJson ? "Template information" : "");
+      const choices = [...container.querySelectorAll('a[href^="/admin/events/new"]')]
+        .filter(link => !link.closest("form"));
+      if (item.guardOk === false) {
+        assert.equal(choices.length, 0);
+        assert.doesNotMatch(container.textContent, /テンプレートの利用権限/);
+      } else {
+        assert.equal(choices[0].getAttribute("href"), "/admin/events/new?template=" + encodeURIComponent(item.id || "t1"));
+        assert.equal(choices[0].classList.contains("fn-btn-primary"), Boolean(item.id));
+        assert.equal(choices.some(link => link.textContent.trim() === "テンプレートなし"), Boolean(item.id));
+      }
+      assert.ok(container.querySelector('a[href="/admin/events/templates"]'));
+      assert.equal(container.querySelectorAll('a[href="/admin/events"]').length, 2);
+    }, "/admin/events/new" + item.query);
+  }
+});
+
+test("MIG-0721 U03b: query A-B-A, provider replacement and unmount retire reads without stale frames", async () => {
+  const pending = [];
+  const provider = name => (url, init) => new Promise(resolve => pending.push({ name, url, init, resolve }));
+  const first = provider("first"), second = provider("second");
+  let lastSignal, lastContainer;
+  await withEventNew({ ...eventNewPorts, fetchFn: first }, async ({ container, router, update, commits }) => {
+    assert.equal(pending.length, 1);
+    await React.act(async () => router.navigate("/admin/events/new?template=b"));
+    await React.act(async () => router.navigate("/admin/events/new?template=t1"));
+    assert.equal(pending.length, 3);
+    assert.ok(pending[0].init.signal.aborted && pending[1].init.signal.aborted);
+    await React.act(async () => pending[1].resolve(json(200, { ...eventNew, templateId: "b" })));
+    await React.act(async () => pending[0].resolve(json(200, eventNew)));
+    assert.equal(container.querySelector("form"), null);
+    assert.ok(commits.every(commit => !commit.hasForm));
+    await React.act(async () => pending[2].resolve(json(200, eventNew)));
+    assert.ok(container.querySelector("form"));
+    await update({ refreshKey: 1 });
+    const frameStart = commits.length;
+    await update({ fetchFn: second });
+    assert.ok(pending[3].init.signal.aborted);
+    assert.equal(container.querySelector("form"), null);
+    assert.ok(commits.slice(frameStart).every(commit => !commit.hasForm));
+    await React.act(async () => pending[4].resolve(json(200, { ...eventNew, userId: "second-owner", templateName: "Second provider" })));
+    await React.act(async () => pending[3].resolve(json(200, { ...eventNew, templateName: "Retired provider" })));
+    assert.match(container.textContent, /Second provider/);
+    assert.doesNotMatch(container.textContent, /Retired provider/);
+    await update({ refreshKey: 2 });
+    lastSignal = pending[5].init.signal;
+    lastContainer = container;
+  });
+  assert.ok(lastSignal.aborted);
+  assert.equal(lastContainer.querySelector("form"), null);
+});
+
+test("MIG-0721 U03b: same-owner refresh retains edits while server-user changes isolate and restore drafts", async () => {
+  let body = eventNew, status = 200;
+  const fetchFn = async () => json(status, body);
+  await withEventNew({ ...eventNewPorts, fetchFn }, async ({ dom, container, change, update }) => {
+    const original = container.querySelector("form");
+    await change("title", "Owner A before debounce");
+    body = { ...eventNew, templateSettingsJson: JSON.stringify({ explanation: "Refreshed settings" }) };
+    await update({ refreshKey: 1 });
+    assert.equal(container.querySelector("form"), original);
+    assert.equal(container.querySelector('[name="title"]').value, "Owner A before debounce");
+    status = 503;
+    await update({ refreshKey: 2 });
+    assert.equal(container.querySelector("form"), original);
+    assert.equal(container.querySelector('[name="title"]').value, "Owner A before debounce");
+    status = 200;
+    body = { ...eventNew, userId: "other-account" };
+    await update({ refreshKey: 3 });
+    assert.notEqual(container.querySelector("form"), original);
+    assert.equal(container.querySelector('[name="title"]').value, "");
+    assert.equal(JSON.parse(dom.window.localStorage.getItem(eventDraftKey("admin-account"))).value.title, "Owner A before debounce");
+    await change("title", "Owner B before debounce");
+    body = eventNew;
+    await update({ refreshKey: 4 });
+    assert.equal(container.querySelector('[name="title"]').value, "Owner A before debounce");
+    assert.equal(JSON.parse(dom.window.localStorage.getItem(eventDraftKey("other-account"))).value.title, "Owner B before debounce");
+  });
+});
+
+test("MIG-0721 U03b: initial failure has no form; explicit denial removes it and ignores retired success", async () => {
+  for (const status of [401, 403]) {
+    const pending = [];
+    const fetchFn = (url, init) => new Promise(resolve => pending.push({ init, resolve }));
+    await withEventNew({ ...eventNewPorts, fetchFn }, async ({ container, update, assigned }) => {
+      await React.act(async () => pending[0].resolve(json(503, {})));
+      assert.equal(container.querySelector("form"), null);
+      assert.match(container.querySelector('[role="alert"]').textContent, /取得できません/);
+      await update({ refreshKey: 1 });
+      await React.act(async () => pending[1].resolve(json(200, eventNew)));
+      assert.ok(container.querySelector("form"));
+      await update({ refreshKey: 2 });
+      await update({ refreshKey: 3 });
+      await React.act(async () => pending[3].resolve(json(status, { redirect: "/dashboard" })));
+      assert.equal(container.querySelector("form"), null);
+      assert.deepEqual(assigned, [status === 401 ? "/entry" : "/dashboard"]);
+      assert.ok(pending[2].init.signal.aborted);
+      await React.act(async () => pending[2].resolve(json(200, eventNew)));
+      assert.equal(container.querySelector("form"), null);
+      assert.equal(assigned.length, 1);
+    });
+  }
+});
+
+test("MIG-0721 U03b: picker cancel, confirm, hash and history preserve the existing Data Router draft contract", async () => {
+  const calls = [];
+  const fetchFn = async url => {
+    calls.push(url);
+    const id = new URL(url, "https://flamenode.test").searchParams.get("template") ?? "";
+    return json(200, { ...eventNew, templateId: id, templateName: id,
+      templates: ["t1", "b"].map(id => ({ ...templates.templates[0], id, name: "Template " + id })) });
+  };
+  await withEventNew({ ...eventNewPorts, fetchFn }, async ({ dom, container, router, change }) => {
+    const click = label => React.act(async () => {
+      const node = [...container.querySelectorAll("a,button"), ...dom.window.document.querySelectorAll('[role="alertdialog"] button')]
+        .find(node => node.textContent.trim() === label);
+      assert.ok(node, label); node.click();
+    });
+    const original = container.querySelector("form");
+    await change("title", "Template A edit");
+    await click("Template b");
+    assert.ok(dom.window.document.querySelector('[role="alertdialog"]'));
+    assert.equal(router.state.location.search, "?template=t1");
+    assert.equal(calls.length, 1);
+    await click("編集を続ける");
+    assert.equal(container.querySelector("form"), original);
+    await React.act(async () => container.querySelector('form nav a[href$="#section-publish"]').click());
+    assert.equal(router.state.location.hash, "#section-publish");
+    assert.equal(dom.window.document.querySelector('[role="alertdialog"]'), null);
+    assert.equal(container.querySelector("form"), original);
+    assert.equal(calls.length, 1);
+    await click("Template b");
+    await click("このページを離れる");
+    assert.equal(router.state.location.search, "?template=b");
+    assert.equal(container.querySelector('[name="title"]').value, "");
+    assert.equal(JSON.parse(dom.window.localStorage.getItem(eventDraftKey("admin-account"))).value.title, "Template A edit");
+    await change("title", "Template B edit");
+    await React.act(async () => router.navigate(-1));
+    await click("このページを離れる");
+    assert.equal(router.state.location.search, "?template=t1");
+    assert.equal(container.querySelector('[name="title"]').value, "Template A edit");
+    await React.act(async () => router.navigate(1));
+    await click("このページを離れる");
+    assert.equal(router.state.location.search, "?template=b");
+    assert.equal(container.querySelector('[name="title"]').value, "Template B edit");
+  });
+});
+
+test("MIG-0721 U03b: one injected create call retains a failed draft and success clears it before navigation", async () => {
+  const writes = [], destinations = [];
+  let navigate;
+  const ports = { ...eventNewPorts,
+    createEvent: data => new Promise(resolve => writes.push({ data, resolve })),
+    router: { push: href => { destinations.push(href); void navigate(href); }, refresh() { assert.fail("create with eventId must push"); } },
+  };
+  await withEventNew({ ...ports, fetchFn: async () => json(200, eventNew) }, async ({ dom, container, router, change }) => {
+    navigate = href => router.navigate(href);
+    await change("id", "new-event");
+    await change("title", "New event title");
+    await React.act(async () => dom.window.dispatchEvent(new dom.window.Event("pagehide")));
+    const key = eventDraftKey("admin-account");
+    assert.ok(dom.window.localStorage.getItem(key));
+    const submit = () => container.querySelector("form").dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+    await React.act(async () => { submit(); submit(); });
+    assert.equal(writes.length, 1);
+    assert.equal(writes[0].data.get("template_id"), "t1");
+    assert.equal(writes[0].data.get("title"), "New event title");
+    await React.act(async () => writes[0].resolve({ ok: false, message: "CURRENT rejection" }));
+    assert.match(container.textContent, /CURRENT rejection/);
+    assert.equal(container.querySelector('[name="title"]').value, "New event title");
+    assert.ok(dom.window.localStorage.getItem(key));
+    await React.act(async () => submit());
+    assert.equal(writes.length, 2);
+    await React.act(async () => writes[1].resolve({ ok: true, eventId: "created /日本" }));
+    assert.deepEqual(destinations, ["/manage/events/created%20%2F%E6%97%A5%E6%9C%AC/edit"]);
+    assert.equal(container.querySelector("form"), null);
+    assert.equal(dom.window.document.querySelector('[role="alertdialog"]'), null);
+    await React.act(async () => dom.window.dispatchEvent(new dom.window.Event("pagehide")));
+    assert.equal(dom.window.localStorage.getItem(key), null);
+  });
+});
 
 test("MIG-0728 U02: event query normalizes CURRENT sort/filter and trims q", () => {
   assert.equal(eventIndexQuery(new URLSearchParams("sort=x&filter=y&q=%20foo%20")),
