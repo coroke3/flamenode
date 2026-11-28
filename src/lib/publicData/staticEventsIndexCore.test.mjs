@@ -107,3 +107,35 @@ test("normalizeStaticEventsIndex drops private rows in index and groups", () => 
   assert.deepEqual(index.events.map((event) => event.id), ["public"]);
   assert.equal(index.groupSections[0].events.length, 0);
 });
+
+
+test("normalizeStaticEventsIndex rejects explicitly nonpublic event groups without breaking legacy groups", () => {
+  const publicEvent = {
+    id: "public-event", title: "Visible event", visibility_status: "public",
+    start_time: 100, end_time: 200,
+  };
+  const group = (id, visibility_status, sort_order) => ({
+    id, slug: id, name: id, sort_order,
+    ...(visibility_status === undefined ? {} : { visibility_status }),
+    events: [publicEvent],
+  });
+  const index = normalizeStaticEventsIndex({
+    items: [publicEvent],
+    group_sections: [
+      group("legacy", undefined, 0),
+      group("explicit-public", "public", 1),
+      group("legacy-null", null, 2),
+      { ...group("private-secret", "private", -5), description: "PRIVATE_GROUP_CANARY" },
+      group("draft-secret", "draft", -4),
+      group("empty-marker", "", -3),
+      group("invalid-marker", false, -2),
+    ],
+  });
+  assert.ok(index);
+  assert.deepEqual(index.events.map((event) => event.id), ["public-event"]);
+  assert.deepEqual(index.groupSections.map((group) => group.id), [
+    "legacy", "explicit-public", "legacy-null",
+  ]);
+  assert.equal(index.groupSections.every((group) => group.events[0]?.id === "public-event"), true);
+  assert.doesNotMatch(JSON.stringify(index.groupSections), /PRIVATE_GROUP_CANARY|private-secret|draft-secret/);
+});

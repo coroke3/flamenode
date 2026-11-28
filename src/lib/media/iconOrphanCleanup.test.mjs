@@ -108,4 +108,88 @@ if (process.env.FLAMENODE_ICON_ORPHAN_EXECUTION !== "1") {
     );
     assert.deepEqual(deleted, ["xicons/a/old.webp"]);
   });
+
+  async function withPoisonedDiagnosticSink(run) {
+    const prior = console.error;
+    const logs = [];
+    console.error = (...args) => {
+      logs.push(args);
+      throw new Error("SEC774_LOGGER_FAILURE");
+    };
+    try {
+      await run(logs);
+    } finally {
+      console.error = prior;
+    }
+  }
+
+  function providerError() {
+    const error = new Error("SEC774_PRIVATE_PROVIDER_PAYLOAD");
+    Object.defineProperty(error, "name", {
+      get() { throw new Error("SEC774_POISONED_ERROR_NAME"); },
+    });
+    return error;
+  }
+
+  test("SEC-774 D1 reference errors and throwing logger never delete the old icon", async () => {
+    const deleted = [];
+    const bucket = { delete: async (key) => deleted.push(key) };
+    for (const failMode of ["sync", "async"]) {
+      await withPoisonedDiagnosticSink(async (logs) => {
+        const db = failMode === "sync"
+          ? { prepare() { throw providerError(); } }
+          : { prepare: () => ({ bind: () => ({ first: async () => { throw providerError(); } }) }) };
+        await assert.doesNotReject(() => tryDeleteUnreferencedIcon(
+          db, bucket, "/api/media/xicons/u/old.webp", "/api/media/xicons/u/new.webp",
+        ));
+        assert.deepEqual(logs, [["[icon-orphan-cleanup] reference check failed"]]);
+      });
+    }
+    assert.deepEqual(deleted, [], "unknown reference state must fail closed");
+  });
+
+  test("SEC-774 failed R2 orphan deletion never exposes provider errors or throws from diagnostic sink", async () => {
+    const db = { prepare: () => ({ bind: () => ({ first: async () => null }) }) };
+    for (const [key, tag] of [
+      ["xicons/u/old.webp", "x_icon_orphan_cleanup_failed"],
+      ["video-icons/u/old.webp", "video_icon_orphan_cleanup_failed"],
+    ]) {
+      for (const failMode of ["sync", "async", "getter"]) {
+        const attempts = [];
+        const bucket = {
+          delete(objectKey) {
+            attempts.push(objectKey);
+            if (failMode === "sync") throw providerError();
+            return Promise.reject(providerError());
+          },
+        };
+        if (failMode === "getter") {
+          Object.defineProperty(bucket, "delete", {
+            get() { throw providerError(); },
+          });
+        }
+        await withPoisonedDiagnosticSink(async (logs) => {
+          await assert.doesNotReject(() => tryDeleteUnreferencedIcon(
+            db, bucket, "/api/media/" + key, "/api/media/" + key.replace("old", "new"),
+          ));
+          assert.deepEqual(logs, [[tag]], "fixed diagnostic code only, no provider Error");
+        });
+        assert.deepEqual(attempts, failMode === "getter" ? [] : [key]);
+      }
+    }
+  });
+
+  test("SEC-774 healthy orphan deletion still removes only the unreferenced object without warning", async () => {
+    const deleted = [];
+    const db = { prepare: () => ({ bind: () => ({ first: async () => null }) }) };
+    const bucket = { delete: async (key) => { deleted.push(key); } };
+    await withPoisonedDiagnosticSink(async (logs) => {
+      await tryDeleteUnreferencedIcon(
+        db, bucket, "/api/media/video-icons/a/old.webp", "/api/media/video-icons/a/new.webp",
+      );
+      assert.deepEqual(logs, []);
+    });
+    assert.deepEqual(deleted, ["video-icons/a/old.webp"]);
+  });
+
 }

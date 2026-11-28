@@ -24,11 +24,33 @@ test("critical Server Actions rethrow Next.js control-flow exceptions", () => {
       /import \{[^}]*unstable_rethrow[^}]*\} from "next\/navigation"/,
       `${file} must import unstable_rethrow`,
     );
-    assert.match(
-      source,
-      /unstable_rethrow\(error\)/,
-      `${file} must call unstable_rethrow in catch blocks`,
-    );
+    if (file === "../actions/video/interaction.ts") {
+      // SEC-820: the mutation catch must classify framework control before
+      // handling provider conflicts, without giving Next the raw error.
+      const mutationStart = source.indexOf("async function mutateVideoInteraction(");
+      const writeStart = source.indexOf("await mutateWithAudit(db, {", mutationStart);
+      assert.ok(mutationStart >= 0 && writeStart > mutationStart);
+      assert.match(
+        source.slice(writeStart),
+        /^await mutateWithAudit\(db, \{[\s\S]*?\}\);\s*\}\s*catch \(error\) \{\s*rethrowVideoInteractionFrameworkControl\(error\);\s*if \(active && isVideoInteractionAuthUniqueConstraintError\(error\)\)/,
+        "video interaction must classify control flow first in the atomic-write catch",
+      );
+
+      const helperStart = source.indexOf("function rethrowVideoInteractionFrameworkControl(");
+      const helperEnd = source.indexOf("\nfunction isVideoInteractionAuthUniqueConstraintError(", helperStart);
+      assert.ok(helperStart >= 0 && helperEnd > helperStart);
+      assert.match(
+        source.slice(helperStart, helperEnd),
+        /try \{\s*unstable_rethrow\(metadata\);\s*\} catch \(controlFlow\) \{\s*if \(controlFlow === metadata\) throw error;/,
+        "the helper must invoke Next on the metadata projection and rethrow the original signal",
+      );
+    } else {
+      assert.match(
+        source,
+        /unstable_rethrow\(error\)/,
+        `${file} must call unstable_rethrow in catch blocks`,
+      );
+    }
   }
 });
 
@@ -90,6 +112,33 @@ test("free video creation treats wake, cleanup, and revalidation as post-commit 
   assert.ok(cleanupIndex > postCommitIndex);
   assert.ok(revalidateIndex > postCommitIndex);
   assert.equal((actionSource.match(/revalidatePath\(/g) ?? []).length, 3);
+});
+
+test("SEC-736: slotted video YouTube wake runs only after the atomic-save catch", () => {
+  const source = read("../actions/video/submitSlotVideo.ts");
+  const start = source.indexOf("async function submitSlotVideoCore(");
+  const end = source.indexOf("const SLOT_SUBMIT_UNEXPECTED_ERROR_MESSAGE", start);
+  assert.ok(start >= 0 && end > start, "inspect the actual slotted submission action");
+  const action = source.slice(start, end);
+  const wakeSet = action.indexOf("const wakeSentKinds = new Set<QueueWakeKind>();");
+  const atomicCommit = action.indexOf("await executeVideoAtomicWritePlan(db, plan, {");
+  const catchIndex = action.indexOf("} catch (error) {", atomicCommit);
+  const rollbackIndex = action.indexOf("await rollbackUploadedVideoIcon(iconResolved.value.uploadedKey)", catchIndex);
+  const postCommitIndex = action.indexOf("await runPostCommitBestEffort(", catchIndex);
+  const conditionalWakeIndex = action.indexOf("...(youtubeFieldPresent && submittedYoutubeId", postCommitIndex);
+  const wakeIndex = action.indexOf('await sendYoutubeSyncPendingWakeBestEffort("web", wakeSentKinds)', postCommitIndex);
+  const cleanupIndex = action.indexOf('name: "icon_orphan_cleanup"', postCommitIndex);
+
+  assert.ok(wakeSet >= 0 && wakeSet < atomicCommit, "one sentKinds set must span the batch and post-commit wake");
+  assert.ok(atomicCommit < catchIndex && catchIndex < rollbackIndex && rollbackIndex < postCommitIndex,
+    "only an uncommitted atomic write may reach the icon rollback catch");
+  assert.ok(postCommitIndex < conditionalWakeIndex && conditionalWakeIndex < wakeIndex,
+    "only a submitted YouTube ID queues the best-effort wake");
+  assert.ok(wakeIndex < cleanupIndex, "a failed wake cannot skip later cleanup tasks");
+  assert.equal(action.slice(atomicCommit, catchIndex).includes("sendYoutubeSyncPendingWakeBestEffort"), false,
+    "a post-commit YouTube Queue exception must never enter the D1 failure catch");
+  assert.equal((action.match(/sendYoutubeSyncPendingWakeBestEffort\(/g) ?? []).length, 1,
+    "the YouTube wake must not execute twice");
 });
 
 test("xid-admin uses post-commit best-effort for revalidate", () => {

@@ -422,13 +422,14 @@ export async function rebuildMemberSuggestions(
     });
   } catch (error) {
     if (signal?.aborted) throw error;
-    console.warn(
-      JSON.stringify({
+    try {
+      console.warn(JSON.stringify({
         service: "member-suggestions-v2",
         result: "v1_fallback_publish_error",
-        error_name: error instanceof Error ? error.name : "UnknownError",
-      }),
-    );
+      }));
+    } catch {
+      // A V2 diagnostic sink must never abort successfully committed V1 work.
+    }
   }
 
   const liveKeys = committed.map((artifact) => artifact.objectKey);

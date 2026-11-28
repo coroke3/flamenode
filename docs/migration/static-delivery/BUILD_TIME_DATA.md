@@ -1,7 +1,7 @@
 # Build-Time Public Data & Delivery (D-09)
 
 > Status: Draft (MIG-0409, PR #323). Nothing here is deployed.
-> Last verified: 2026-10-18
+> Last verified: 2026-11-28
 > Source of truth: `docs/migration/OPEN_DECISIONS.md` (D-06, D-09), `docs/migration/ZERO_1102.md` (§1, §3, §5), `docs/migration/PHASE_4_5_SPEC.md` §MIG-0409
 
 Every number below is either measured (with the command that produced it) or marked
@@ -94,6 +94,30 @@ check ever runs more often. Re-derive both when Workers Builds timing replaces t
 2. Push 5 empty commits to `probe/u03-build`; record each build's duration from the build log.
 3. Put the 5 durations in this table, recompute `m`, the daily cap and the interval.
 4. Delete the project (Settings → Delete) and the branch.
+
+### Build request marker (MIG-0516; pending review, not deployed)
+
+A mutation-driven, non-empty `buildStaticRebuildQueueBatch` appends **one** D1 statement to its atomic batch, after the queue's bulk UPSERT chunks:
+
+```sql
+UPDATE public_build_state
+SET requested_at = MAX(requested_at + 1, last_hook_at + 1, ?)
+WHERE id = 1;
+```
+
+The bound timestamp is **epoch milliseconds** (`Date.now()`), matching `workers/fast-jobs/publicBuildTrigger.ts`; the queue's existing `created_at` / `updated_at` remain epoch **seconds**. The expected row-change count includes one marker row; an absent `id=1` is a failed batch, not a silently lost build request. An empty enqueue makes **zero** statements and leaves `requested_at` unchanged. Same-millisecond mutations increment the prior generation; if an enqueue worker's clock is behind a claimed hook, the marker advances past `last_hook_at` so the hourly scheduler's `requested_at <= last_hook_at` rule cannot suppress the new change. The builder adds **+1 marker statement per non-empty mutation batch**, regardless of queue item count; 101 items become two queue UPSERTs plus one mark before the caller's existing assertions. Audited mutations already assert the expected row changes. Direct best-effort `enqueueStaticRebuildMany` also executes the existing `assertChanges(1)` immediately after the marker in the same D1 batch. Its maximum 256 targets use three queue UPSERTs, one marker and one assertion (five statements); an absent singleton rolls back both queue inserts and updates, logs the fixed failure code, and does not wake the queue. The earlier source mutation remains committed.
+
+#### Actual caller acceptance and remaining caller trace (2026-11-28)
+
+- PR #436 tested source/test HEAD `d1523e2eb7cab258a28f64aa9144a5c73b9f8aed`; [Actions #46058271321](https://github.com/coroke3/flamenode/actions/runs/46058271321) passed both required jobs. The parent Manage-router SA-032 test executes real cookie session, Origin/write admission, writeGuard, CostGuard and D1 adapter paths. It counts standalone executed statements plus every member of each D1 batch, including a rolled-back projection batch.
+- Ten cases passed: admin 12-known-X 42/50; admin 6-new-X 42/50; admin mixed 12 mutation units 42/50; delegate equivalents 43/50. 13 units are rejected before any mutation/projection batch (5 admin / 6 delegate logical statements). With the singleton missing, the 30-statement audited staff mutation commits while the separate 3-statement queue/marker/assertion batch rolls back; the handler remains fail-soft. These are SQLite fixture measurements, not production D1 or Workerd CPU measurements.
+- Slot generation remains owned by MIG-0656 / Draft PR #514. `generateSlotsBatch` processes up to 100 requested rows in sequential chunks of at most 3. Each successful chunk atomically commits slot insertion plus its queue/marker assertions and audit. A later failure after at least one successful chunk preserves those committed chunks and best-effort enqueues `event_slots` and `top_slot_stats` via a separate three-statement bulk batch, then revalidates and returns the partial count. The catch path is not a transaction spanning earlier chunks. No dedicated execution failure-injection test for this partial path was found in the inspected slot tests; no changes were made to the other owner's files, and no request-wide aggregate budget is inferred from per-chunk planning.
+- Exact-call searches for legacy `enqueueAfterVideoCreate` / `enqueueAfterVideoUpdate` found only core definitions, compatibility exports and tests, with no production action caller on the indexed default branch. The isolated 256-target/five-statement test is therefore not treated as a live caller budget. Any future reintroduction must bound event fanout and carry a real caller-level budget test.
+- S3 Workerd CPU evidence remains narrowly deferred per review 6092243478. PR #436 remains Draft pending independent non-builder review, any exact-head follow-up CI, and required human Lead squash authorization. No production D1/Queue/Worker/route/secret/deployment operation.
+
+
+**Production schema evidence (historical):** the [2026-11-12 owner read-only receipt](https://github.com/coroke3/flamenode/pull/436#issuecomment-6818537955) records `0065_public_build_state.sql` applied, the five expected columns and singleton `id=1`; no writes. This clears the schema-evidence condition only, not a fresh production check or deployment approval. A missing table or singleton in the marker batch must fail that batch. The scheduler/credential activation remains separate in [MIG-0410](../work-items/MIG-0410.md); do not run remote D1, deploy hooks, secrets or Workers.
+
 
 ## 3. New and unpublished pages (U04)
 
@@ -333,7 +357,7 @@ Owner-only checkpoint, after explicit permission:
 4. Recompute the `MAX_DATA_BUILDS_PER_DAY` and `MIN_BUILD_INTERVAL_MS` constants against the actual 80% Workers Builds Free-plan budget; stop if one build is ≥4 minutes or exceeds the approved constraints. This is an owner/lead review, not automatic CI completion.
 5. Only after reviewed results and separate production approval may anyone consider a build project or Route cutover; this PR does not request or execute that change.
 
-**Current validation state:** MIG-0509 (code task) is DONE in PR #469 (2026-11-02 integration) once the latest-head GitHub Actions are green and an independent review plus human merge approval are recorded. The 5 Workers Builds measurements, the production `0065` check and credential setup are **owner follow-ups that remain unperformed** (tracked in `OPEN_DECISIONS.md` D-11 follow-up B and `work-items/MIG-0509.md`); they are not performed by an agent.
+**Current validation state:** MIG-0509 (code task) is DONE in PR #469 (2026-11-02 integration). The historical [2026-11-12 read-only owner receipt](https://github.com/coroke3/flamenode/pull/436#issuecomment-6818537955) records production `0065` applied. The 5 Workers Builds measurements and credential setup remain separate owner follow-ups (see `OPEN_DECISIONS.md` D-11 follow-up B, `work-items/MIG-0509.md` and [MIG-0410](../work-items/MIG-0410.md)); this code integration neither performs them nor changes scheduler/production authorization.
 
 ## 6. Sizing from the production counts (one read-only count, 2026-10-18)
 
@@ -356,6 +380,23 @@ R2 because of freshness (Assets change only with a build, ≤ 24/day), not becau
 Static Assets: home, lists / events index / search index JSON (build families of §1), route
 shards, fixed pages and bundles. R2: one HTML per public video / user / event, written by the
 MIG-0411 consumer.
+
+### MIG-0666 — API event artifact Class A PUT budget (estimate, not measurement)
+
+Build-time U01/U02 publishes only `events/index.json` and `events/<id>/release.v1.json`. On the recorded 2026-10-18 production count of **22 public events**, this is **23 candidate objects per build**. An unchanged SHA-256 payload causes **0 Class A PUTs**; R2 comparison/readback GETs are Class B, not included here.
+
+| Scenario | Candidate objects / build | Monthly builds | Worst-case Class A PUTs / month | Against 800,000 / month project target |
+| --- | ---: | ---: | ---: | ---: |
+| Fully unchanged | 23 | 720 (hourly) | 0 | 0% |
+| Every API artifact changes, readback succeeds | 23 | 720 | 16,560 | 2.07% |
+| Every artifact changes, every write requires 3 readback retry PUTs | 23 | 720 | 66,240 | 8.28% |
+| Stress: every 15 minutes, every artifact changes, 3 retries each | 23 | 2,880 | 264,960 | 33.12% |
+| Hypothetical 201 public events, hourly, all change, no retries | 202 | 720 | 145,440 | 18.18% |
+| Hypothetical 201 public events, 15-minute cadence, all change, 3 retries each | 202 | 2,880 | 2,327,040 | 290.88% — exceeds target |
+
+For `N` public release artifacts, the API publisher attempts `N + 1` objects (releases plus the one capped index); the worst-case Class A PUT count is `(N + 1) × builds_per_month × (1 + retry_PUTs)`. The 200-row index cap does **not** cap public release objects or their Class A costs. The 201-event rows are synthetic capacity stress tests, not live event counts or billing measurements. At 15-minute cadence and the allowed three retries, this API family alone would exceed the project target; the publisher must remain nonproduction until an authorized design measures effective change rates and caps or budgets total writers.
+
+This estimate uses the project budget **80% of R2's 1,000,000 Class A operations/month = 800,000**. The 15-minute all-retry stress scenario leaves **535,040 operations** for all *other* R2 writers, including the separate detail HTML pipeline. Therefore this API sub-budget **does not demonstrate that total project Class A usage is below 800,000**: the detail-page worst case below is already above budget independently. Future event count/build cadence must be recomputed and actual Class A writes monitored before any authorized production R2 publication. The build's default invocation remains dry-run/no R2 publication, and `--publish-api-artifacts` requires an explicitly injected bucket; production write credentials and live R2 mutations remain STOP.
 
 R2 reads: each detail page view is one R2 GET (Class B; free 10 M/month ≈ 333,000/day) after one
 KV read and one route shard read. No traffic figures were read, so the volume is stated as that

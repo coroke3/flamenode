@@ -16,6 +16,10 @@ import {
   ALL_PERMISSION_KEYS,
   LEGACY_PERMISSION_KEY_ALIASES,
   canonicalizePermissionKey,
+  safeParseCustomPermissionKeys,
+  getManageStaffRole,
+  resolveStaffPermissionKeys,
+  staffRowHasPermissionKey,
   expandPermissionAliases,
   isValidPermissionKey,
 } from "@flamenode/domain/auth/permissions";
@@ -101,6 +105,48 @@ test("canonicalizePermissionKey and expandPermissionAliases map legacy keys", ()
   assert.deepEqual(expandPermissionAliases("videos.title"), ["video.basics"]);
   assert.deepEqual(expandPermissionAliases("video.basics"), ["video.basics"]);
   assert.deepEqual(expandPermissionAliases("invalid.key"), []);
+});
+
+test("permission alias lookup rejects inherited Object.prototype properties", () => {
+  const inheritedNames = Object.getOwnPropertyNames(Object.prototype);
+  assert.equal(inheritedNames.length, 12);
+  for (const key of inheritedNames) {
+    assert.equal(canonicalizePermissionKey(key), null, key);
+    assert.deepEqual(expandPermissionAliases(key), [], key);
+    assert.deepEqual(
+      safeParseCustomPermissionKeys(JSON.stringify([key]), { allowAdminOnly: true }),
+      [],
+      "stored invalid permission must not resolve: " + key,
+    );
+  }
+  assert.deepEqual(
+    safeParseCustomPermissionKeys(JSON.stringify(["videos.title", "video.basics"]), { allowAdminOnly: true }),
+    ["video.basics"],
+  );
+});
+
+test("SEC-930: invalid stored aliases cannot create a manage role or change valid custom grants", () => {
+  const row = (keys) => ({
+    permission_preset: "custom",
+    custom_permission_keys_json: JSON.stringify(keys),
+  });
+  for (const invalid of Object.getOwnPropertyNames(Object.prototype)) {
+    const invalidOnly = row([invalid]);
+    assert.deepEqual([...resolveStaffPermissionKeys(invalidOnly)], []);
+    assert.equal(getManageStaffRole(invalidOnly), null);
+    assert.equal(staffRowHasPermissionKey(invalidOnly, invalid), false);
+    assert.equal(staffRowHasPermissionKey(invalidOnly, "event.members"), false);
+    const mixed = row([invalid, "videos.title", "video.basics", "event.members", null, {}, "not.a.key"]);
+    assert.deepEqual([...resolveStaffPermissionKeys(mixed)], ["video.basics", "event.members"]);
+    assert.equal(getManageStaffRole(mixed), "editor");
+    assert.equal(staffRowHasPermissionKey(mixed, "videos.title"), true);
+    assert.equal(staffRowHasPermissionKey(mixed, "event.members"), true);
+    assert.equal(staffRowHasPermissionKey(mixed, invalid), false);
+    const explicit = row([invalid, "videos.title", "video.basics", "xid.link_requests"]);
+    assert.deepEqual(safeParseCustomPermissionKeys(explicit.custom_permission_keys_json, { allowAdminOnly: false }), ["video.basics"]);
+    assert.deepEqual(safeParseCustomPermissionKeys(explicit.custom_permission_keys_json, { allowAdminOnly: true }), ["video.basics", "xid.link_requests"]);
+    assert.equal(staffRowHasPermissionKey(explicit, "xid.link_requests"), true);
+  }
 });
 
 test("shouldWarnManageActiveXMismatch detects mismatch with staff list", () => {
