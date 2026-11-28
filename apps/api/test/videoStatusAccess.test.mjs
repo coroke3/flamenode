@@ -807,6 +807,28 @@ test("MIG-0603: commit-time status authorization assertion rolls back on revoked
       sqlite.exec("UPDATE event_staff SET custom_permission_keys_json='[]' WHERE event_id='evA' AND x_user_id='custom_x'")],
     ["custom grant malformed", (sqlite) =>
       sqlite.exec("UPDATE event_staff SET custom_permission_keys_json='{broken' WHERE event_id='evA' AND x_user_id='custom_x'")],
+    ["custom grant grows to 1025 UTF-8 bytes", (sqlite) => {
+      const raw = JSON.stringify(["video.status", "x".repeat(1006)]);
+      assert.equal(Buffer.byteLength(raw, "utf8"), 1025);
+      sqlite.prepare("UPDATE event_staff SET custom_permission_keys_json=? WHERE event_id='evA' AND x_user_id='custom_x'").run(raw);
+    }],
+    ["custom grant grows through multibyte content", (sqlite) => {
+      const raw = JSON.stringify(["video.status", "日".repeat(336)]);
+      assert.ok(Buffer.byteLength(raw, "utf8") > 1024 && raw.length < 1024);
+      sqlite.prepare("UPDATE event_staff SET custom_permission_keys_json=? WHERE event_id='evA' AND x_user_id='custom_x'").run(raw);
+    }],
+    ...[JSON.stringify(["unrelated", "x".repeat(2048)]), "[" + "x".repeat(2048)].map((raw, i) =>
+      ["custom grant oversized with a separate owner grant " + i, (sqlite) => {
+        insert(sqlite, "x_users", { id: "commit_backup_x", x_name: "backup", approval_status: "approved" });
+        insert(sqlite, "x_user_account_links", {
+          x_user_id: "commit_backup_x", auth_user_id: "u_custom", link_role: "manager",
+        });
+        insert(sqlite, "event_staff", {
+          id: "commit-backup-staff", event_id: "evA", x_user_id: "commit_backup_x",
+          display_name: "Backup", permission_preset: "owner",
+        });
+        sqlite.prepare("UPDATE event_staff SET custom_permission_keys_json=? WHERE event_id='evA' AND x_user_id='custom_x'").run(raw);
+      }]),
     ["actor banned after preflight", (sqlite) =>
       sqlite.exec("UPDATE user SET is_banned=1 WHERE id='u_mgr'")],
     ["site-admin role revoked after preflight", (sqlite) =>
@@ -884,6 +906,8 @@ test("MIG-0603: commit-time status assertion accepts current canonical preset an
     ["reviewer", { id: "u_rev", role: "user" }, false],
     ["owner", { id: "u_owner", role: "user" }, false],
     ["custom", { id: "u_custom", role: "user" }, true],
+    ["custom exact ASCII cap", { id: "u_custom", role: "user" }, JSON.stringify(["video.status", "x".repeat(1005)])],
+    ["custom exact UTF-8 cap", { id: "u_custom", role: "user" }, JSON.stringify(["video.status", "日".repeat(335)])],
     ["site admin", { id: "u_admin", role: "admin" }, false],
   ]) {
     const sqlite = createSqlite();
@@ -891,8 +915,11 @@ test("MIG-0603: commit-time status assertion accepts current canonical preset an
       seed(sqlite);
       sqlite.exec('UPDATE "user" SET is_tos_accepted=1');
       enableStatusCostGuard(sqlite);
-      if (custom) sqlite.exec(`UPDATE event_staff SET custom_permission_keys_json='["video.status"]'
-        WHERE event_id='evA' AND x_user_id='custom_x'`);
+      if (custom) {
+        const raw = typeof custom === "string" ? custom : '["video.status"]';
+        if (typeof custom === "string") assert.equal(Buffer.byteLength(raw, "utf8"), 1024);
+        sqlite.prepare("UPDATE event_staff SET custom_permission_keys_json=? WHERE event_id='evA' AND x_user_id='custom_x'").run(raw);
+      }
       const d1 = createVideoStatusD1(sqlite);
       const db = drizzle(d1, { schema });
       const prior = await loadManageVideoStatusSnapshot(db, user, "evA", "v1");

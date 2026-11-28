@@ -523,8 +523,13 @@ export function planManageVideoStatusCommitAssertion(
 
   // Custom grants are arrays of permission-key strings. SQL must reject
   // malformed JSON and scalar JSON exactly as the canonical JS resolver does.
-  // Nested CASE prevents json_type() from touching invalid JSON.
-  const safeKeysJson = sql`CASE WHEN json_valid(${eventStaff.custom_permission_keys_json})
+  // Reapply the preload byte cap BEFORE any JSON1 parsing: permissions may
+  // have changed since the read. A separate whole-set check below rejects
+  // oversized custom rows even when another staff row grants the permission.
+  const safeKeysJson = sql`CASE
+    WHEN length(CAST(${eventStaff.custom_permission_keys_json} AS BLOB)) >
+      ${MAX_MANAGE_STATUS_CUSTOM_PERMISSION_JSON_BYTES} THEN '[]'
+    WHEN json_valid(${eventStaff.custom_permission_keys_json})
     THEN CASE WHEN json_type(${eventStaff.custom_permission_keys_json}) = 'array'
       THEN ${eventStaff.custom_permission_keys_json} ELSE '[]' END
     ELSE '[]' END`;
@@ -657,13 +662,19 @@ export function planManageVideoStatusCommitAssertion(
   // LIMIT 257 fail-closed rule. An importer or concurrent manager may add a
   // 257th approved/joined staff row AFTER the authorized preload. A single
   // permission-granting row must not silently authorize an incomplete set.
-  // The inner LIMIT caps D1 work. This is part of the first batch assertion,
-  // never a fourth S3 pre-read; site-admin bypass matches preflight behavior.
+  // Recheck the per-custom-row byte ceiling in this same bounded scan. A
+  // second valid preset must not authorize an oversized custom grant added
+  // after preload. No new D1 pre-read; site-admin bypass is unchanged.
   const staffRowsStillBounded = user.role === "admin"
     ? sql`1 = 1`
     : sql`(
-      SELECT COUNT(*) FROM (
-        SELECT 1 FROM "event_staff" bounded_staff
+      SELECT COUNT(*) <= ${MANAGE_VIDEO_STATUS_STAFF_ROW_LIMIT}
+        AND COALESCE(MAX(oversized_custom), 0) = 0 FROM (
+        SELECT CASE WHEN bounded_staff."permission_preset" = 'custom'
+          AND length(CAST(bounded_staff."custom_permission_keys_json" AS BLOB)) >
+            ${MAX_MANAGE_STATUS_CUSTOM_PERMISSION_JSON_BYTES}
+          THEN 1 ELSE 0 END AS oversized_custom
+        FROM "event_staff" bounded_staff
         INNER JOIN "x_user_account_links" bounded_link
           ON bounded_staff."x_user_id" = trim(bounded_link."x_user_id")
         INNER JOIN "x_users" bounded_x
@@ -673,7 +684,7 @@ export function planManageVideoStatusCommitAssertion(
           AND bounded_x."approval_status" = 'approved'
         LIMIT ${MANAGE_VIDEO_STATUS_STAFF_ROW_LIMIT + 1}
       ) approved_staff
-    ) <= ${MANAGE_VIDEO_STATUS_STAFF_ROW_LIMIT}`;
+    )`;
   // Admin video status is GLOBAL; CURRENT admin body contains no event_id.
   // Manage is event-scoped even for a site admin acting through that route.
   // A prior admin/manage status snapshot contains at most eight unique

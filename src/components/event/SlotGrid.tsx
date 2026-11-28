@@ -32,6 +32,8 @@ import { areSlotsInSamePart } from "@/lib/utils/slotGroupingCore";
 import type { SlotViewerRelation } from "@/lib/slots/slotIdentityCore";
 import { redirectForGuardReason as redirectForGuard } from "@/lib/client/guardRedirect";
 import { normalizeXId } from "@/lib/utils/xid";
+import { ACTIVE_X_CHANGED_EVENT } from "@/lib/client/activeXSwitchEvents";
+import { readPersistedSlotDisplayName, persistSlotDisplayName, reusableSlotDisplayName } from "@/lib/slots/slotDisplayNameStorage";
 import { computeFloatingMenuPosition } from "@/lib/ui/floatingMenuPosition";
 import { buildConsecutiveSlotGuidance } from "@/lib/slots/slotGuidance";
 import {
@@ -112,7 +114,6 @@ type ActionMenuState = {
 };
 
 const SLOT_PREVIEW_EVENT = "flamenode:slot-preview";
-const LEGACY_SLOT_DISPLAY_NAME_KEY = "fn:lastSlotDisplayName";
 const COMMUNICATION_ERROR_MESSAGE =
   "通信エラーが発生しました。状態を再取得してもう一度お試しください。";
 
@@ -130,26 +131,12 @@ async function runSlotAction<T>(
   }
 }
 
-function slotDisplayNameStorageKey(viewerXId: string | null): string {
-  const normalized = normalizeXId(viewerXId ?? "");
-  return normalized
-    ? `${LEGACY_SLOT_DISPLAY_NAME_KEY}:${normalized}`
-    : `${LEGACY_SLOT_DISPLAY_NAME_KEY}:unassigned`;
-}
-
 function readSavedSlotDisplayName(viewerXId: string | null): string {
   if (typeof window === "undefined") return "";
-  try {
-    const normalizedViewerXId = normalizeXId(viewerXId ?? "");
-    const scopedKey = slotDisplayNameStorageKey(viewerXId);
-    const scoped = window.localStorage.getItem(scopedKey);
-    if (scoped) return scoped;
-    if (normalizedViewerXId) return "";
-    const legacy = window.localStorage.getItem(LEGACY_SLOT_DISPLAY_NAME_KEY);
-    return legacy ?? "";
-  } catch {
-    return "";
-  }
+  return readPersistedSlotDisplayName(
+    normalizeXId(viewerXId ?? ""),
+    (key) => window.localStorage.getItem(key),
+  );
 }
 
 function formatBreakDetail(end: number | null, start: number | null): string | null {
@@ -257,6 +244,8 @@ export function SlotGrid({
   const [reserveDisplayName, setReserveDisplayName] = React.useState<string>("");
   const [reserveCount, setReserveCount] = React.useState("1");
   const [savedName, setSavedName] = React.useState<string>("");
+  // Retire pending client completions after an Active X authority transition.
+  const viewerGeneration = React.useRef(0);
   const eventMaxSlots = normalizeMaxSlotsPerVideo(maxSlotsPerVideo);
   const effectiveMaxSlots = operatorOverrideAllowed
     ? MAX_SLOTS_PER_VIDEO
@@ -279,18 +268,27 @@ export function SlotGrid({
   );
 
   React.useEffect(() => {
-    setError(null);
-    setSuccess(null);
-    setReservedSlotId(null);
-    setConfirmReleaseId(null);
-    setConfirmExtend(null);
-    setConfirmMerge(null);
-    setReserveTarget(null);
-    setActionMenu(null);
-    setMergeDisplayName("");
-    setReserveDisplayName("");
-    setReserveCount("1");
+    const clearViewerPrivateUi = () => {
+      viewerGeneration.current += 1;
+      setError(null);
+      setSuccess(null);
+      setReservedSlotId(null);
+      setConfirmReleaseId(null);
+      setConfirmExtend(null);
+      setConfirmMerge(null);
+      setReserveTarget(null);
+      setActionMenu(null);
+      setMergeDisplayName("");
+      setReserveDisplayName("");
+      setReserveCount("1");
+      setSavedName("");
+    };
+    clearViewerPrivateUi();
     setSavedName(readSavedSlotDisplayName(viewerXId));
+    // A successful Active X switch must clear an already-open dialog even
+    // before the parent overlay supplies a different viewerXId.
+    window.addEventListener(ACTIVE_X_CHANGED_EVENT, clearViewerPrivateUi);
+    return () => window.removeEventListener(ACTIVE_X_CHANGED_EVENT, clearViewerPrivateUi);
   }, [viewerXId]);
 
   React.useEffect(() => {
@@ -428,7 +426,7 @@ export function SlotGrid({
     setError(null);
     setSuccess(null);
     setReserveTarget({ slot, label: formatSlotLabel(slot) });
-    setReserveDisplayName(savedName);
+    setReserveDisplayName(reusableSlotDisplayName(normalizeXId(viewerXId ?? ""), savedName));
     setReserveCount("1");
   };
   const previewSlot = React.useCallback((slotId: string) => {
@@ -455,19 +453,23 @@ export function SlotGrid({
     if (operatorOverrideRequired) fd.set("operator_override", "1");
     const dn = displayName.trim();
     if (dn) {
-      try {
-        window.localStorage.setItem(slotDisplayNameStorageKey(viewerXId), dn);
-        setSavedName(dn);
-      } catch {
-        // localStorage 利用不可な環境では何もしない
-      }
+      // Keep the current-dialog preference in memory even for Discord-only viewers.
+      // Never persist an unassigned viewer or import ambiguous legacy names.
+      setSavedName(reusableSlotDisplayName(normalizeXId(viewerXId ?? ""), dn));
+      persistSlotDisplayName(
+        normalizeXId(viewerXId ?? ""),
+        dn,
+        (key, value) => window.localStorage.setItem(key, value),
+      );
     }
+    const submittedGeneration = viewerGeneration.current;
     startTransition(async () => {
       const result = await runSlotAction(() => reserveSlot(fd), () => {
+        if (submittedGeneration !== viewerGeneration.current) return;
         setError(COMMUNICATION_ERROR_MESSAGE);
         router.refresh();
       });
-      if (!result) return;
+      if (submittedGeneration !== viewerGeneration.current || !result) return;
       if (!result.ok) {
         if (redirectForGuardReason(result.reason)) return;
         setError(result.message ?? "枠の確保に失敗しました。");
@@ -499,12 +501,14 @@ export function SlotGrid({
     setSuccess(null);
     const fd = new FormData();
     fd.set("slot_id", slotId);
+    const submittedGeneration = viewerGeneration.current;
     startTransition(async () => {
       const result = await runSlotAction(() => releaseOwnSlot(fd), () => {
+        if (submittedGeneration !== viewerGeneration.current) return;
         setError(COMMUNICATION_ERROR_MESSAGE);
         router.refresh();
       });
-      if (!result) return;
+      if (submittedGeneration !== viewerGeneration.current || !result) return;
       if (!result.ok) {
         if (redirectForGuardReason(result.reason)) return;
         setError(result.message ?? "枠の解放に失敗しました。");
@@ -530,12 +534,14 @@ export function SlotGrid({
     fd.set("slot_id", slotId);
     fd.set("direction", direction);
     if (operatorOverrideRequired) fd.set("operator_override", "1");
+    const submittedGeneration = viewerGeneration.current;
     startTransition(async () => {
       const result = await runSlotAction(() => extendOwnSlotGroup(fd), () => {
+        if (submittedGeneration !== viewerGeneration.current) return;
         setError(COMMUNICATION_ERROR_MESSAGE);
         router.refresh();
       });
-      if (!result) return;
+      if (submittedGeneration !== viewerGeneration.current || !result) return;
       if (!result.ok) {
         if (redirectForGuardReason(result.reason)) return;
         setError(result.message ?? "枠の拡張に失敗しました。");
@@ -566,12 +572,14 @@ export function SlotGrid({
     fd.set("gap_slot_id", gapSlotId);
     fd.set("display_name", displayName);
     if (operatorOverrideRequired) fd.set("operator_override", "1");
+    const submittedGeneration = viewerGeneration.current;
     startTransition(async () => {
       const result = await runSlotAction(() => mergeOwnSlotGroups(fd), () => {
+        if (submittedGeneration !== viewerGeneration.current) return;
         setError(COMMUNICATION_ERROR_MESSAGE);
         router.refresh();
       });
-      if (!result) return;
+      if (submittedGeneration !== viewerGeneration.current || !result) return;
       if (!result.ok) {
         if (redirectForGuardReason(result.reason)) return;
         setError(result.message ?? "枠の結合に失敗しました。");

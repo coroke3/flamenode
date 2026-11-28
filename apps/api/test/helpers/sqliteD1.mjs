@@ -45,11 +45,22 @@ export const SCHEMA = `
     created_at INTEGER, updated_at INTEGER);
   CREATE UNIQUE INDEX static_rebuild_queue_active ON static_rebuild_queue(target_type, target_id)
     WHERE status IN ('pending', 'processing');
+  -- MIG-0516: mirror migration 0065 exactly in SQLite mutation test worlds.
+  CREATE TABLE public_build_state (
+    id INTEGER NOT NULL PRIMARY KEY CHECK (id = 1),
+    requested_at INTEGER NOT NULL DEFAULT 0,
+    last_hook_at INTEGER NOT NULL DEFAULT 0,
+    hooks_day TEXT NOT NULL DEFAULT '',
+    hooks_today INTEGER NOT NULL DEFAULT 0
+  );
+  INSERT INTO public_build_state (id) VALUES (1);
   CREATE TABLE events (${EVENT_COLUMNS.map((c) => (c === "id" ? "id TEXT PRIMARY KEY" : c)).join(", ")});
 `;
 
 export function createAdminD1({ onFirst } = {}) {
-  const stats = { reads: 0, batches: 0, prepares: 0 };
+  // Count SQL actually issued to the D1 fake; constructing a prepared SQL
+  // object is not itself a D1 query. Batch members each consume one query.
+  const stats = { reads: 0, batches: 0, batchStatements: 0, prepares: 0 };
   const sqlite = new DatabaseSync(":memory:");
   sqlite.exec(SCHEMA);
   const make = (sql, params) => ({
@@ -85,6 +96,7 @@ export function createAdminD1({ onFirst } = {}) {
     },
     batch: async (statements) => {
       stats.batches += 1;
+      stats.batchStatements += statements.length;
       sqlite.exec("BEGIN");
       try {
         const results = [];
