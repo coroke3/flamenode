@@ -1,7 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import vm from "node:vm";
+import * as ts from "typescript";
+import { Hono } from "hono";
+import { createAdminRoutes } from "../src/routes/admin/index.ts";
+import { createAdminD1, seedBase } from "./helpers/sqliteD1.mjs";
 import { app } from "../src/app.ts";
 import { CostGuardBannerResponseSchema } from "@flamenode/contracts";
+import { isOperationMode } from "@flamenode/domain/admin";
 import { readOperationModeKvMirror, resetOperationModeCachesForTests, resolvePublicOperationMode } from "../src/routes/live/operationMode.ts";
 import { cookie, createD1, createSqlite } from "./support/personalHarness.mjs";
 import { seed as seedAdminRead } from "./support/adminReadSeed.mjs";
@@ -470,4 +477,561 @@ test("MIG-0661 T09: oversized mirror with bad mode or missing updated_at stays n
     assert.deepEqual(await requestWith({ DB: unavailableD1({ count: 0 }), KV: kvResponse(text, kv) }),
       { mode: "normal", reason: null });
   }
+});
+
+test("MIG-0661 T09 / #916: oversized root properties honor nested keys, last key wins and escaped spelling", async () => {
+  const large = "X".repeat(70 * 1024);
+  const cases = [
+    ['{"mode":"normal","updated_at":1,"reason":"' + large + '","mode":"maintenance"}', "maintenance"],
+    ['{"other":{"mode":"normal"},"mode":"maintenance","updated_at":1,"reason":"' + large + '"}', "maintenance"],
+    ['{"reason":"' + large + '","updated_at":1,"\\u006dode":"static_only"}', "static_only"],
+    ['{"mode":"read_only","reason":"' + large + '","updated_at":3}', "read_only"],
+  ];
+  for (const [raw, expected] of cases) {
+    resetOperationModeCachesForTests();
+    const d1 = { count: 0 }, kv = { count: 0 };
+    const env = { DB: unavailableD1(d1), KV: kvResponse(raw, kv) };
+    assert.equal(await resolvePublicOperationMode(env, { allowD1: false }), expected);
+    assert.deepEqual(await requestWith(env), { mode: expected, reason: null });
+    assert.equal(kv.count, 1);
+    assert.equal(d1.count, 0);
+  }
+});
+
+test("MIG-0661 T09 / #916: oversized malformed or invalid last root fields fail closed", async () => {
+  const large = "X".repeat(70 * 1024);
+  const cases = [
+    '{"mode":"maintenance","updated_at":1,"reason":"' + large + '","mode":null}',
+    '{"mode":"maintenance","updated_at":1,"reason":"' + large + '","updated_at":1e999}',
+    '{"mode":"maintenance","updated_at":1,"reason":"' + large + '","extra":[1,]}',
+    '{"mode":"maintenance","updated_at":1,"reason":"' + large + '"}garbage',
+    '{"mode":"maintenance","updated_at":1,"reason":"' + large + '","nested":{"x":1,}}',
+  ];
+  for (const raw of cases) {
+    resetOperationModeCachesForTests();
+    const d1 = { count: 0 }, kv = { count: 0 };
+    assert.deepEqual(await requestWith({ DB: unavailableD1(d1), KV: kvResponse(raw, kv) }),
+      { mode: "normal", reason: null });
+    assert.equal(kv.count, 1);
+    assert.equal(d1.count, 0);
+  }
+});
+
+test("MIG-0661 T09 / #916: oversized finite exponent underflow matches JSON.parse without large JSON.parse", async () => {
+  const hugeExponent = "9".repeat(150);
+  const raw = '{"mode":"maintenance","updated_at":1e-' + hugeExponent
+    + ',"reason":"' + "X".repeat(70 * 1024) + '"}';
+  assert.equal(JSON.parse(raw).updated_at, 0);
+  resetOperationModeCachesForTests();
+  const d1 = { count: 0 }, kv = { count: 0 };
+  const env = { DB: unavailableD1(d1), KV: kvResponse(raw, kv) };
+  assert.equal(await resolvePublicOperationMode(env, { allowD1: false }), "maintenance");
+  assert.deepEqual(await requestWith(env), { mode: "maintenance", reason: null });
+  assert.equal(kv.count, 1);
+  assert.equal(d1.count, 0);
+});
+
+test("MIG-0661 T09 / #916: UTF-8 byte ceiling with multibyte JSON preserves mode and cache", async () => {
+  const limit = 64 * 1024;
+  const prefix = '{"mode":"normal","updated_at":1,"reason":"bounded note","extra":"';
+  const suffix = '","mode":"maintenance"}';
+  const overhead = Buffer.byteLength(prefix + suffix, "utf8");
+  const realParse = JSON.parse;
+  for (const unit of ["\u65e5", "\u{1f680}"]) {
+    const unitBytes = Buffer.byteLength(unit, "utf8");
+    for (const byteSize of [limit - 1, limit, limit + 1]) {
+      const padding = byteSize - overhead;
+      const raw = prefix + unit.repeat(Math.floor(padding / unitBytes))
+        + "x".repeat(padding % unitBytes) + suffix;
+      assert.equal(Buffer.byteLength(raw, "utf8"), byteSize);
+      assert.ok(raw.length < limit, "UTF-16 length alone must not choose the parse path");
+      assert.equal(realParse(raw).mode, "maintenance");
+      resetOperationModeCachesForTests();
+      const d1 = { count: 0 }, kv = { count: 0 };
+      const env = { DB: unavailableD1(d1), KV: kvResponse(raw, kv) };
+      let oversizedParses = 0;
+      let wholeMirrorParses = 0;
+      JSON.parse = (value, ...args) => {
+        if (typeof value === "string" && Buffer.byteLength(value, "utf8") > limit) oversizedParses++;
+        if (value === raw) wholeMirrorParses++;
+        return realParse(value, ...args);
+      };
+      try {
+        assert.equal(await resolvePublicOperationMode(env, { allowD1: false }), "maintenance");
+        assert.deepEqual(await requestWith(env), {
+          mode: "maintenance",
+          reason: byteSize > limit ? null : "bounded note",
+        });
+      } finally {
+        JSON.parse = realParse;
+      }
+      assert.equal(oversizedParses, 0, "request-time JSON.parse input must remain within 64 KiB");
+      assert.equal(wholeMirrorParses, byteSize > limit ? 0 : 1,
+        "at the byte limit use the ordinary parser; above it use the bounded scanner");
+      assert.equal(kv.count, 1, "the live resolver and banner share a mirror");
+      assert.equal(d1.count, 0);
+    }
+  }
+});
+
+test("MIG-0661 T09 / #916: long whitespace and numeric tokens retain JSON grammar and mode", async () => {
+  const spaces = " \t\r\n".repeat(18 * 1024);
+  const digits = "9".repeat(70 * 1024);
+  const prefix = '{"mode":"maintenance","updated_at":';
+  const cases = [
+    [prefix + spaces + '1}', 1],
+    [prefix + '-1e-' + digits + '}', -0],
+    [prefix + '1,"extra":[' + digits + ']}', 1],
+    [prefix + '1,"extra":[0.' + digits + ']}', 1],
+    [prefix + '1,"extra":[1e-' + digits + ']}', 1],
+    [prefix + '1,' + spaces + '"extra":[01]}', null],
+    [prefix + '1,' + spaces + '"extra":[1.]}', null],
+    [prefix + '1,' + spaces + '"extra":[1e+]}', null],
+    [prefix + '1,' + spaces + '\u00a0"extra":0}', null],
+    [prefix + '1,' + spaces + '\u2028"extra":0}', null],
+    [prefix + '1e' + digits + '}', null],
+  ];
+  for (const [raw, timestamp] of cases) {
+    assert.ok(Buffer.byteLength(raw, "utf8") > 64 * 1024);
+    if (timestamp !== null) {
+      assert.ok(Object.is(JSON.parse(raw).updated_at, timestamp));
+    } else {
+      // The final case is valid JSON but an invalid non-finite timestamp.
+      if (raw.startsWith(prefix + "1e")) assert.equal(JSON.parse(raw).updated_at, Infinity);
+      else assert.throws(() => JSON.parse(raw), SyntaxError);
+    }
+    resetOperationModeCachesForTests();
+    const d1 = { count: 0 }, kv = { count: 0 };
+    const binding = kvResponse(raw, kv);
+    const env = { DB: unavailableD1(d1), KV: binding };
+    const expectedMode = timestamp === null ? "normal" : "maintenance";
+    assert.equal(await resolvePublicOperationMode(env, { allowD1: false }), expectedMode);
+    assert.deepEqual(await readOperationModeKvMirror(binding), timestamp === null
+      ? null : { mode: "maintenance", updated_at: timestamp, reason: null });
+    assert.deepEqual(await requestWith(env), { mode: expectedMode, reason: null });
+    assert.equal(kv.count, 1);
+    assert.equal(d1.count, 0);
+  }
+});
+
+test("MIG-0661 T09 / #916: dense escaped strings preserve JSON grammar across native batch boundaries", async () => {
+  const large = "X".repeat(70 * 1024);
+  const unicodeEscape = "\\u0061";
+  const simpleEscape = "\\n";
+  const dense = unicodeEscape.repeat(12000);
+  const boundary = simpleEscape.repeat(256);
+  const prefix = '{"mode":"normal","updated_at":1,"reason":"' + large;
+  const suffix = '","\\u006dode":"\\u006daintenance"}';
+  const cases = [
+    [dense, true],
+    ['\\"'.repeat(34000), true],
+    ["\\\\\\/\\b\\f\\n\\r\\t\\uD800\\uDC00".repeat(4000), true],
+    [simpleEscape + large, true],
+    ...[255, 256, 257].flatMap((count) =>
+      [16, 17].map((pad) => [(simpleEscape + "a".repeat(pad)).repeat(count), true])),
+    [boundary + "\\x", false],
+    [boundary + "\\u000Z", false],
+    [boundary + "\\u00", false],
+    [boundary + "\u0001", false],
+    [dense + "\\x", false],
+  ];
+  for (const [contents, valid] of cases) {
+    const raw = prefix + contents + suffix;
+    assert.ok(Buffer.byteLength(raw, "utf8") > 64 * 1024);
+    if (valid) assert.equal(JSON.parse(raw).mode, "maintenance");
+    else assert.throws(() => JSON.parse(raw), SyntaxError);
+    resetOperationModeCachesForTests();
+    const d1 = { count: 0 }, kv = { count: 0 };
+    const binding = kvResponse(raw, kv);
+    const env = { DB: unavailableD1(d1), KV: binding };
+    const expectedMode = valid ? "maintenance" : "normal";
+    assert.equal(await resolvePublicOperationMode(env, { allowD1: false }), expectedMode);
+    assert.deepEqual(await readOperationModeKvMirror(binding), valid
+      ? { mode: "maintenance", updated_at: 1, reason: null } : null);
+    assert.deepEqual(await requestWith(env), { mode: expectedMode, reason: null });
+    assert.equal(kv.count, 1);
+    assert.equal(d1.count, 0);
+  }
+});
+
+test("MIG-0661 T09 / #916: compact nesting stack preserves root identity and grammar through growth", async () => {
+  const pad = "X".repeat(70 * 1024);
+  const prefix = '{"mode":"normal","updated_at":1,"reason":"' + pad + '"';
+  const nested = (depth) => '[{"mode":'.repeat(depth) + '"static_only"' + '}]'.repeat(depth);
+  const deep = nested(32768);
+  const deepArray = "[".repeat(131072) + "0" + "]".repeat(131072);
+  const deepArrayInObject = '{"inside":' + deepArray + '}';
+  const cases = [
+    ...[15, 16, 17, 31, 32, 33, 63, 64, 65, 32768].map((depth) =>
+      [prefix + ',"extra":' + nested(depth) + ',"mode":"maintenance"}', "maintenance", true]),
+    [prefix + ',"extra":' + deepArray + ',"mode":"maintenance"}', "maintenance", true],
+    [prefix + ',"extra":' + deepArrayInObject + ',"mode":"maintenance"}', "maintenance", true],
+    [prefix + ',"extra":[' + deep + ',' + deepArray + '],"mode":"read_only"}', "read_only", true],
+    [prefix + ',"mode":' + deep + ',"mode":"maintenance"}', "maintenance", true],
+    [prefix + ',"updated_at":' + deep + ',"updated_at":1,"mode":"maintenance"}', "maintenance", true],
+    [prefix + ',"mode":"maintenance","mode":' + deep + '}', null, true],
+    [prefix + ',"mode":"maintenance","updated_at":' + deepArray + '}', null, true],
+    [prefix + ',"extra":' + deep.slice(0, -1) + ',"mode":"maintenance"}', null, false],
+    [prefix + ',"extra":' + "[".repeat(32768) + "0," + "]".repeat(32768) + '}', null, false],
+    [prefix + ',"extra":' + '{"x":'.repeat(32768) + "0," + "}".repeat(32768) + '}', null, false],
+    [prefix + ',"extra":' + deep + ',"mode":"maintenance"}x', null, false],
+    [prefix + ',"extra":' + deepArray.slice(0, -1) + '}', null, false],
+    [prefix + ',"extra":' + deepArray + '],"mode":"maintenance"}', null, false],
+    [prefix + ',"extra":[{},[],{"mode":"economy"}],"mode":"static_only"}', "static_only", true],
+  ];
+  for (const [raw, mode, syntaxValid] of cases) {
+    assert.ok(Buffer.byteLength(raw, "utf8") > 64 * 1024);
+    if (syntaxValid) {
+      const reference = JSON.parse(raw);
+      if (mode !== null) {
+        assert.equal(reference.mode, mode);
+        assert.equal(reference.updated_at, 1);
+      } else {
+        assert.ok(typeof reference.mode !== "string" || typeof reference.updated_at !== "number");
+      }
+    } else assert.throws(() => JSON.parse(raw), SyntaxError);
+    resetOperationModeCachesForTests();
+    const d1 = { count: 0 }, kv = { count: 0 };
+    const binding = kvResponse(raw, kv);
+    const env = { DB: unavailableD1(d1), KV: binding };
+    const expectedMode = mode ?? "normal";
+    assert.equal(await resolvePublicOperationMode(env, { allowD1: false }), expectedMode);
+    assert.deepEqual(await readOperationModeKvMirror(binding), mode === null
+      ? null : { mode, updated_at: 1, reason: null });
+    assert.deepEqual(await requestWith(env), { mode: expectedMode, reason: null });
+    assert.equal(kv.count, 1);
+    assert.equal(d1.count, 0);
+  }
+});
+
+test("MIG-0661 T09 / #916: scalar array batches preserve grammar at batch and fallback boundaries", async () => {
+  const pad = "X".repeat(70 * 1024);
+  const prefix = '{"mode":"normal","updated_at":1,"reason":"' + pad + '","extra":';
+  const suffix = ',"mode":"maintenance"}';
+  const dense = "0,-1.2e+4,true,false,null,".repeat(3000);
+  const denseStrings = '"","日本語","🚀","a,b","{}[]",'.repeat(3000);
+  const cases = [
+    ...[0, 1, 2, 3, 255, 256, 257, 258, 511, 512, 513].map((n) =>
+      ["[0," + "1,".repeat(n) + "2]", true]),
+    ["[0," + dense + "0]", true],
+    ...[0, 1, 2, 3, 255, 256, 257, 258, 511, 512, 513].map((n) =>
+      ["[0," + '"text",'.repeat(n) + '"last"]', true]),
+    ["[0," + denseStrings + "0]", true],
+    ["[0," + denseStrings + '"' + "x".repeat(32) + '","' + "y".repeat(33) + '","\\u0061",{},[1,2]]', true],
+    ...['"\\x"', '"a\u0001b"', '"a\u0000b"', '"unterminated', '"x",', '"x" "y"', '"x"\u00a0', ""].map((tail) =>
+      ["[0," + denseStrings + tail + "]", false]),
+    ["[0," + dense + '[],{},[1,2],"text",{"mode":"static_only"}]', true],
+    ["[0,1,2," + "9".repeat(70000) + ",0,1]", true],
+    ["[0,1,2,0.12345678901234567,1e+1234567,-0,1]", true],
+    ["[0,1,2," + " ".repeat(17) + "3,4]", true],
+    ["[0,1,2,\t\r\n3,4]", true],
+    ...["01","-01","1.","1e+","truex","nullx","0x1","0\u00a0","0\u2028","", "0,"].map((tail) =>
+      ["[0," + dense + tail + "]", false]),
+    ["[0," + dense + "0]x", false],
+  ];
+  for (const [array, valid] of cases) {
+    const raw = prefix + array + suffix;
+    assert.ok(Buffer.byteLength(raw, "utf8") > 64 * 1024);
+    if (valid) assert.equal(JSON.parse(raw).mode, "maintenance");
+    else assert.throws(() => JSON.parse(raw), SyntaxError);
+    resetOperationModeCachesForTests();
+    const d1 = { count: 0 }, kv = { count: 0 };
+    const binding = kvResponse(raw, kv);
+    const env = { DB: unavailableD1(d1), KV: binding };
+    const expectedMode = valid ? "maintenance" : "normal";
+    assert.equal(await resolvePublicOperationMode(env, { allowD1: false }), expectedMode);
+    assert.deepEqual(await readOperationModeKvMirror(binding), valid
+      ? { mode: "maintenance", updated_at: 1, reason: null } : null);
+    assert.deepEqual(await requestWith(env), { mode: expectedMode, reason: null });
+    assert.equal(kv.count, 1);
+    assert.equal(d1.count, 0);
+  }
+});
+
+test("MIG-0661 T09 / #916: nested object scalar batches never skip root mode or timestamp", async () => {
+  const pad = "X".repeat(70 * 1024);
+  const prefix = '{"mode":"normal","updated_at":1,"reason":"' + pad + '"';
+  const members = '"mode":"static_only","updated_at":0,"x":true,"y":null,"":-0,';
+  const dense = members.repeat(2000);
+  const nested = (s) => prefix + ',"extra":{"first":1,' + s + '},"mode":"maintenance"}';
+  const cases = [
+    ...[0, 1, 2, 3, 255, 256, 257, 258, 511, 512, 513].map((count) =>
+      [nested('"x":1,'.repeat(count) + '"last":0'), "maintenance", 1, true]),
+    [nested(dense + '"last":0'), "maintenance", 1, true],
+    [nested(dense + '"\\u006dode":"static_only","x":"\\u0061","nested":{"mode":"static_only"},"array":[1,2,3]'), "maintenance", 1, true],
+    [nested(dense + '"' + "x".repeat(33) + '":"' + "y".repeat(33) + '","large":' + "9".repeat(70000)), "maintenance", 1, true],
+    [nested(dense + '"x" :' + " ".repeat(17) + '0,"y":-1.2e+1234567'), "maintenance", 1, true],
+    [nested(dense + '"🚀":"日本語","":0'), "maintenance", 1, true],
+    [prefix + ',' + dense + '"mode":"read_only","updated_at":2}', "read_only", 2, true],
+    [prefix + ',' + dense + '"x":0}', "static_only", 0, true],
+    [prefix + ',' + dense + '"mode":null}', null, null, true],
+    [prefix + ',' + dense + '"updated_at":null}', null, null, true],
+    ...['"x":01','"x":1.','"x":1e+','"x":truex','"x":nullx','"x":0\u00a0','"x":0\u2028','"x":0,','',
+      '"x":"\\x"','"\\u000Z":0','"x":"a\u0001b"','"x" 0','"x":0 "y":1'].map((tail) =>
+      [nested(dense + tail), null, null, false]),
+  ];
+  for (const [raw, mode, updatedAt, syntaxValid] of cases) {
+    assert.ok(Buffer.byteLength(raw, "utf8") > 64 * 1024);
+    if (syntaxValid) {
+      const reference = JSON.parse(raw);
+      if (mode !== null) {
+        assert.equal(reference.mode, mode);
+        assert.equal(reference.updated_at, updatedAt);
+      } else {
+        assert.ok(reference.mode === null || reference.updated_at === null);
+      }
+    } else assert.throws(() => JSON.parse(raw), SyntaxError);
+    resetOperationModeCachesForTests();
+    const d1 = { count: 0 }, kv = { count: 0 };
+    const binding = kvResponse(raw, kv);
+    const env = { DB: unavailableD1(d1), KV: binding };
+    const expectedMode = mode ?? "normal";
+    assert.equal(await resolvePublicOperationMode(env, { allowD1: false }), expectedMode);
+    assert.deepEqual(await readOperationModeKvMirror(binding), mode === null
+      ? null : { mode, updated_at: updatedAt, reason: null });
+    assert.deepEqual(await requestWith(env), { mode: expectedMode, reason: null });
+    assert.equal(kv.count, 1);
+    assert.equal(d1.count, 0);
+  }
+});
+
+
+const COST_GUARD_SITE = "https://app.flamenode.example";
+const COST_GUARD_ADMIN = {
+  id: "admin-1", name: "Admin", email: null, image: null,
+  role: "admin", is_banned: 0, is_tos_accepted: 1, active_x_user_id: null,
+};
+
+function setupCostGuardMirrorWriter({ settings = "normal", failKvPut = false } = {}) {
+  const { db, sqlite, stats } = createAdminD1();
+  seedBase(sqlite, { role: "admin", settings });
+  const kvPuts = [];
+  const hono = new Hono();
+  hono.route("/api/admin", createAdminRoutes({ session: async (c, next) => {
+    c.set("user", COST_GUARD_ADMIN);
+    c.set("sessionState", "user");
+    await next();
+  } }));
+  const env = {
+    DB: db,
+    NEXT_PUBLIC_SITE_URL: COST_GUARD_SITE,
+    KV: {
+      put: async (key, value) => {
+        if (failKvPut) throw new Error("private KV failure must not escape");
+        kvPuts.push([key, value]);
+      },
+    },
+  };
+  const request = (path, body) => hono.request("/api/admin" + path, {
+    method: "POST",
+    headers: { "content-type": "application/json", Origin: COST_GUARD_SITE },
+    body: JSON.stringify(body),
+  }, env);
+  return { sqlite, stats, kvPuts, request };
+}
+
+async function loadCurrentKvMirrorModule({ failPut = false } = {}) {
+  const mirrorSource = await readFile(new URL("../../../src/lib/operationMode/kvMirror.ts", import.meta.url), "utf8");
+  const coreSource = await readFile(new URL("../../../src/lib/operationMode/kvMirrorCore.ts", import.meta.url), "utf8");
+  const actionSource = await readFile(new URL("../../../src/lib/actions/cost-guard.ts", import.meta.url), "utf8");
+  const state = { puts: [], gets: 0, getOptions: [], raw: null, failGet: false };
+  let now = 1_800_000_000_000;
+  class ClockDate extends Date {
+    static now() { return now; }
+  }
+  const compile = (source) => ts.transpileModule(source, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const coreModule = { exports: {} };
+  vm.runInNewContext(compile(coreSource), {
+    module: coreModule,
+    exports: coreModule.exports,
+    require: (id) => {
+      if (id === "./resolve.ts") return { isOperationMode };
+      throw new Error("unexpected kvMirrorCore dependency: " + id);
+    },
+  }, { timeout: 1_000 });
+  const env = {
+    KV: {
+      put: async (key, value) => {
+        if (failPut) throw new Error("private KV put failure");
+        state.puts.push([key, value]);
+      },
+      get: async (key, options) => {
+        state.gets += 1;
+        state.getOptions.push({ key, ...options });
+        if (state.failGet) throw new Error("private KV get failure");
+        return state.raw;
+      },
+    },
+  };
+  const mirrorModule = { exports: {} };
+  vm.runInNewContext(compile(mirrorSource), {
+    module: mirrorModule,
+    exports: mirrorModule.exports,
+    Date: ClockDate,
+    require: (id) => {
+      if (id === "server-only") return {};
+      if (id === "@/lib/cloudflare") return { getEnv: () => env };
+      if (id === "./kvMirrorCore") return coreModule.exports;
+      throw new Error("unexpected kvMirror dependency: " + id);
+    },
+  }, { timeout: 1_000 });
+  return {
+    module: mirrorModule.exports,
+    state,
+    actionSource,
+    setNow: (value) => { now = value; },
+    getNow: () => now,
+  };
+}
+
+test("MIG-0661 SA-016: Hono writer captures bounded KV PUT bytes for every mode and 500 UTF-16-unit reason edge", async () => {
+  const x = setupCostGuardMirrorWriter();
+  const reasons = [
+    ["control", "\u0001".repeat(500)],
+    ["lone-surrogate", "\ud800".repeat(500)],
+    ["japanese", "日".repeat(500)],
+    ["astral", "💩".repeat(250)],
+    ["backslash", "\\".repeat(500)],
+  ];
+  try {
+    for (const mode of ["normal", "economy", "read_only", "static_only"]) {
+      for (const [label, reason] of reasons) {
+        const response = await x.request("/cost-guard/mode", { mode, reason });
+        assert.equal(response.status, 200, mode + "/" + label);
+        const [key, raw] = x.kvPuts.at(-1);
+        const parsed = JSON.parse(raw);
+        assert.equal(key, "operation_mode:mirror");
+        assert.deepEqual(Object.keys(parsed), ["mode", "reason", "updated_at"],
+          "Hono writer keeps its established mode/reason/updated_at byte order");
+        assert.equal(parsed.mode, mode);
+        assert.equal(parsed.reason, reason);
+        assert.ok(Number.isSafeInteger(parsed.updated_at));
+        assert.ok(Buffer.byteLength(raw, "utf8") < 64 * 1024);
+      }
+    }
+    const beforeRejected = x.kvPuts.length;
+    const rejected = await x.request("/cost-guard/mode", {
+      mode: "economy", reason: "\u0001".repeat(501),
+    });
+    assert.equal(rejected.status, 400);
+    assert.equal(x.kvPuts.length, beforeRejected, "501 UTF-16 units are rejected before the KV mirror write");
+  } finally {
+    x.sqlite.close();
+  }
+});
+
+test("MIG-0661 SA-017: maintenance enable/disable preserves non-maintenance modes in the mirror", async () => {
+  const cases = [
+    { settings: "normal", value: "1", expected: "maintenance", reason: "保守開始" },
+    { settings: "maintenance", value: "0", expected: "normal", reason: "保守解除" },
+    { settings: "economy", value: "0", expected: "economy", reason: "節約維持" },
+    { settings: "read_only", value: "0", expected: "read_only", reason: "読取専用維持" },
+    { settings: "static_only", value: "0", expected: "static_only", reason: "静的配信維持" },
+  ];
+  for (const item of cases) {
+    const x = setupCostGuardMirrorWriter({ settings: item.settings });
+    try {
+      const response = await x.request("/cost-guard/maintenance", {
+        is_maintenance_mode: item.value, reason: "  " + item.reason + "  ",
+      });
+      assert.equal(response.status, 200, JSON.stringify(item));
+      const [key, raw] = x.kvPuts[0];
+      const parsed = JSON.parse(raw);
+      assert.equal(key, "operation_mode:mirror");
+      assert.deepEqual(Object.keys(parsed), ["mode", "reason", "updated_at"]);
+      assert.equal(parsed.mode, item.expected);
+      assert.equal(parsed.reason, item.reason, "writer receives the trimmed canonical reason");
+      assert.ok(Number.isSafeInteger(parsed.updated_at));
+    } finally {
+      x.sqlite.close();
+    }
+  }
+});
+
+test("MIG-0661 SA-016: failed Hono KV PUT remains best-effort after the D1 commit", async () => {
+  const x = setupCostGuardMirrorWriter({ failKvPut: true });
+  try {
+    const response = await x.request("/cost-guard/mode", { mode: "economy", reason: "writer failure" });
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.ok, true);
+    assert.match(body.warning, /KV複製の更新に失敗/);
+    const row = x.sqlite.prepare("SELECT operation_mode, cost_guard_reason FROM system_settings WHERE id = 'default'").get();
+    assert.equal(row.operation_mode, "economy");
+    assert.equal(row.cost_guard_reason, "writer failure");
+  } finally {
+    x.sqlite.close();
+  }
+});
+
+test("MIG-0661 CURRENT SA-016/017: actual mirror module serializes its own key order and cache miss/warm/expiry/error TTL", async () => {
+  const current = await loadCurrentKvMirrorModule();
+  const mirror = {
+    mode: "economy",
+    updated_at: 1_800_000_000,
+    reason: "\ud800".repeat(500),
+  };
+  await current.module.writeOperationModeKvMirror(mirror);
+  assert.equal(current.state.puts.length, 1);
+  const [key, raw] = current.state.puts[0];
+  assert.equal(key, "operation_mode:mirror");
+  assert.deepEqual(Object.keys(JSON.parse(raw)), ["mode", "updated_at", "reason"],
+    "CURRENT writer keeps its established mode/updated_at/reason byte order");
+  assert.deepEqual(JSON.parse(raw), mirror);
+  assert.ok(Buffer.byteLength(raw, "utf8") < 64 * 1024);
+
+  assert.deepEqual(await current.module.readOperationModeKvMirror(), mirror,
+    "a successful write warms the isolate-local mirror cache");
+  assert.equal(current.state.gets, 0);
+
+  const base = current.getNow();
+  const expired = { mode: "read_only", updated_at: 1_800_000_030, reason: "KV after expiry" };
+  current.state.raw = JSON.stringify(expired);
+  current.setNow(base + 30_001);
+  // The parser constructs its result inside a separate vm realm. Compare
+  // its own fields in this realm, retaining strict value/key assertions.
+  const expiredRead = await current.module.readOperationModeKvMirror();
+  assert.ok(expiredRead);
+  assert.deepEqual({ ...expiredRead }, expired,
+    "cache expiry performs one KV read and accepts the current writer key order");
+  assert.deepEqual(current.state.getOptions[0], { key: "operation_mode:mirror", cacheTtl: 30 });
+  assert.equal(current.state.gets, 1);
+  const warmRead = await current.module.readOperationModeKvMirror();
+  assert.equal(warmRead, expiredRead, "warm cache reuses the parsed receipt");
+  assert.deepEqual({ ...warmRead }, expired,
+    "the successful miss read warms the cache");
+  assert.equal(current.state.gets, 1);
+
+  current.state.failGet = true;
+  current.setNow(base + 60_002);
+  assert.equal(await current.module.readOperationModeKvMirror(), null);
+  assert.equal(current.state.gets, 2);
+  assert.equal(await current.module.readOperationModeKvMirror(), null,
+    "failed KV read is cached for the shorter error TTL");
+  assert.equal(current.state.gets, 2);
+
+  current.state.failGet = false;
+  const recovered = { mode: "maintenance", updated_at: 1_800_000_036, reason: "recovered" };
+  current.state.raw = JSON.stringify(recovered);
+  current.setNow(base + 65_003);
+  const recoveredRead = await current.module.readOperationModeKvMirror();
+  assert.ok(recoveredRead);
+  assert.deepEqual({ ...recoveredRead }, recovered,
+    "error TTL expiry retries the KV read and preserves maintenance mode");
+  assert.equal(current.state.gets, 3);
+
+  const action = current.actionSource;
+  assert.match(action, /export async function setCostGuardMode[\s\S]*?syncOperationModeKvMirrorBestEffort\(\{ mode, reason, updatedAt: now \}\)/);
+  assert.match(action, /export async function setMaintenanceMode[\s\S]*?syncOperationModeKvMirrorBestEffort\(\{ mode: nextMode, reason, updatedAt: now \}\)/);
+  assert.match(action, /writeOperationModeKvMirror\(\{\s*mode: input\.mode,\s*updated_at: input\.updatedAt,\s*reason: input\.reason,/);
+});
+
+test("MIG-0661 CURRENT SA-016/017: mirror writer propagates KV PUT failure for the best-effort action wrapper", async () => {
+  const current = await loadCurrentKvMirrorModule({ failPut: true });
+  await assert.rejects(
+    current.module.writeOperationModeKvMirror({ mode: "normal", updated_at: 1, reason: "failure" }),
+    /private KV put failure/,
+  );
 });
