@@ -236,5 +236,5 @@ test("v2 event policy fallback deny is preserved when the permission UI is edite
   const source = await read("src/components/admin/PermissionKeysField.tsx");
   assert.match(source, /policy\.fallback === "deny"/);
   assert.match(source, /omittedState/);
-  assert.match(source, /buildPermissionJson\(states\)/);
+  assert.match(source, /onChange\(buildPermissionJson\(next\)\)/);
 });

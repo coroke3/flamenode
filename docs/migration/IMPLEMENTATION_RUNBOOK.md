@@ -7,6 +7,10 @@
 
 Checkpoint policy: WORK_ITEM_ONLY
 
+2026-11-27 owner policy: 通常の移行PRは個別の人間承認不要。全micro-unit・受入条件・依存・rollback・最新main統合・最終HEADの必須CI成功と独立APPROVEを確認したagentがsquash mergeし、mainで確認して次のREADYへ進む。高リスクは独立した上位Lead agentの追加レビューを要求するが、既定仕様の範囲内のコード統合に人間承認は不要。非本番Phase Gateは証拠に基づく独立Leadレビューで通過可能。本番切替・本番DB/データ移行・Route/Custom Domain/DNS・Secrets・仕様/権限/可視性の意味変更は別途明示承認を維持する。通常main mergeに伴う既存Workers Builds自動実行はこの方針で許可するが、手動deployや本番切替の許可ではない。既存の個別承認待ち記録は履歴であり、本方針が優先する。
+
+テストは既存suite・fixture・helperを優先し、既存ファイルへの最小限の回帰ケース追加を原則とする。既存テストで受入条件を証明できる場合は新規テストを作らない。重複・同等ケース、証跡だけのtest-only PR、別ファイルへの細分化を避ける。新規ファイルは既存suiteでは必要な契約を検証できない場合に限り、理由・非重複性をPRへ記録する。必須検証・安全性・失敗系カバレッジを削減したり、未実行をPASSにしたりしない。
+
 ## 最初の90秒に行うこと
 
 **実行環境:** `package.json`のNode要件（22系）を先に確認する。Windowsで標準Nodeが異なる場合は、導入済みfnmの例として `fnm exec --using 22 node --version`、`fnm exec --using 22 npm.cmd ci --no-audit --no-fund` を使い、以降のnpm/node検証も同じ22系で実行する。engine checkを無効化せず、ホスト全体の既定バージョンを変更する必要はない。
@@ -110,7 +114,7 @@ header には `- **Recipe:** R-...`（[IMPLEMENTATION_RECIPES.md](IMPLEMENTATION
 
 DONE/SKIPPED以外の全taskはこの形式のWork Orderを持ち、`Depends on` はSTATUSの依存を全部含み、STATUSに無い依存経路を足さない。READYのtaskは依存が全部DONEであること。`node scripts/check-migration-task-cards.mjs`（`validatePlanCompleteness`）がCIで検証する。
 
-小型モデル（Haiku / Luna / Flash 等）は、Work Orderが **`Model: small` かつ `Readiness: READY_FOR_SMALL_MODEL`** のtaskだけをwriterとして実行する（`npm run migration:next -- --model small` はそれ以外を候補から外す）。それ以外のtask、他agent PRの独立レビュー、Phase Gate、高リスクPRのmerge、Work Orderの作成・更新はlead（上位モデルまたは人間）の担当。小型モデルは自分のPRについて、上位モデルsubagentによるレビュー（下記 **E**）とmerge統合（**F**、merge 自体はしない）まで行ってよい。
+小型モデル（Haiku / Luna / Flash 等）は、Work Orderが **`Model: small` かつ `Readiness: READY_FOR_SMALL_MODEL`** のtaskだけをwriterとして実行する（`npm run migration:next -- --model small` はそれ以外を候補から外す）。それ以外のtask、他agent PRの独立レビュー、Phase Gate、高リスクPRのmerge、Work Orderの作成・更新はlead（上位モデルまたは人間）の担当。小型モデルは自分のPRについて、上位モデルsubagentによるレビュー（下記 **E**）とmerge統合（**F**、最終Head合格後に通常PRをmerge）まで行ってよい。
 
 小型モデルの実行規則:
 
@@ -135,7 +139,7 @@ GitHub の操作は `gh` か GitHub MCP のどちらかで行う。`gh auth stat
 | Draft PR 作成 | `gh pr create --draft --base main --title ... --body-file <file>` | `create_pull_request` draft=true, base=main, body=<file の中身> |
 | comment | `gh pr comment <n> --body-file <file>` | `add_issue_comment` issue_number=<n> |
 | Ready にする | `gh pr ready <n>` | `update_pull_request` draft=false |
-| squash merge（ユーザーだけ。F の暫定規則） | `gh pr merge <n> --squash` | `merge_pull_request` merge_method=squash |
+| squash merge（最終Headの条件合格後） | `gh pr merge <n> --squash` | `merge_pull_request` merge_method=squash |
 
 branch・diff・Head は `gh` を使わず git で読む（`git fetch origin <branch>`、`git show origin/<branch>:<path>`、`git diff origin/main...HEAD`、`git rev-parse HEAD`）。一時 file は `/tmp` ではなく host の scratch directory（Claude Code なら scratchpad）に書く。
 
@@ -161,7 +165,7 @@ npm run migration:next -- --model small --open-pr-branches "<branch>,<branch>"
 
 0. 自分のPRの work-item が `State: DONE`（F で統合済み、未 merge）:
    - 現在の Head への APPROVE が無く、上位モデルを subagent として起動できる → **E**（最終 Head の再レビュー）
-   - 現在の Head への APPROVE があり CI が green で、PR に現在の Head の `Merge requested:` comment が無い → F の最後の comment だけ書いて終了
+   - 現在の Head への APPROVE があり CI が green で、PR に現在の Head の `Merge requested:` comment が無い → F の証拠commentを記録し、expected HEAD指定でsquash merge、main確認後終了
    - それ以外（再レビュー待ち・CI 待ち・merge 待ち）→ この PR は REVIEW 待ちと同じ扱いで下へ進む
 1. 自分のPRに、現在のHeadへの `Independent review: ... | Verdict: APPROVE` commentがあり、CIがgreen → **F**
 2. 自分のPRが`REVIEW`でレビューが無く、自分より上位のモデルをsubagentとして起動できる → **E**
@@ -233,9 +237,9 @@ Independent review: <agent>/<model> (fresh-context subagent of <自分のmodel>)
 <確認した項目と指摘>
 ```
 
-CHANGES_REQUESTEDならwork-itemを`IN_PROGRESS`に戻し（F で `STATUS.md` を `DONE` にしていたら当該行と `Task State:` も `IN_PROGRESS` に戻す）、`Next`に指摘を書いて終了（次wakeで **C**）。APPROVEでCIがgreenなら同じwakeで **F** へ進んでよい。work-item が既に `DONE`（最終 Head の再レビュー）なら **F** はやり直さず、A の 0 の `Merge requested:` comment を書く。同等以下のモデルしか起動できない場合は **E** を行わず、他agentか人間のレビューを待つ。
+CHANGES_REQUESTEDならwork-itemを`IN_PROGRESS`に戻し（F で `STATUS.md` を `DONE` にしていたら当該行と `Task State:` も `IN_PROGRESS` に戻す）、`Next`に指摘を書いて終了（次wakeで **C**）。APPROVEでCIがgreenなら同じwakeで **F** へ進んでよい。work-item が既に `DONE`（最終 Head の再レビュー）なら **F** はやり直さず、A の 0 の証拠記録・squash mergeへ進む。同等以下のモデルしか起動できない場合は **E** を行わず、他agentか人間のレビューを待つ。
 
-**F. merge統合（Model: small のPRのみ。leadのPR・高リスク・Phase Gateはleadとユーザー承認。merge 自体はユーザー）**
+**F. merge統合（通常PRはagentが実施。高リスク・非本番Phase Gateは独立Leadレビュー、本番切替は別途明示承認）**
 
 CI が green でなければ終了して次 wake。green なら:
 
@@ -255,13 +259,13 @@ git commit -m "MIG-XXXX: STATUS統合"
 git push
 ```
 
-**merge はしない**（暫定。main への merge は Workers Builds の本番 deploy を起こし、`AGENT_PROTOCOL.md` の merge 規則と Mandatory stop「production actionの明示承認待ち」のどちらが優先かが決まっていないため。規則が改訂されるまでこの手順に従う）。PR を Ready にして終了する。次の wake の **A** の 0 で、最終 Head の再レビュー（**E**）と CI green を確かめ、揃ったら PR へ次の comment を1回だけ書いて終了する。merge はユーザーが行う。
+**最終HEADで独立APPROVE・必須CI green・全受入条件・依存・rollback・最新main整合・blocking findingなしを確認後、PRをReadyにしてsquash mergeする。** 既存Workers Builds自動実行を含む通常main統合は2026-11-27 owner policyで許可済み。手動本番操作は別途承認。証拠をPRへ記録し、`gh pr merge <n> --squash --match-head-commit <40hex>` または `merge_pull_request` の expected_head_sha を用いる。main反映確認後、次の依存解消taskへ進む。
 
 ```text
 Merge requested: integrated | Head: <40hex> | Review: <最終Headの再レビューcommentのURL> | CI: <CI runのURL>
 ```
 
-**最終Headの例外なしルール:** rebase・merge・競合解消・STATUS/work-item統合commitを含めてHeadが変わったら、変更後の**最終Head SHA**を対象に別agent/人間（または **E** の上位モデル）が独立レビューし、同じSHAで必須CIを通す。レビュー済みの旧Headに対する承認やCIでマージしない。再レビューのAPPROVE・該当SHA・CI URLをPRへ記録する（work-itemへ書いてcommitするとHeadが変わるので書かない）。agent は merge しない（上の F の暫定規則）。
+**最終Headの例外なしルール:** rebase・merge・競合解消・STATUS/work-item統合commitを含めてHeadが変わったら、変更後の**最終Head SHA**を対象に別agent/人間（または **E** の上位モデル）が独立レビューし、同じSHAで必須CIを通す。レビュー済みの旧Headに対する承認やCIでマージしない。再レビューのAPPROVE・該当SHA・CI URLをPRへ記録する（work-itemへ書いてcommitするとHeadが変わるので書かない）。agentはFの条件を満たしたPRをmergeする。
 
 ## 最小検証コマンド
 
@@ -318,7 +322,7 @@ Next: one explicit action and its owner
 
 ## 人間承認が必要な境界
 
-本番DB書き込み・データ移行・適用済みmigrationの変更、本番Route/Custom Domain/DNS、Secrets、Discord認証cutover、権限/可視性を変えるproduct behavior、Phase Gate、採用済み仕様の再決定。これらは設計が`DECIDED`でも作業実行を自動許可しない。
+本番DB書き込み・データ移行・適用済みmigrationの変更、本番Route/Custom Domain/DNS、Secrets、Discord認証cutover、権限/可視性を変えるproduct behavior、本番切替Gate、採用済み仕様の再決定。非本番Phase Gateは独立Leadレビューで通過可能。これらは設計が`DECIDED`でも作業実行を自動許可しない。
 
 HTMLモックは受領・登録済み（MIG-0200完了、D-08は **DECIDED**）。Phase 2の基盤タスク（MIG-0201: visual/IA抽出・デザイントークン）はREADY。ただし、各画面の個別visual移行は先行基盤（MIG-0201等）の完了と、UI_REFERENCE.mdの受入基準（機能パリティ・状態・権限検証）を満たす必要がある。
 

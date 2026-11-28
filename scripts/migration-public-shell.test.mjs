@@ -15,7 +15,7 @@ import { JSDOM } from "jsdom";
 import {
   THEME_BOOTSTRAP_CODE, buildSiteJsonLd, serializeJsonLd, gaMeasurementId, gaInitScript, gaLoaderSrc, buildPageHead,
 } from "../apps/site/src/lib/pageHead.ts";
-import { loadAboutStatsSnapshot, ABOUT_STATS_KEY } from "../apps/site/src/lib/publicDataLoader.ts";
+import { loadAboutStatsSnapshot, ABOUT_STATS_KEY, SnapshotBuildError } from "../apps/site/src/lib/publicDataLoader.ts";
 import { loadAboutStatsForBuild } from "../apps/site/src/lib/aboutStats.ts";
 
 const DIST = path.resolve("apps/site/dist");
@@ -334,4 +334,41 @@ test("about stats render: CURRENT numbers, ja-JP grouping, unit 件, labels and 
   for (const [, label, note] of items) { assert.ok(src.includes(label) && src.includes(note)); }
   assert.ok(src.includes('toLocaleString("ja-JP")') && src.includes('unit: "件"'));
   assert.equal(doc({ stats: null }).querySelector(".metrics"), null);
+});
+
+
+test("SEC-794: optional about-stats loader returns null despite hostile diagnostics", async () => {
+  let codeReads = 0;
+  let coercions = 0;
+  const poison = new SnapshotBuildError("HASH_MISMATCH", "SEC794_PRIVATE_ERROR_TEXT");
+  Object.defineProperty(poison, "code", {
+    get() { codeReads++; throw new Error("SEC794_POISONED_CODE"); },
+  });
+  const nonString = new SnapshotBuildError("HASH_MISMATCH", "SEC794_PRIVATE_ERROR_TEXT");
+  Object.defineProperty(nonString, "code", {
+    value: { toString() { coercions++; throw new Error("SEC794_COERCION"); } },
+  });
+  const trap = new Proxy(new Error("SEC794_PRIVATE_PROXY"), {
+    getPrototypeOf() { throw new Error("SEC794_GET_PROTOTYPE"); },
+  });
+  const oldWarn = console.warn;
+  const warnings = [];
+  try {
+    console.warn = (line) => { warnings.push(String(line)); };
+    for (const failure of [poison, nonString, trap, new Error("SEC794_PRIVATE_SQL")]) {
+      const env = new Proxy({}, { get() { throw failure; } });
+      assert.equal(await loadAboutStatsForBuild(env), null);
+    }
+    assert.equal(codeReads, 1);
+    assert.equal(coercions, 0);
+    assert.equal(warnings.length, 4);
+    for (const warning of warnings) {
+      assert.ok(warning.includes("(UNKNOWN)"), "unrecognized errors have a fixed diagnostic code");
+      assert.doesNotMatch(warning, /SEC794_|PRIVATE_SQL|PRIVATE_ERROR/);
+    }
+    console.warn = () => { throw new Error("SEC794_BROKEN_LOGGER"); };
+    assert.equal(await loadAboutStatsForBuild(new Proxy({}, { get() { throw poison; } })), null);
+  } finally {
+    console.warn = oldWarn;
+  }
 });

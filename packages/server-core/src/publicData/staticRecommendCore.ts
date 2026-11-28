@@ -1,6 +1,7 @@
 import type { StaticVideoCardData as VideoCardData } from "./videoCardCore.ts";
 import {
   normalizeCount,
+  normalizeNullableUnix,
   normalizeNumericUnix as normalizeUnix,
   normalizePresentString as normalizeNullableString,
   normalizePresentString as normalizeString,
@@ -26,12 +27,12 @@ export interface StaticRecommendCoreData {
 }
 
 export function normalizeRecommendCore(value: unknown): StaticRecommendCoreData | null {
-  if (!value || typeof value !== "object") return null;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const payload = value as StaticRecommendCorePayload;
-  if (Number(payload.schema_version) !== RECOMMEND_CORE_SCHEMA_VERSION) return null;
+  if (payload.schema_version !== RECOMMEND_CORE_SCHEMA_VERSION) return null;
   if (!Array.isArray(payload.recommended) || !Array.isArray(payload.latest)) return null;
   if (!Array.isArray(payload.underrated)) return null;
-  const generatedAt = normalizeUnix(payload.generated_at);
+  const generatedAt = normalizeNullableUnix(payload.generated_at);
   if (generatedAt == null || generatedAt <= 0) return null;
   return {
     generatedAt,

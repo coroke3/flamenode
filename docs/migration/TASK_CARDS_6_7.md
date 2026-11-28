@@ -56,10 +56,10 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 - DONE: U04 と Final audit。MIG-0633 DONE まで着手しない。
 
 ### MIG-0605 — Auth User / Active X / Admin / remaining RH（親）
-- 読む: `PHASE_6_SPEC.md` の MIG-0605 Work Order、D-03 / D-04、`xid-admin.ts`。
-- 変更: SA-090/091（MIG-0633 の後）、D-03 fan-out dry-run script、D-04 checkpoint 文書、RH-001..033 の担当表。残りは MIG-0636 / 0637 / 0638（SA-043/044 は MIG-0603）。
-- 試験: 権限の無い staff の拒否、dry-run の規則、担当表に空欄なし。
-- DONE: 上の unit と Final audit。本番 backfill を実行しない。
+- 読む: `PHASE_6_SPEC.md` の MIG-0605 Work Order、D-03 / D-04、D-19-1 / D-19-2、`xid-admin.ts`。
+- 変更: SA-090/091（`+packages/server-core/src/xid/linkRequestReview.ts` と `src/lib/actions/xid-admin.ts` bridge 含む、D-19-1 Option A）、D-03 fan-out dry-run script、D-04 checkpoint 文書、RH-001..033 の担当表。残りは MIG-0636 / 0637 / 0638（SA-043/044 は MIG-0603）。
+- 試験: server-core 単体・権限の無い staff の拒否・reservation 連携・dry-run の規則・担当表に空欄なし。
+- DONE: 上の unit と Final audit。本番 backfill を実行しない。`xid-admin.ts` 互換 bridge と独立レビューを確認。
 
 ### MIG-0606 — API CPU/security budgets
 - 読む: `API_CPU_BENCHMARK.md`、`scripts/benchmark-api-cpu.mjs`、各 task の上限入力。
@@ -186,10 +186,10 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 
 ### MIG-0627 — R2 artifact consumers to build-time snapshots
 
-- 読む: `PHASE_6_SPEC.md` の MIG-0627 Work Order、`workers/json-generator/**`、`src/lib/publicData/sitemapSources`。
-- 変更: R2 artifact の読み手を build 時 snapshot へ、`R2_ARTIFACT_CONSUMERS.md`。
-- 試験: `rg` で R2 get key の読み手と producer 一覧の突き合わせ、置き換え後の DTO の同一性。
-- DONE: 全 artifact に置き換え先があり、MIG-0907 が参照できる。
+- 読む: `PHASE_6_SPEC.md` の MIG-0627 Work Order、`R2_ARTIFACT_CONSUMERS.md`、`src/lib/publicData/sitemapSources.ts`。
+- 変更: 実行時 R2 artifact 読み手を build 時 snapshot へ（D-13-52 診断は MIG-0665、build 側 R2 差分 PUT・完全性検査は MIG-0666 へ分割、D-19-4）、`R2_ARTIFACT_CONSUMERS.md`。
+- 試験: `npm run check:r2-artifact-consumers`、置き換え後の各読み手の DTO 同一性。
+- DONE: 対象 runtime 読み手の置き換え先が完了し、MIG-0907 が参照できる（MIG-0665/0666 と合わせて依存）。
 
 ### MIG-0628 — new Worker deploy + smoke chain
 
@@ -305,7 +305,7 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 ### MIG-0645 — legacy import Route Handler
 - 読む: `app/api/admin/import/legacy/route.ts`、`src/lib/import/legacy/*`。
 - 変更: `apps/api/src/routes/admin/legacyImport.ts`、純粋関数の core 移動。
-- 試験: preview → commit、途中失敗の全件 rollback、CPU budget。
+- 試験: preview → commit、未commit D1 batchのrollback、先行batch確定後のmarker・後続処理失敗の復旧、step成功後の進捗CAS失敗はcommitted_progress_pendingと同じ資格情報での復旧、CPU budget（全インポート・全HTTP stepの原子性は前提にしない）。
 - DONE: RH-002 の parity。
 
 ### MIG-0646 — media Route Handlers
@@ -408,11 +408,11 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 
 **Personal SPA = `apps/app`: `/dashboard`, `/entry`, `/onboarding`, `/_personal_assets/*`. Ops SPA = `+apps/ops` at MIG-0704: `/manage`, `/admin`, `/_ops_assets/*`.** CSS/JS chunks別、Cookie同一origin、認可はHono+旧Authと一致。現在`apps/ops`は未作成なのでビルド成功を要求するのはMIG-0704以降だけ。cross-SPA遷移は通常HTTP navigation。UIはCURRENT見た目を踏襲（公開HTMLの新visualをprivateへ無理に適用しない）。
 
-### MIG-0662 — admin audit restore API (SA-011, D-17-9)
-- 読む: `audit-admin.ts:125-171`、`apps/api/src/routes/admin/audit.ts`、`packages/server-core/src/audit/restore.ts`、MIG-0603 U02a の host、D-13-41 / 54。
-- 変更: `+apps/api/src/visibility/auditRestoreHost.ts`、`admin/audit.ts` に `POST /restore`、`+packages/contracts/src/admin/auditRestore.ts`、parity test。
+### MIG-0662 — admin audit restore API (SA-011, D-17-9; merge gate MIG-0603)
+- 読む: `audit-admin.ts:125-171`、`apps/api/src/routes/admin/audit.ts`、`packages/server-core/src/audit/restore.ts`、D-13-41 / 54、D-16-1、D-19-3。
+- 変更: `+apps/api/src/visibility/auditRestoreHost.ts`（暫定は server-core helper、U04 で MIG-0603 shared host へ切替）、`admin/audit.ts` に `POST /restore`、`+packages/contracts/src/admin/auditRestore.ts`、parity test。
 - 試験: 拒否、確認文字列違い、競合と `force_overwrite`、可視性の host の key 集合、413。
-- DONE: MIG-0603 の DONE 後に着手、restore が独立レビュー済み。
+- DONE: MIG-0603 DONE 後に U04 置換して merge、restore が独立レビュー済み。
 
 ### MIG-0663 — Manage navigation の active X / 運営 X
 - 読む: `ConsoleSidebar.tsx:106-108`、`apps/api/src/routes/manage/{navigation,dashboard}.ts`、`packages/contracts/src/manage/shared.ts:28-34`、D-17-13。
@@ -425,6 +425,18 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 - 変更: 2 つの degraded 応答に `degradedReason` を足す（他の値は変えない）、`accountSummary.test.mjs` に case。
 - 試験: pending だけの失敗 / 管理権限の読みの失敗 / 両方成功で field なし / 503。
 - DONE: 既存の応答の値が変わらず、`degradedReason` が原因どおり。
+
+### MIG-0665 — `/admin/static-builds` shared-input diagnostics (D-13-52, ex MIG-0627)
+- 読む: `PHASE_6_SPEC.md` MIG-0665、CURRENT `loadStaticSharedInputDiagnostics`、`apps/api/src/routes/adminRead/ops.ts:338-365`、`packages/contracts/src/adminReadOps.ts:462-470`、`StaticBuilds.tsx:71-78`。
+- 変更: S2 予算内の軽量 metadata 連携、`adminRead/ops.ts` と `adminReadOps.ts`、`StaticBuilds.tsx`、`ROUTE_MATRIX.md` Admin 45 行。MIG-0626 DONE 後に着手。
+- 試験: 正常 4 種の `loadStatus` / `generatedAt` / `itemCount` 一致、欠損・破損時劣化、S2 制約（大 JSON 読込 0・D1 <= 3）。
+- DONE: MIG-0626 の DONE 後に完了し、`/admin/static-builds` の `—` プレースホルダが解消。
+
+### MIG-0666 — build-time R2 API artifact differential publish + integrity (ex MIG-0627 U04/U05)
+- 読む: `PHASE_6_SPEC.md` MIG-0666、`apps/site/scripts/produceSnapshots.ts`、`apps/site/scripts/buildPublicSite.ts`、`BUILD_TIME_DATA.md` §6、`R2_ARTIFACT_CONSUMERS.md`。
+- 変更: `+apps/site/scripts/publishApiArtifacts.ts`（+test）、`buildPublicSite.ts`、`BUILD_TIME_DATA.md` §6（Class A 月間見積り）、`R2_ARTIFACT_CONSUMERS.md`。
+- 試験: 初回/差分/全一致 PUT 件数、欠落時の最大 3 回再試行と失敗、`check:r2-artifact-consumers`。
+- DONE: 差分 PUT・完全性検査・§6 Class A 80% 以下見積りが完了（実 R2 write 設定/本番 PUT は明示承認まで停止）。
 
 ### MIG-0701 — Personal dashboard GET screens
 
@@ -504,10 +516,16 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 - DONE: 部品が network を呼ばない。
 
 ### MIG-0714 — video form part C: `VideoForm` + `UnslottedPostForm` port
-- 読む: `VideoForm.tsx`（:112,142,193,442,469）、`UnslottedPostForm.tsx`、`src/components/forms/*.contract.test.mjs`。
-- 変更: `+apps/app/src/components/forms/{VideoForm,UnslottedPostForm}.tsx`（submit は adapter）、`+apps/app/src/lib/guardRedirect.ts`、`video-form.css`。
+- 読む: `VideoForm.tsx`（:113,143,194,470）、`UnslottedPostForm.tsx`、`src/components/forms/*.contract.test.mjs`、MIG-0738 出力。
+- 変更: `+apps/app/src/components/forms/{VideoForm,UnslottedPostForm}.tsx`（submit は adapter）、`video-form.css`（`portCssModule.mjs` / `main.tsx`）。
 - 試験: 不正な URL・重複、adapter の FormData が契約 test と同じ、下書きの key、guard の移動先。
-- DONE: MIG-0712 / 0713 の部品を使い、network を呼ばない。
+- DONE: MIG-0712 / 0713 / 0738 の部品を使い、network を呼ばない。
+
+### MIG-0738 — Personal SPA video form helpers + `ErrorCallout` + `PublicReflectionDelayNotice` (ex MIG-0714 U01)
+- 読む: `PHASE_7_SPEC.md` MIG-0738 Work Order、移植元 14 ファイル（`youtube/id`, `video/{types,formSettings,requiredVideoFields,permissionUnlockHint,videoFormDraft}`, `client/{guardRedirect,activeXSwitchEvents}`, `forms/submitFormCompat`, `interactions/{useFormDraft,draftFileStore}`, `publicReflectionNotice`, `ErrorCallout`, `PublicReflectionDelayNotice`）。
+- 変更: `+apps/app/src/lib/{youtubeId,publicReflectionNotice,videoTypes,videoFormSettings,requiredVideoFields,permissionUnlockHint,videoFormDraft,guardRedirect,activeXSwitchEvents,submitFormCompat,useFormDraft,draftFileStore}.ts`, `+apps/app/src/components/ui/{PublicReflectionDelayNotice,ErrorCallout}.tsx`, `+apps/app/test/videoFormHelpers.test.mjs`, `FILE_MIGRATION_MATRIX.md`。
+- 試験: CURRENT 10 テスト 54 ケース移植 + `ErrorCallout`/`PublicReflectionDelayNotice` 表示 + `next/*`/`@/`/`fetch(` 0 件。
+- DONE: U01〜U04 / T01〜T05 が PASS、`@flamenode/app` build と `typecheck` と `check:project-docs` が 0。
 
 ### MIG-0715 — `/dashboard/edit/:id/permissions` screen (merge gate MIG-0650)
 - 読む: `permissions/page.tsx:44-,220-226`、`VideoCollabPermsManager.tsx:274,294-330,346`、`EditPermissionsResponseSchema`。
