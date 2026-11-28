@@ -16,6 +16,7 @@ import {
   ALL_PERMISSION_KEYS,
   LEGACY_PERMISSION_KEY_ALIASES,
   canonicalizePermissionKey,
+  safeParseCustomPermissionKeys,
   expandPermissionAliases,
   isValidPermissionKey,
 } from "@flamenode/domain/auth/permissions";
@@ -101,6 +102,24 @@ test("canonicalizePermissionKey and expandPermissionAliases map legacy keys", ()
   assert.deepEqual(expandPermissionAliases("videos.title"), ["video.basics"]);
   assert.deepEqual(expandPermissionAliases("video.basics"), ["video.basics"]);
   assert.deepEqual(expandPermissionAliases("invalid.key"), []);
+});
+
+test("permission alias lookup rejects inherited Object.prototype properties", () => {
+  const inheritedNames = Object.getOwnPropertyNames(Object.prototype);
+  assert.equal(inheritedNames.length, 12);
+  for (const key of inheritedNames) {
+    assert.equal(canonicalizePermissionKey(key), null, key);
+    assert.deepEqual(expandPermissionAliases(key), [], key);
+    assert.deepEqual(
+      safeParseCustomPermissionKeys(JSON.stringify([key]), { allowAdminOnly: true }),
+      [],
+      "stored invalid permission must not resolve: " + key,
+    );
+  }
+  assert.deepEqual(
+    safeParseCustomPermissionKeys(JSON.stringify(["videos.title", "video.basics"]), { allowAdminOnly: true }),
+    ["video.basics"],
+  );
 });
 
 test("shouldWarnManageActiveXMismatch detects mismatch with staff list", () => {
