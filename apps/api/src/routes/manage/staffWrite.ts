@@ -373,7 +373,7 @@ export function registerStaffWriteRoutes(app: Hono<AppEnv>): void {
         seen.set(xId, row.lineNumber);
         const a = assignmentFromCsv(row.permission_preset, row.permission_keys, isAdmin);
         if (a.permission_preset === "owner") {
-          return deny(c, `${row.lineNumber}行目: 代表者の変更はCSVでは行えません。`, 409);
+          return deny(c, `${row.lineNumber}行目: 代表者の追加・変更はCSVでは行えません。専用の代表者移譲操作を使用してください。`, 409);
         }
         normalized.push({
           line: row.lineNumber, xId, displayName: row.display_name,
@@ -414,20 +414,23 @@ export function registerStaffWriteRoutes(app: Hono<AppEnv>): void {
       const knownIds = new Set(known.results.map((row) => row.id));
       const context = `event-staff-csv:${generateId("batch")}`;
       const newX = normalized.filter((row) => !knownIds.has(row.xId));
-      const upserts = normalized.map((row) => {
+      const upserts = [];
+      for (const row of normalized) {
         const existing = byX.get(row.xId) ?? null;
         if (existing?.permission_preset === "owner") {
-          throw new Error(`${row.line}行目: 代表者はCSVで変更できません。`);
+          // This is a trusted local validation outcome, not a provider error.
+          // Preserve CURRENT's row-specific message without widening domainMessage.
+          return deny(c, `${row.line}行目: 代表者はCSVで変更できません。専用の代表者移譲操作を使用してください。`, 409);
         }
         if (existing && !VALID_STAFF_ID.test(existing.id)) {
           throw new Error("既存スタッフIDが不正です。");
         }
-        return {
+        upserts.push({
           id: existing?.id ?? generateId("es"),
           existingId: existing?.id ?? null,
           values: row.values,
-        };
-      });
+        });
+      }
       const mutations = upserts.length + newX.length;
       const budget = planD1AuditMutationBudget({
         mutationStatementCount: mutations, mutationAssertionCount: mutations,
