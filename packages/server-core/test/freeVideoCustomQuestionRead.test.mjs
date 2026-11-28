@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { drizzle } from "drizzle-orm/sqlite-proxy";
 import { createSqlite, insert } from "../../../apps/api/test/support/personalHarness.mjs";
-import { loadGeneralCustomQuestionsForFreeVideo, loadGeneralCustomQuestionsForSlotSubmission, decodeGeneralCustomQuestionPolicyProjection, MAX_VIDEO_CUSTOM_QUESTIONS_READ } from "../src/video/freeVideoCustomQuestionRead.ts";
+import { eventCustomQuestions } from "@flamenode/db/schema";
+import { loadGeneralCustomQuestionsForFreeVideo, loadGeneralCustomQuestionsForSlotSubmission, decodeGeneralCustomQuestionPolicyProjection, MAX_VIDEO_CUSTOM_QUESTIONS_READ, stagePermissionQuestionKeyCondition } from "../src/video/freeVideoCustomQuestionRead.ts";
 import { loadEligibleUnslottedVideoRequiredFields } from "../src/video/requiredVideoFields.ts";
 
 function setup() {
@@ -205,4 +206,34 @@ test("MIG-0651 SA-088 general questions: no IDs means no reads and >80 preserves
     await assert.rejects(loadGeneralCustomQuestionsForSlotSubmission(db,ids),/video_custom_question_read_limit_exceeded/);
     assert.equal(statements.length,2);
   } finally { sqlite.close(); }
+});
+
+test("MIG-0651 / MIG-0652 shared stage-question predicate is exact, case-sensitive and key-only", async () => {
+  const { sqlite, db, statements } = setup();
+  try {
+    insert(sqlite, "events", { id: "ev-stage", title: "Stage predicate" });
+    const put = (id, questionKey, extra = {}) => insert(sqlite, "event_custom_questions", {
+      id, event_id: "ev-stage", question_key: questionKey, label: id,
+      type: "text", required: 0, options_json: null, sort_order: 1,
+      is_active: 1, ...extra,
+    });
+    put("stage-exact-inactive", "stage_permission", { is_active: 0 });
+    put("stage-prefixed", "stage_permission_2");
+    put("near-prefix", "stage_permissionX");
+    put("case-mismatch", "Stage_permission_2");
+    put("general", "general");
+
+    const rows = await db.select({ id: eventCustomQuestions.id })
+      .from(eventCustomQuestions)
+      .where(stagePermissionQuestionKeyCondition());
+
+    assert.deepEqual(rows.map(row => row.id).sort(), [
+      "stage-exact-inactive", "stage-prefixed",
+    ]);
+    assert.equal(statements.length, 1);
+    assert.ok(statements[0].params.includes("stage_permission"));
+    assert.ok(statements[0].params.includes("stage_permission_"));
+  } finally {
+    sqlite.close();
+  }
 });

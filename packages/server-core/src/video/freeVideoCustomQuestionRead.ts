@@ -100,6 +100,17 @@ export function decodeGeneralCustomQuestionPolicyProjection(
 const STAGE_KEY = "stage_permission";
 const STAGE_PREFIX = "stage_permission_";
 
+/**
+ * CURRENT's exact key-only stage-question predicate, shared with event-update planning.
+ * Keep is_active as a separate caller predicate; this helper deliberately does not add it.
+ */
+export function stagePermissionQuestionKeyCondition() {
+  return sql`(
+    ${eventCustomQuestions.question_key} = ${STAGE_KEY}
+    OR substr(${eventCustomQuestions.question_key}, 1, ${STAGE_PREFIX.length}) = ${STAGE_PREFIX}
+  )`;
+}
+
 async function readGeneralQuestionRows(db: ServerCoreDb, ids: readonly string[]) {
   return db.select({
     id: eventCustomQuestions.id,
@@ -119,10 +130,7 @@ async function readGeneralQuestionRows(db: ServerCoreDb, ids: readonly string[])
     .where(and(
       ids.length === 1 ? eq(eventCustomQuestions.event_id, ids[0]) : inArray(eventCustomQuestions.event_id, [...ids]),
       eq(eventCustomQuestions.is_active, 1),
-      not(sql`(
-        ${eventCustomQuestions.question_key} = ${STAGE_KEY}
-        OR substr(${eventCustomQuestions.question_key}, 1, ${STAGE_PREFIX.length}) = ${STAGE_PREFIX}
-      )`),
+      not(stagePermissionQuestionKeyCondition()),
     )!)
     .orderBy(
       asc(eventCustomQuestions.event_id),
