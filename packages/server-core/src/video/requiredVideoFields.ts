@@ -1021,7 +1021,17 @@ export type SlotSubmissionEventSelectionAssertionInput = {
 };
 
 function compareSlotSelectionIds(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0;
+  // SQL ORDER BY uses SQLite BINARY (UTF-8 bytes), not JS UTF-16 order.
+  // Keep this comparator local to CAS serialization; target selection order
+  // and the CURRENT-derived policy evaluator must not change.
+  if (a === b) return 0;
+  const encoder = new TextEncoder();
+  const left = encoder.encode(a);
+  const right = encoder.encode(b);
+  for (let i = 0; i < Math.min(left.length, right.length); i++) {
+    if (left[i] !== right[i]) return left[i]! - right[i]!;
+  }
+  return left.length - right.length;
 }
 
 /**

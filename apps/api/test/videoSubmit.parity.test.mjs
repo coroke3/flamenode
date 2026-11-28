@@ -1993,6 +1993,13 @@ test("U03a SA-088: stage/general question policy changes fail the same audited b
     const { sql } = await import("drizzle-orm");
     const cases = [
       { name: "unchanged non-admin receipt", isAdmin: false, accept: true },
+      { name: "unchanged Unicode event and staff receipt", isAdmin: false, unicodeEvents: true, accept: true },
+      { name: "unchanged Unicode admin receipt", isAdmin: true, initialRole: "admin", unicodeEvents: true, accept: true },
+      {
+        name: "Unicode event policy changes after receipt",
+        isAdmin: false, unicodeEvents: true,
+        mutate: (sqlite) => sqlite.prepare("UPDATE events SET allow_user_video_event_links=0 WHERE id=?").run("ev_\u{10000}"),
+      },
       {
         name: "existing video-event link changes",
         isAdmin: false,
@@ -2043,6 +2050,23 @@ test("U03a SA-088: stage/general question policy changes fail the same audited b
           display_name: "Staff", permission_preset: "reviewer",
           custom_permission_keys_json: null, created_at: 100, updated_at: 100,
         });
+        if (scenario.unicodeEvents) {
+          // JS UTF-16 sorts the supplementary character before U+E000;
+          // SQLite BINARY orders these UTF-8 IDs the other way around.
+          for (const id of ["ev_\u{10000}", "ev_\uE000"]) {
+            insert(w.sqlite, "events", {
+              id, title: "Legacy event", visibility_status: "public",
+              allow_unslotted_posts: 0, allow_user_video_event_links: 1,
+              created_at: 100, updated_at: 100,
+            });
+            insert(w.sqlite, "video_events", { video_id: "v_link", event_id: id });
+            insert(w.sqlite, "event_staff", {
+              id: "staff_" + id, event_id: id, x_user_id: "x_owner",
+              display_name: "Staff", permission_preset: "reviewer",
+              custom_permission_keys_json: null, created_at: 100, updated_at: 100,
+            });
+          }
+        }
         const db = drizzle(w.d1);
         const input = {
           videoId: "v_link", requested: ["ev_open"], anchorEventId: "ev_closed",
