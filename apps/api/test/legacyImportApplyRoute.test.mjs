@@ -1,5 +1,5 @@
 // MIG-0645: intentionally test-only mounted apply HTTP adapter.
-// The real D1 audited apply adapter is NOT wired, and production has no mount.
+// The real D1 adapter currently covers system_user only; production has no mount.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
@@ -12,11 +12,17 @@ import {
 } from "@flamenode/server-core/legacyImport/progress";
 import { createAdminRoutes } from "../src/routes/admin/index.ts";
 import { createLegacyImportApplyRoutes } from "../src/routes/admin/legacyImportApplyRoute.ts";
+import { legacyImportD1ApplyStep } from "../src/routes/admin/legacyImportD1ApplyAdapter.ts";
 import { createAdminD1, seedBase } from "./helpers/sqliteD1.mjs";
 
 const SITE = "https://app.flamenode.example";
 // CURRENT RH-002 durable run identity; the bearer preview token itself is never persisted.
 const previewFingerprint = (token) => createHash("sha256").update(token).digest("hex");
+const runDigest = (token) => previewFingerprint(token).slice(0, 24);
+
+function extendLegacyImportUserSchema(sqlite) {
+  sqlite.exec("ALTER TABLE \"user\" ADD COLUMN \"emailVerified\" INTEGER; ALTER TABLE \"user\" ADD COLUMN can_create_events INTEGER; ALTER TABLE \"user\" ADD COLUMN is_notification_enabled INTEGER; ALTER TABLE \"user\" ADD COLUMN terms_reaccept_required INTEGER; ALTER TABLE \"user\" ADD COLUMN onboarding_completed_at INTEGER; ALTER TABLE \"user\" ADD COLUMN last_guild_check INTEGER; ALTER TABLE \"user\" ADD COLUMN created_at INTEGER;");
+}
 const runDigest = (token) => previewFingerprint(token).slice(0, 24);
 const ADMIN = { id: "admin-1", name: "Admin", email: null, image: null,
   role: "admin", is_banned: 0, active_x_user_id: null };
@@ -299,113 +305,11 @@ test("MIG-0645 U02 apply Hono: finalization CAS failure keeps committed receipt 
 });
 
 
-test("MIG-0645 U02o Hono: committed SQLite D1 audit receipt survives R2 CAS failure", async () => {
-  const { sql } = await import("drizzle-orm");
-  const { mutateWithAudit } = await import("@flamenode/server-core/audit/mutate");
+test("MIG-0645 U02u Hono: real system_user D1 receipt survives R2 CAS failure and validates CURRENT replay contract", async () => {
   const { bucket, record } = previewBucket({ failAdvanceOnce: true });
   const { credential, form } = await createApplyCredential(bucket);
-  let durableWrites = 0;
-  const { request, sqlite, stats, getD1ApplyCalls } = setup({
-    bucket,
-    applyStep: async (input) => {
-      assert.equal(input.actorAuthUserId, ADMIN.id);
-      assert.equal(input.previewToken, credential.previewToken);
-      assert.equal(input.planHash, credential.planHash);
-      assert.equal(input.progress.stage, "system_user");
-      const identity = {
-        runDigest: runDigest(credential.previewToken),
-        planHash: credential.planHash,
-        stage: input.progress.stage,
-        index: input.progress.index,
-      };
-      const target = `${identity.runDigest}:${identity.planHash.slice(0, 24)}:${identity.stage}:${identity.index}`;
-      const nextProgress = {
-        stage: "x_users",
-        index: 0,
-        counts: input.progress.counts,
-        skipExistingEventIds: input.strategy === "skip_existing"
-          ? [...input.progress.skipExistingEventIds].sort()
-          : [],
-        skipExistingVideoIds: input.strategy === "skip_existing"
-          ? [...input.progress.skipExistingVideoIds].sort()
-          : [],
-      };
-      const receipts = sqlite.prepare(
-        "SELECT after_json FROM audit_logs WHERE table_name = 'legacy_import_steps' AND target_id = ? AND context = 'legacy_import:step'",
-      ).all(target);
-      assert.ok(receipts.length <= 1, "a duplicate or conflicting marker must fail closed");
-      if (receipts.length === 1) {
-        const stored = JSON.parse(receipts[0].after_json);
-        if (
-          !stored || typeof stored !== "object" ||
-          typeof stored.run_digest !== "string" ||
-          typeof stored.plan_hash !== "string" ||
-          typeof stored.stage !== "string" ||
-          !Number.isSafeInteger(stored.index) ||
-          !stored.outcome || typeof stored.outcome !== "object" ||
-          stored.outcome.kind !== "system_user" ||
-          typeof stored.next_stage !== "string" ||
-          !Number.isSafeInteger(stored.next_index) ||
-          !stored.next_counts || typeof stored.next_counts !== "object" ||
-          Array.isArray(stored.next_counts) ||
-          typeof stored.skip_event_snapshot_fingerprint !== "string" ||
-          typeof stored.skip_video_snapshot_fingerprint !== "string"
-        ) {
-          throw new Error("invalid durable import step receipt");
-        }
-        const receipt = {
-          runDigest: stored.run_digest,
-          planHash: stored.plan_hash,
-          stage: stored.stage,
-          index: stored.index,
-          nextStage: stored.next_stage,
-          nextIndex: stored.next_index,
-          nextCounts: stored.next_counts,
-          skipEventSnapshotFingerprint: stored.skip_event_snapshot_fingerprint,
-          skipVideoSnapshotFingerprint: stored.skip_video_snapshot_fingerprint,
-        };
-        if (!legacyImportReceiptMatchesProgress(receipt, identity, nextProgress)) {
-          throw new Error("durable import step receipt does not match recomputed progress");
-        }
-      } else {
-        await mutateWithAudit(input.db, {
-          mutationStatements: [
-            input.db.run(sql.raw(
-              "INSERT INTO x_users (id, x_name, approval_status) VALUES ('legacy_x_hono', 'Hono X', 'imported')",
-            )),
-            input.db.run(sql.raw(
-              "INSERT INTO static_rebuild_queue (id, target_type, target_id, reason, priority, status) VALUES ('rebuild-x-hono', 'users_index', 'global', 'legacy_import_x_users', 'low', 'pending')",
-            )),
-          ],
-          expectedMutationChanges: [1, 1],
-          audits: [
-            { table_name: "x_users_import_batch", target_id: "legacy_x_hono",
-              operation: "CREATE", before: null, after: { ids: ["legacy_x_hono"] },
-              actor_user_id: ADMIN.id, context: "legacy_import",
-              retention_class: "long_audit", restore_strategy: "none" },
-            { table_name: "legacy_import_steps", target_id: target,
-              operation: "SYSTEM", before: null,
-              after: {
-                run_digest: identity.runDigest,
-                plan_hash: identity.planHash,
-                stage: identity.stage,
-                index: identity.index,
-                outcome: { kind: "system_user" },
-                next_stage: nextProgress.stage,
-                next_index: nextProgress.index,
-                next_counts: nextProgress.counts,
-                skip_event_snapshot_fingerprint: legacyImportSkipSnapshotFingerprint(nextProgress.skipExistingEventIds),
-                skip_video_snapshot_fingerprint: legacyImportSkipSnapshotFingerprint(nextProgress.skipExistingVideoIds),
-              },
-              actor_user_id: ADMIN.id, context: "legacy_import:step",
-              retention_class: "long_audit", restore_strategy: "none" },
-          ],
-        });
-        durableWrites++;
-      }
-      return { progress: { ...input.progress, ...nextProgress }, complete: false };
-    },
-  });
+  const { request, sqlite, stats, getD1ApplyCalls } = setup({ bucket, applyStep: legacyImportD1ApplyStep });
+  extendLegacyImportUserSchema(sqlite);
   try {
     const first = await request(form());
     assert.equal(first.status, 503, JSON.stringify(await first.clone().json()));
@@ -414,23 +318,35 @@ test("MIG-0645 U02o Hono: committed SQLite D1 audit receipt survives R2 CAS fail
     assert.equal(failed.committed, true);
     assert.equal(failed.requires_repreview, false);
     assert.equal(record().status, "ready");
-    assert.equal(record().progress.stage, "system_user", "R2 still points to the committed step");
-    assert.equal(stats.batches, 1);
-    assert.equal(durableWrites, 1);
-    // A committed receipt with hostile/mismatched identity is never evidence
-    // that this request may advance R2. Reject, release and preserve D1.
-    const auditRow = sqlite.prepare(
-      "SELECT id, target_id, after_json, actor_user_id FROM audit_logs WHERE table_name = 'legacy_import_steps'",
-    ).get();
+    assert.equal(record().progress.stage, "system_user");
+    assert.equal(stats.reads, 3, "two parent guard reads plus one combined receipt/principal read");
+    assert.equal(stats.batches, 1, "principal and durable marker commit in one audited D1 batch");
+
+    const auditRow = sqlite.prepare("SELECT id, target_id, after_json, actor_user_id FROM audit_logs WHERE table_name = 'legacy_import_steps'").get();
     assert.ok(auditRow);
     const originalReceipt = auditRow.after_json;
-    assert.ok(!auditRow.target_id.includes(credential.previewToken), "raw preview token must not be an audit target");
-    assert.ok(!originalReceipt.includes(credential.previewToken), "audit sanitization must not store the bearer token");
     assert.equal(auditRow.actor_user_id, ADMIN.id);
+    assert.equal(auditRow.target_id, runDigest(credential.previewToken) + ":" + credential.planHash.slice(0, 24) + ":system_user:0");
+    assert.ok(!auditRow.target_id.includes(credential.previewToken));
+    assert.ok(!originalReceipt.includes(credential.previewToken));
     const expected = JSON.parse(originalReceipt);
-    assert.equal(expected.run_digest, runDigest(credential.previewToken),
-      "the persisted run digest must match CURRENT's 24-character identity");
+    assert.equal(expected.run_digest, runDigest(credential.previewToken));
     assert.equal(expected.plan_hash, credential.planHash);
+    assert.equal(expected.stage, "system_user");
+    assert.equal(expected.index, 0);
+    assert.deepEqual(expected.outcome, { kind: "system_user" });
+    assert.equal(expected.next_stage, "x_users");
+    assert.equal(expected.next_index, 0);
+    assert.deepEqual(expected.next_counts, {
+      createdEvents: 0, replacedEvents: 0, skippedEvents: 0,
+      createdVideos: 0, replacedVideos: 0, skippedVideos: 0,
+      createdXUsers: 0, createdAuthUsers: 0, createdSoftwares: 0,
+      createdCustomQuestions: 0, reusedCustomQuestions: 0,
+    });
+    assert.equal(expected.skip_event_snapshot_fingerprint, legacyImportSkipSnapshotFingerprint([]));
+    assert.equal(expected.skip_video_snapshot_fingerprint, legacyImportSkipSnapshotFingerprint([]));
+    assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM "user" WHERE id = ?').get("system_legacy_import").n, 1);
+
     const unsafeMarkers = [
       ["run digest mismatch", JSON.stringify({ ...expected, run_digest: "0".repeat(24) })],
       ["plan hash mismatch", JSON.stringify({ ...expected, plan_hash: "0".repeat(64) })],
@@ -445,33 +361,84 @@ test("MIG-0645 U02o Hono: committed SQLite D1 audit receipt survives R2 CAS fail
       ["malformed JSON", '{"incomplete":'],
     ];
     for (const [reason, brokenJson] of unsafeMarkers) {
-      sqlite.prepare("UPDATE audit_logs SET after_json = ? WHERE id = ?")
-        .run(brokenJson, auditRow.id);
+      sqlite.prepare("UPDATE audit_logs SET after_json = ? WHERE id = ?").run(brokenJson, auditRow.id);
       const blocked = await request(form());
       assert.equal(blocked.status, 409, reason + " " + JSON.stringify(await blocked.clone().json()));
-      const blockedBody = await blocked.json();
-      assert.equal(blockedBody.ok, false, reason);
-      assert.equal(blockedBody.requires_repreview, true, reason);
-      assert.equal(record().status, "ready", reason + " releases R2 claim");
-      assert.equal(record().progress.stage, "system_user", reason + " cannot advance R2");
-      assert.equal(stats.batches, 1, reason + " must not duplicate D1 transaction");
-      assert.equal(durableWrites, 1);
+      const body = await blocked.json();
+      assert.equal(body.ok, false, reason);
+      assert.equal(body.requires_repreview, true, reason);
+      assert.equal(record().status, "ready", reason);
+      assert.equal(record().progress.stage, "system_user", reason);
+      assert.equal(stats.batches, 1, reason);
+      assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM "user" WHERE id = ?').get("system_legacy_import").n, 1);
     }
-    // Restore valid persisted audit; only a fully matching marker can recover R2.
-    sqlite.prepare("UPDATE audit_logs SET after_json = ? WHERE id = ?")
-      .run(originalReceipt, auditRow.id);
+
+    sqlite.prepare("INSERT INTO audit_logs (id, table_name, target_id, operation, before_json, after_json, changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json, reason, context, retention_class, restore_strategy, restore_status, payload_size_bytes, expires_at, created_at, restore_unavailable_reason_code, restore_unavailable_message) SELECT ?, table_name, target_id, operation, before_json, after_json, changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json, reason, context, retention_class, restore_strategy, restore_status, payload_size_bytes, expires_at, created_at, restore_unavailable_reason_code, restore_unavailable_message FROM audit_logs WHERE id = ?").run("duplicate-step-marker", auditRow.id);
+    const duplicate = await request(form());
+    assert.equal(duplicate.status, 409, "duplicate marker rows fail closed");
+    assert.equal(record().status, "ready");
+    assert.equal(record().progress.stage, "system_user");
+    assert.equal(stats.batches, 1);
+    sqlite.prepare("DELETE FROM audit_logs WHERE id = ?").run("duplicate-step-marker");
+
+    sqlite.prepare("UPDATE audit_logs SET after_json = ? WHERE id = ?").run(originalReceipt, auditRow.id);
     const second = await request(form());
     assert.equal(second.status, 200, JSON.stringify(await second.clone().json()));
     const recovered = await second.json();
     assert.equal(recovered.progress.stage, "x_users");
-    assert.equal(recovered.attempt, unsafeMarkers.length + 2, "each rejected receipt consumes one R2 claim");
+    assert.equal(recovered.attempt, unsafeMarkers.length + 3);
     assert.equal(record().progress.stage, "x_users");
-    assert.equal(getD1ApplyCalls(), unsafeMarkers.length + 2, "all rejected receipts and recovery invoke the read-only adapter");
-    assert.equal(stats.batches, 1, "replaying a committed D1 audit must never write another batch");
-    assert.equal(durableWrites, 1);
-    for (const [table, count] of [["x_users", 1], ["static_rebuild_queue", 1], ["audit_logs", 2]]) {
-      assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM "' + table + '"').get().n, count, table);
-    }
+    assert.equal(getD1ApplyCalls(), unsafeMarkers.length + 3);
+    assert.equal(stats.batches, 1);
+    assert.equal(stats.reads, 3 * (unsafeMarkers.length + 3), "every request stays within three pre-reads");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 2);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE table_name = 'legacy_import_steps'").get().n, 1);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE table_name = 'user'").get().n, 1);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM x_users").get().n, 0);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 0);
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("MIG-0645 U02u Hono: valid pre-existing technical principal receives marker-only atomic audit", async () => {
+  const { bucket, record } = previewBucket();
+  const { form } = await createApplyCredential(bucket);
+  const { request, sqlite, stats } = setup({ bucket, applyStep: legacyImportD1ApplyStep });
+  extendLegacyImportUserSchema(sqlite);
+  sqlite.prepare("INSERT INTO \"user\" (id, name, email, \"emailVerified\", image, discord_id, role, can_create_events, is_notification_enabled, is_tos_accepted, accepted_terms_version_id, terms_reaccept_required, is_banned, active_x_user_id, onboarding_completed_at, last_guild_check, created_at) VALUES (?, ?, NULL, NULL, NULL, NULL, 'user', 0, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 1)").run("system_legacy_import", "Legacy import system");
+  try {
+    const response = await request(form());
+    assert.equal(response.status, 200, JSON.stringify(await response.clone().json()));
+    assert.equal((await response.json()).progress.stage, "x_users");
+    assert.equal(record().progress.stage, "x_users");
+    assert.equal(stats.reads, 3);
+    assert.equal(stats.batches, 1);
+    assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM "user" WHERE id = ?').get("system_legacy_import").n, 1);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 1);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE table_name = 'legacy_import_steps'").get().n, 1);
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("MIG-0645 U02u Hono: reserved principal collision fails closed before any D1 batch", async () => {
+  const { bucket, record } = previewBucket();
+  const { form } = await createApplyCredential(bucket);
+  const { request, sqlite, stats } = setup({ bucket, applyStep: legacyImportD1ApplyStep });
+  extendLegacyImportUserSchema(sqlite);
+  sqlite.prepare("INSERT INTO \"user\" (id, name, email, \"emailVerified\", image, discord_id, role, can_create_events, is_notification_enabled, is_tos_accepted, accepted_terms_version_id, terms_reaccept_required, is_banned, active_x_user_id, onboarding_completed_at, last_guild_check, created_at) VALUES (?, 'Legacy import system', NULL, NULL, NULL, NULL, 'admin', 0, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 1)").run("system_legacy_import");
+  try {
+    const response = await request(form());
+    assert.equal(response.status, 409);
+    const body = await response.json();
+    assert.equal(body.retryable, false);
+    assert.equal(body.requires_repreview, true);
+    assert.equal(record().status, "ready");
+    assert.equal(record().progress.stage, "system_user");
+    assert.equal(stats.reads, 3);
+    assert.equal(stats.batches, 0);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
   } finally {
     sqlite.close();
   }

@@ -13,6 +13,7 @@ import {
   type LegacyImportApplyProgress,
 } from "@flamenode/server-core/legacyImport/previewStore";
 import type { AppEnv } from "../../env.ts";
+import type { PreloadedAuditContext } from "@flamenode/server-core/audit/logger";
 import { costGuardMiddleware } from "../../middleware/costGuard.ts";
 import { onlyMutating } from "../../middleware/writeOrigin.ts";
 import { runLegacyImportApplyPipeline } from "./legacyImportApplyPipeline.ts";
@@ -21,6 +22,7 @@ import { legacyImportR2Adapter } from "./legacyImportR2Adapter.ts";
 type PipelineStep = Parameters<typeof runLegacyImportApplyPipeline<LegacyImportApplyProgress>>[0]["applyStep"];
 type AtomicD1Step = (input: Parameters<PipelineStep>[0] & {
   db: AppEnv["Variables"]["db"];
+  preloaded: PreloadedAuditContext;
 }) => ReturnType<PipelineStep>;
 
 /**
@@ -51,7 +53,14 @@ export function createLegacyImportApplyRoutes(applyStep: AtomicD1Step) {
       formData,
       authUserId: user.id,
       claimPreview: r2.claimPreview,
-      applyStep: (input) => applyStep({ ...input, db }),
+      applyStep: (input) => applyStep({
+        ...input,
+        db,
+        preloaded: {
+          settings: c.get("auditSettings"),
+          actorSnapshotJsonById: c.get("actorSnapshotJsonById"),
+        },
+      }),
       mapPreviewError: r2.mapPreviewError,
       isTransientApplyFailure: (cause) =>
         isTransientDbError(cause) ||
