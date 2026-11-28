@@ -638,21 +638,26 @@ test("MIG-0651 U02 rebuild queue: real SQLite inserts 13/16 exact targets in the
         trustedActiveXId: "alice", eventId, requiredFieldsSnapshot: eventId ? null : undefined, now: NOW,
         questions: [], customAnswerDrafts: [],
       });
-      assert.equal(plan.statements.length, eventId ? 7 : 4);
+      assert.equal(plan.statements.length, eventId ? 8 : 5);
       assert.deepEqual(plan.expectedChanges, eventId
-        ? [null, null, null, 1, 1, 1, 16]
-        : [null, 1, 1, 13]);
+        ? [null, null, null, 1, 1, 1, 16, 1]
+        : [null, 1, 1, 13, 1]);
       assert.equal(plan.audits.length, eventId ? 3 : 2,
         "queue UPSERT is not a duplicate audit entry");
       assert.equal(plan.statements[0].sqlExpr !== undefined, true);
-      const last = plan.statements.at(-1);
-      assert.ok(last.sqlExpr, "the queue write is appended after video/event INSERTs");
-      assert.match(new SQLiteSyncDialect().sqlToQuery(last.sqlExpr).sql,
+      const queueStatement = plan.statements.at(-2);
+      const buildMarkStatement = plan.statements.at(-1);
+      assert.ok(queueStatement.sqlExpr, "the queue UPSERT follows video/event INSERTs");
+      assert.match(new SQLiteSyncDialect().sqlToQuery(queueStatement.sqlExpr).sql,
         /INSERT INTO static_rebuild_queue/);
+      assert.ok(buildMarkStatement.sqlExpr, "the public build marker is the final atomic statement");
+      assert.match(new SQLiteSyncDialect().sqlToQuery(buildMarkStatement.sqlExpr).sql,
+        /UPDATE public_build_state/);
       const cost = inspectFreeVideoSubmissionAtomicPlanBudget(plan, 0);
       assert.equal(cost.withinLimit, true);
 
       const dialect = new SQLiteSyncDialect();
+      const markerBefore = sqlite.prepare("SELECT requested_at FROM public_build_state WHERE id = 1").get().requested_at;
       sqlite.exec("BEGIN");
       try {
         for (const [index, statement] of plan.statements.entries()) {
@@ -661,7 +666,7 @@ test("MIG-0651 U02 rebuild queue: real SQLite inserts 13/16 exact targets in the
           assert.ok(compiled.params.length <= D1_MAX_BIND_PARAMETERS,
             "all D1 binds must stay <=100");
           const stmt = sqlite.prepare(compiled.sql);
-          const result = expr && index !== plan.statements.length - 1
+          const result = expr && index < plan.statements.length - 2
             ? stmt.get(...compiled.params)
             : stmt.run(...compiled.params);
           if (plan.expectedChanges[index] !== null) {
@@ -676,6 +681,8 @@ test("MIG-0651 U02 rebuild queue: real SQLite inserts 13/16 exact targets in the
       assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM videos").get().n, 1);
       assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n,
         eventId ? 16 : 13);
+      const markerAfter = sqlite.prepare("SELECT requested_at FROM public_build_state WHERE id = 1").get().requested_at;
+      assert.ok(markerAfter > markerBefore, "successful video + queue batch advances the public build generation");
       assert.equal(sqlite.prepare(
         "SELECT COUNT(*) AS n FROM static_rebuild_queue WHERE target_type='video' AND target_id='v:1'",
       ).get().n, 1);
@@ -702,17 +709,20 @@ test("MIG-0651 U02 rebuild queue: queue write failure also rolls back prior vide
       eventId: null, now: NOW, questions: [], customAnswerDrafts: [],
     });
     const dialect = new SQLiteSyncDialect();
+    const markerBefore = sqlite.prepare("SELECT requested_at FROM public_build_state WHERE id = 1").get().requested_at;
     sqlite.exec("BEGIN");
     assert.throws(() => {
       for (const [index, statement] of plan.statements.entries()) {
         const isSql = "sqlExpr" in statement;
         const compiled = isSql ? dialect.sqlToQuery(statement.sqlExpr) : statement.toSQL();
         const stmt = sqlite.prepare(compiled.sql);
-        if (isSql && index !== plan.statements.length - 1) stmt.get(...compiled.params);
+        if (isSql && index < plan.statements.length - 2) stmt.get(...compiled.params);
         else stmt.run(...compiled.params);
       }
     }, /queue-test-abort/);
     sqlite.exec("ROLLBACK");
+    assert.equal(sqlite.prepare("SELECT requested_at FROM public_build_state WHERE id = 1").get().requested_at,
+      markerBefore, "failed queue transaction leaves the public build generation unchanged");
     for (const table of ["videos", "video_youtube_metadata", "static_rebuild_queue"]) {
       assert.equal(sqlite.prepare(`SELECT COUNT(*) AS n FROM "${table}"`).get().n, 0);
     }
@@ -740,7 +750,7 @@ test("MIG-0651 U02: new software catalog + links and static queue commit togethe
       usedSoftware: "Fresh Tool",
     });
     assert.equal(preReads, 1, "alias+catalog matching uses one bounded JOIN pre-read");
-    assert.deepEqual(plan.expectedChanges, [null, null, 1, 1, 1, 1, 13]);
+    assert.deepEqual(plan.expectedChanges, [null, null, 1, 1, 1, 1, 13, 1]);
     assert.equal(plan.audits.length, 4, "video, metadata, catalog and link each strictly audited");
     assert.ok(plan.audits.every(a => a.strict));
     assert.equal(plan.expectedChanges.findIndex(c => c !== null), 2,
@@ -761,7 +771,7 @@ test("MIG-0651 U02: new software catalog + links and static queue commit togethe
         const q = isSql ? dialect.sqlToQuery(statement.sqlExpr) : statement.toSQL();
         assert.ok(q.params.length <= D1_MAX_BIND_PARAMETERS);
         const prepared = sqlite.prepare(q.sql);
-        const result = isSql && i < plan.statements.length - 1
+        const result = isSql && i < plan.statements.length - 2
           ? prepared.get(...q.params) : prepared.run(...q.params);
         if (plan.expectedChanges[i] !== null) {
           assert.equal(Number(result.changes), plan.expectedChanges[i]);
@@ -794,7 +804,7 @@ test("MIG-0651 U02: failing rebuild queue rolls back fresh software/catalog/vide
       videoAfter: video(), actorUserId: "user-1", trustedActiveXId: "alice",
       eventId: null, now: NOW, questions: [], customAnswerDrafts: [], usedSoftware: "Fresh Tool",
     });
-    assert.deepEqual(plan.expectedChanges, [null, null, 1, 1, 1, 1, 13]);
+    assert.deepEqual(plan.expectedChanges, [null, null, 1, 1, 1, 1, 13, 1]);
     const dialect = new SQLiteSyncDialect();
     sqlite.exec("BEGIN");
     assert.throws(() => {
@@ -802,7 +812,7 @@ test("MIG-0651 U02: failing rebuild queue rolls back fresh software/catalog/vide
         const isSql = "sqlExpr" in statement;
         const q = isSql ? dialect.sqlToQuery(statement.sqlExpr) : statement.toSQL();
         const prepared = sqlite.prepare(q.sql);
-        if (isSql && index < plan.statements.length - 1) prepared.get(...q.params);
+        if (isSql && index < plan.statements.length - 2) prepared.get(...q.params);
         else prepared.run(...q.params);
       }
     }, /queue-down/);
@@ -836,7 +846,7 @@ test("MIG-0651 U02: software catalog arrival after pre-read fails before first v
       eventId: null, now: NOW, questions: [], customAnswerDrafts: [],
       usedSoftware: "New Racing Tool",
     });
-    assert.deepEqual(plan.expectedChanges, [null, null, 1, 1, 1, 1, 13]);
+    assert.deepEqual(plan.expectedChanges, [null, null, 1, 1, 1, 1, 13, 1]);
     insert(sqlite, "software_catalog", {
       id: "raced-software", name: "New Racing Tool", normalized_name: "new racing tool",
       is_active: 1, usage_count: 0, created_at: NOW, updated_at: NOW,
@@ -884,7 +894,7 @@ test("MIG-0651 U02: CURRENT-style video_submitted DM, video and rebuild queue sh
         video_id: "v:1", url: "https://flamenode.example/v:1" },
     });
     assert.equal(stats.reads, 0, "DM and opt-out checks run inside D1 batch without a pre-read");
-    assert.deepEqual(plan.expectedChanges, [null, 1, 1, null, 13]);
+    assert.deepEqual(plan.expectedChanges, [null, 1, 1, null, 13, 1]);
     assert.equal(plan.audits.length, 2, "notification does not duplicate strict video audit");
     const budget = inspectFreeVideoSubmissionAtomicPlanBudget(plan, stats.reads);
     assert.equal(budget.d1WithinLimit, true);
@@ -940,7 +950,7 @@ test("MIG-0651 U02: queue failure rolls back prepared DM outbox with video and m
       submittedNotificationPayload: { content: "投稿受付",
         video_id: "v:1", url: "https://flamenode.example/v:1" },
     });
-    assert.deepEqual(plan.expectedChanges, [null, 1, 1, null, 13]);
+    assert.deepEqual(plan.expectedChanges, [null, 1, 1, null, 13, 1]);
     const dialect = new SQLiteSyncDialect();
     sqlite.exec("BEGIN");
     assert.throws(() => {
@@ -990,7 +1000,7 @@ test("MIG-0651 U02: both free-video notification routes share the video/Queue tr
         },
       });
       assert.equal(reads, 0, "DM and ops recipient checks run inside the same batch");
-      assert.deepEqual(plan.expectedChanges, [null, 1, 1, null, null, 13],
+      assert.deepEqual(plan.expectedChanges, [null, 1, 1, null, null, 13, 1],
         "opted-out DM remains a prepared conditional no-change INSERT");
       assert.equal(plan.audits.length, 2, "notification rows are not fabricated strict audits");
       const budget = inspectFreeVideoSubmissionAtomicPlanBudget(plan, reads);
@@ -1050,7 +1060,7 @@ test("MIG-0651 U02: queue fault rolls back video, DM, forced ops channel and met
         threadName: "[作品登録] Title / @alice",
       },
     });
-    assert.deepEqual(plan.expectedChanges, [null, 1, 1, null, null, 13]);
+    assert.deepEqual(plan.expectedChanges, [null, 1, 1, null, null, 13, 1]);
     const dialect = new SQLiteSyncDialect();
     sqlite.exec("BEGIN");
     assert.throws(() => {
@@ -1106,7 +1116,7 @@ test("MIG-0651 U02 new-video member/chapter plan is atomic with video/metadata/r
       memberSubmission: verifiedMembersForNewVideo(),
     });
     assert.equal(preReads, 1, "member alias and direct rows resolve in one D1 SELECT");
-    assert.deepEqual(plan.expectedChanges, [null, null, 1, 1, 1, 2, 1, 13]);
+    assert.deepEqual(plan.expectedChanges, [null, null, 1, 1, 1, 2, 1, 13, 1]);
     assert.equal(plan.audits.length, 5);
     assert.ok(plan.audits.every(a => a.strict));
     assert.equal(plan.expectedChanges.findIndex(n => n !== null), 2,
@@ -1165,7 +1175,7 @@ test("MIG-0651 U02 new-video: exact or normalized X race aborts full audited vid
         eventId: null, now: NOW, questions: [], customAnswerDrafts: [],
         memberSubmission: verifiedMembersForNewVideo(),
       });
-      assert.deepEqual(plan.expectedChanges, [null, null, 1, 1, 1, 2, 1, 13]);
+      assert.deepEqual(plan.expectedChanges, [null, null, 1, 1, 1, 2, 1, 13, 1]);
       insert(sqlite, "x_users", {
         id: racingId, x_name: "Pre-existing approved", approval_status: "approved",
       });
@@ -1219,7 +1229,7 @@ test("MIG-0651 U02 new-video: rebuild failure rolls back member X, chapter and v
       eventId: null, now: NOW, questions: [], customAnswerDrafts: [],
       memberSubmission: verifiedMembersForNewVideo(),
     });
-    assert.deepEqual(plan.expectedChanges, [null, null, 1, 1, 1, 2, 1, 13]);
+    assert.deepEqual(plan.expectedChanges, [null, null, 1, 1, 1, 2, 1, 13, 1]);
     const dialect = new SQLiteSyncDialect();
     sqlite.exec("BEGIN");
     assert.throws(() => {
