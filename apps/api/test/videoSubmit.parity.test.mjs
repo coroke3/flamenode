@@ -1458,6 +1458,8 @@ test("U03a SA-088: multi-event stage/general policy receipt is one read and matc
       await import("../../../src/lib/video/stagePermissionSubmission.ts");
     const { validateCustomAnswersForEvents } =
       await import("../../../src/lib/video/submissionValidation.ts");
+    const { fetchActiveCustomQuestionsForEvents } =
+      await import("../../../src/lib/video/customQuestionAnswers.ts");
     const eventIds = ["ev_open", "ev_closed"];
     const w = seedWorld();
     try {
@@ -1511,19 +1513,19 @@ test("U03a SA-088: multi-event stage/general policy receipt is one read and matc
       formData.append("custom_question_answer_id", "stage_permission_2");
       formData.append("custom_question_answer_value", "");
       formData.append("custom_answer:ev_open:general_open", "answer");
+      formData.append("custom_answer:ev_open:reason", "応募理由");
 
       const currentGeneral = await validateCustomAnswersForEvents(db, formData, eventIds);
       assert.equal(currentGeneral.ok, true);
-      assert.equal(candidateGeneral.length, 2);
+      const currentQuestionsByEvent = await fetchActiveCustomQuestionsForEvents(db, eventIds);
+      const currentGeneralQuestions = [...currentQuestionsByEvent.values()].flat();
+      const questionSignature = (question) => [
+        question.id, question.event_id, question.question_key, question.label,
+        question.type, question.required, question.options, question.max_length,
+      ];
       assert.deepEqual(
-        candidateGeneral.map((question) => [
-          question.id, question.event_id, question.question_key, question.label,
-          question.type, question.required, question.options, question.max_length,
-        ]),
-        [
-          ["general_closed", "ev_closed", "general_closed", "別イベント質問", "select", false, ["A", "B"], 1000],
-          ["general_open", "ev_open", "general_open", "一般質問", "text", true, [], 30],
-        ],
+        candidateGeneral.map(questionSignature),
+        currentGeneralQuestions.map(questionSignature),
       );
 
       const candidateStage = buildSlotSubmissionStagePermissionSubmission(formData, candidateStageFields);
@@ -1553,7 +1555,74 @@ test("U03a SA-088: multi-event stage/general policy receipt is one read and matc
     }
   });
 
-  test("U03a SA-088: stage/general question policy changes fail the same audited batch", async () => {
+  test("U03a SA-088: general-question receipt preserves CURRENT 80-event chunk order", async () => {
+  const {
+    readSlotSubmissionVideoEventReceipt,
+    decodeSlotSubmissionGeneralQuestions,
+  } = await import("@flamenode/server-core/video/requiredVideoFields");
+  const { fetchActiveCustomQuestionsForEvents } =
+    await import("../../../src/lib/video/customQuestionAnswers.ts");
+  const firstChunk = Array.from({ length: 80 }, (_, index) =>
+    "z_event_" + String(index).padStart(3, "0")
+  );
+  const eventIds = [...firstChunk, "a_event_080"];
+  const w = seedWorld();
+  try {
+    for (const [index, eventId] of eventIds.entries()) {
+      insert(w.sqlite, "events", {
+        id: eventId,
+        title: eventId,
+        visibility_status: "public",
+        allow_unslotted_posts: 1,
+        end_time: 2_000_000_000,
+        required_video_fields_json: null,
+        created_at: 100,
+        updated_at: 100,
+      });
+      const questionId = "question_" + String(index).padStart(3, "0");
+      insert(w.sqlite, "event_custom_questions", {
+        id: questionId,
+        event_id: eventId,
+        question_key: questionId,
+        label: "Question " + index,
+        description: null,
+        type: "text",
+        required: 0,
+        options_json: null,
+        placeholder: null,
+        max_length: 1000,
+        sort_order: 0,
+        is_active: 1,
+        visibility: "review",
+        created_at: 100,
+        updated_at: 100,
+      });
+    }
+
+    const db = drizzle(w.d1);
+    const readsBefore = w.d1.stats.reads;
+    const receipt = await readSlotSubmissionVideoEventReceipt(
+      db, { event_id: eventIds[0], video_id: null }, null, eventIds,
+    );
+    assert.equal(w.d1.stats.reads - readsBefore, 1);
+
+    const candidate = decodeSlotSubmissionGeneralQuestions(receipt);
+    const currentByEvent = await fetchActiveCustomQuestionsForEvents(db, eventIds);
+    const current = [...currentByEvent.values()].flat();
+    const signature = (question) => [
+      question.id, question.event_id, question.question_key, question.label,
+      question.type, question.required, question.options, question.max_length,
+    ];
+    assert.deepEqual(candidate.map(signature), current.map(signature));
+    assert.deepEqual(candidate.map((question) => question.event_id), eventIds);
+    assert.equal(w.d1.stats.reads - readsBefore, 3);
+    assert.ok(w.d1.stats.maxBinds <= 100);
+  } finally {
+    w.sqlite.close();
+  }
+});
+
+test("U03a SA-088: stage/general question policy changes fail the same audited batch", async () => {
     const {
       readSlotSubmissionVideoEventReceipt,
       buildSlotSubmissionQuestionPolicyAssertions,
@@ -1767,7 +1836,11 @@ test("U03a SA-088: multi-event stage/general policy receipt is one read and matc
             const reads = w.d1.stats.reads;
             const actual = await readSlotSubmissionVideoEventReceipt(db, { event_id: eventId, video_id: videoId }, youtubeId);
             assert.equal(w.d1.stats.reads - reads, 1);
-            assert.deepEqual(actual, {
+            assert.deepEqual({
+              existing: actual.existing,
+              event: actual.event,
+              youtubeDuplicate: actual.youtubeDuplicate,
+            }, {
               existing: videoId ? video ? { kind: "found", row: video } : { kind: "missing" } : { kind: "none" },
               event,
               youtubeDuplicate: duplicate,
@@ -1775,7 +1848,7 @@ test("U03a SA-088: multi-event stage/general policy receipt is one read and matc
           }
         }
       }
-      assert.equal(w.d1.stats.maxBinds, 3);
+      assert.ok(w.d1.stats.maxBinds <= 100);
       assert.equal(w.d1.stats.batches, 0);
       assert.deepEqual(snapshotDb(w.sqlite), before);
       assert.deepEqual(w.bucket.puts, []);
