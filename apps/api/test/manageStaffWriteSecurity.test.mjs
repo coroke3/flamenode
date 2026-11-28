@@ -53,11 +53,26 @@ function setup({ user = ADMIN, fault, failQueue = false, failRouteDb = false } =
   };
   const originalPrepare = db.prepare;
   db.prepare = (sql) => {
-    if (fault?.match(sql)) {
-      receipt.readFaults++;
-      throw fault.error;
+    if (!fault?.match(sql)) return originalPrepare(sql);
+    if (fault.readMethod) {
+      // A D1 failure can also reject the bound statement's read promise.
+      const prepared = originalPrepare(sql);
+      return {
+        ...prepared,
+        bind: (...params) => {
+          const bound = prepared.bind(...params);
+          return {
+            ...bound,
+            [fault.readMethod]: async () => {
+              receipt.readFaults++;
+              throw fault.error;
+            },
+          };
+        },
+      };
     }
-    return originalPrepare(sql);
+    receipt.readFaults++;
+    throw fault.error;
   };
   const originalBatch = db.batch;
   db.batch = async (statements) => {
@@ -149,17 +164,20 @@ test("SEC-800: provider prefix and throwing diagnostic cannot escape staff write
 test("SEC-800: direct preparation reads never classify provider text as a domain conflict", async () => {
   const singleXRead = (sql) => /SELECT id FROM x_users WHERE id = \? LIMIT 1/i.test(sql);
   const csvXRead = (sql) => /SELECT id FROM x_users WHERE id IN \(/i.test(sql);
-  for (const [method, path, body, match, log] of [
-    ["POST", "/", upsert, staffRead, "staff upsert unavailable"],
-    ["PUT", "/s-owner", { ...upsert, staff_id: "s-owner" }, staffRead, "staff upsert unavailable"],
-    ["POST", "/", upsert, singleXRead, "staff upsert unavailable"],
-    ["PUT", "/s-owner", { ...upsert, staff_id: "s-owner" }, singleXRead, "staff upsert unavailable"],
-    ["POST", "/csv", csv(), staffRead, "CSV staff mutation unavailable"],
-    ["POST", "/csv", csv(), csvXRead, "CSV staff mutation unavailable"],
-    ["DELETE", "/s-owner", { reason: "remove" }, staffRead, "staff delete unavailable"],
+  for (const [method, path, body, match, readMethod, log] of [
+    ["POST", "/", upsert, staffRead, "all", "staff upsert unavailable"],
+    ["PUT", "/s-owner", { ...upsert, staff_id: "s-owner" }, staffRead, "all", "staff upsert unavailable"],
+    ["POST", "/", upsert, singleXRead, "first", "staff upsert unavailable"],
+    ["PUT", "/s-owner", { ...upsert, staff_id: "s-owner" }, singleXRead, "first", "staff upsert unavailable"],
+    ["POST", "/csv", csv(), staffRead, "all", "CSV staff mutation unavailable"],
+    ["POST", "/csv", csv(), csvXRead, "all", "CSV staff mutation unavailable"],
+    ["DELETE", "/s-owner", { reason: "remove" }, staffRead, "first", "staff delete unavailable"],
   ]) {
-    for (const message of [LAST_OWNER_ERROR, "確認のため「REMOVE SELF ev-1」と入力してください。"]) {
-      const s = setup({ fault: { match, error: new Error(message) } });
+    for (const fault of [
+      { match, error: new Error(LAST_OWNER_ERROR) },
+      { match, readMethod, error: new Error("確認のため「REMOVE SELF ev-1」と入力してください。") },
+    ]) {
+      const s = setup({ fault });
       try {
         await withThrowingDiagnostics(async ({ errors }) => {
           const result = await s.send(method, path, body);
