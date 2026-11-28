@@ -97,6 +97,50 @@ export function decodeGeneralCustomQuestionPolicyProjection(
   });
 }
 
+/**
+ * Decode the same ordered general-question projection for a resolved
+ * multi-event slot submission. SQL orders by event_id, sort_order, id;
+ * each event retains CURRENT's independent 18-row cap.
+ */
+export function decodeGeneralCustomQuestionPolicyForEvents(
+  json: string,
+  expectedEventIds: readonly string[],
+): LoadedGeneralCustomQuestion[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    throw new Error("video_custom_question_projection_invalid");
+  }
+  const ids = Array.from(new Set(expectedEventIds.filter(Boolean)));
+  if (!Array.isArray(parsed) || parsed.length > ids.length * MAX_VIDEO_CUSTOM_QUESTIONS_READ) {
+    throw new Error("video_custom_question_projection_limit_or_shape_invalid");
+  }
+  const expected = new Set(ids);
+  const grouped = new Map<string, unknown[][]>();
+  const order: string[] = [];
+  for (const tuple of parsed) {
+    if (!Array.isArray(tuple) || tuple.length !== 11 ||
+        typeof tuple[1] !== "string" || !expected.has(tuple[1])) {
+      throw new Error("video_custom_question_projection_invalid");
+    }
+    const eventId = tuple[1];
+    let rows = grouped.get(eventId);
+    if (!rows) {
+      rows = [];
+      grouped.set(eventId, rows);
+      order.push(eventId);
+    }
+    rows.push(tuple);
+    if (rows.length > MAX_VIDEO_CUSTOM_QUESTIONS_READ) {
+      throw new Error("video_custom_question_projection_limit_or_shape_invalid");
+    }
+  }
+  return order.flatMap((eventId) =>
+    decodeGeneralCustomQuestionPolicyProjection(JSON.stringify(grouped.get(eventId)), eventId)
+  );
+}
+
 const STAGE_KEY = "stage_permission";
 const STAGE_PREFIX = "stage_permission_";
 
