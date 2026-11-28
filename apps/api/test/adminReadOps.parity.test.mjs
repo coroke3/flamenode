@@ -2420,6 +2420,16 @@ if (runUnderRootTsx(import.meta.url)) {
       ["non-array", '{"key":"event.basic"}', true],
       ["non-strings", "[null,7,true,{}]", true],
       ["unknown-only", '["bogus.key"]', true],
+      // SEC-930: both CURRENT and TARGET use the shared canonicalizer.
+      // Inherited-only keys now resolve to no grants; mixed valid keys retain
+      // the existing diagnostic behavior (at least one recognized key).
+      ...Object.getOwnPropertyNames(Object.prototype).flatMap((name, i) => [
+        ["inherited-only-" + i, JSON.stringify([name]), true],
+        ["inherited-alias-" + i, JSON.stringify([name, "videos.title"]), false],
+        ["inherited-admin-" + i, JSON.stringify([name, "xid.link_requests"]), false],
+      ]),
+      ["inherited-only-all", JSON.stringify(Object.getOwnPropertyNames(Object.prototype)), true],
+      ["inherited-all-with-valid", JSON.stringify([...Object.getOwnPropertyNames(Object.prototype), "event.basic"]), false],
       ["known", '["event.basic"]', false],
       ["legacy-alias", '["videos.title"]', false],
       ["admin-only-key", '["xid.link_requests"]', false],
