@@ -91,6 +91,7 @@ test("U04a: local workerd/D1 preserves raw actor snapshot bytes and version-fenc
     "  await run(db, 'CREATE TABLE IF NOT EXISTS audit_actor_refs_u04a (audit_id TEXT PRIMARY KEY, snapshot_id TEXT NOT NULL REFERENCES audit_actor_snapshots_u04a(id))');",
     "  await run(db, 'CREATE TABLE IF NOT EXISTS u04a_audit_inline (id TEXT PRIMARY KEY, actor_snapshot_json TEXT NOT NULL)');",
     "  await run(db, 'CREATE TABLE IF NOT EXISTS u04a_actor_history_refs (id TEXT PRIMARY KEY, user_version INTEGER NOT NULL, x_version INTEGER NOT NULL)');",
+    "  await run(db, 'CREATE TABLE IF NOT EXISTS u04a_actor_history_refs_fk (id TEXT PRIMARY KEY, user_version INTEGER NOT NULL REFERENCES u04a_user_history(version), x_version INTEGER NOT NULL REFERENCES u04a_x_users_history(version))');",
     "  await run(db, 'CREATE TABLE IF NOT EXISTS u04a_forced_failure (value INTEGER NOT NULL CHECK (value = 1))');",
     "  await run(db, 'INSERT OR IGNORE INTO u04a_user (id, discord_id, name, active_x_user_id, image) VALUES (?, ?, ?, ?, ?)', ['admin-1', 'd', 'Name', 'u04a-x', 'image']);",
     "  await run(db, 'INSERT OR IGNORE INTO u04a_x_users (id, x_name, icon_url) VALUES (?, ?, ?)', ['u04a-x', 'X name', 'https://i/x.png']);",
@@ -276,6 +277,43 @@ test("U04a: local workerd/D1 preserves raw actor snapshot bytes and version-fenc
     "  const immutableHistoryFailureRow = (await all(db, historySql, [immutableHistoryFailureVersions.x_version, 'admin-1', immutableHistoryFailureVersions.user_version]))[0];",
     "  const immutableHistoryFailureOut = { failed: immutableHistoryFailureFailed, refCount: Number((await all(db, 'SELECT COUNT(*) AS n FROM u04a_actor_history_refs WHERE id=?', ['history-failed']))[0].n), resource: await getResource(), historyAvailable: !!immutableHistoryFailureRow, admissionJson: immutableHistoryFailureAdmissionJson, historyJson: JSON.stringify(actorSnapshotFromRow(immutableHistoryFailureRow)), liveName: (await all(db, sourceSql, ['admin-1']))[0]?.x_name };",
     "  await resetActor();",
+    "  const immutableHistoryLifecycleVersions = await getVersions();",
+    "  const immutableHistoryLifecycleSource = (await all(db, sourceSql, ['admin-1']))[0];",
+    "  const immutableHistoryLifecycleAdmissionJson = JSON.stringify(actorSnapshotFromRow(immutableHistoryLifecycleSource));",
+    "  const immutableHistoryLifecycleAdmissionBytes = (await all(db, sourceBytesSql, ['admin-1']))[0];",
+    "  await run(db, \"DELETE FROM u04a_user WHERE id='admin-1'\");",
+    "  await run(db, \"INSERT INTO u04a_user (id, discord_id, name, active_x_user_id, image) VALUES ('admin-1', 'd-after', 'User after lifecycle', 'u04a-x', 'image-after')\");",
+    "  await run(db, \"DELETE FROM u04a_x_users WHERE id='u04a-x'\");",
+    "  await run(db, \"INSERT INTO u04a_x_users (id, x_name, icon_url) VALUES ('u04a-x', 'X after lifecycle', 'https://i/after.png')\");",
+    "  const immutableHistoryLifecycleLiveJson = JSON.stringify(actorSnapshotFromRow((await all(db, sourceSql, ['admin-1']))[0]));",
+    "  const immutableHistoryLifecycleResults = await db.batch([",
+    "    db.prepare('UPDATE u04a_resource SET value=? WHERE id=?').bind('history-lifecycle', 'target'),",
+    "    db.prepare('INSERT INTO u04a_actor_history_refs (id, user_version, x_version) VALUES (?, ?, ?)').bind('history-lifecycle', immutableHistoryLifecycleVersions.user_version, immutableHistoryLifecycleVersions.x_version),",
+    "  ]);",
+    "  const immutableHistoryLifecycleRow = (await all(db, historySql, [immutableHistoryLifecycleVersions.x_version, 'admin-1', immutableHistoryLifecycleVersions.user_version]))[0];",
+    "  const immutableHistoryLifecycleBytes = (await all(db, historyBytesSql, [immutableHistoryLifecycleVersions.x_version, 'admin-1', immutableHistoryLifecycleVersions.user_version]))[0];",
+    "  const immutableHistoryLifecycle = { allSuccess: immutableHistoryLifecycleResults.every(r => r.success === true), admissionJson: immutableHistoryLifecycleAdmissionJson, historyJson: JSON.stringify(actorSnapshotFromRow(immutableHistoryLifecycleRow)), liveJson: immutableHistoryLifecycleLiveJson, historyBytesMatch: JSON.stringify(immutableHistoryLifecycleBytes) === JSON.stringify(immutableHistoryLifecycleAdmissionBytes), resource: await getResource(), refCount: Number((await all(db, 'SELECT COUNT(*) AS n FROM u04a_actor_history_refs WHERE id=?', ['history-lifecycle']))[0].n), userHistoryCount: Number((await all(db, 'SELECT COUNT(*) AS n FROM u04a_user_history WHERE version=?', [immutableHistoryLifecycleVersions.user_version]))[0].n), xHistoryCount: Number((await all(db, 'SELECT COUNT(*) AS n FROM u04a_x_users_history WHERE version=?', [immutableHistoryLifecycleVersions.x_version]))[0].n) };",
+    "  await resetActor();",
+    "  const cleanupNoFkVersions = await getVersions();",
+    "  await run(db, 'DELETE FROM u04a_user_history WHERE version=?', [cleanupNoFkVersions.user_version]);",
+    "  await run(db, 'DELETE FROM u04a_x_users_history WHERE version=?', [cleanupNoFkVersions.x_version]);",
+    "  const cleanupNoFkResults = await db.batch([",
+    "    db.prepare('UPDATE u04a_resource SET value=? WHERE id=?').bind('cleanup-no-fk', 'target'),",
+    "    db.prepare('INSERT INTO u04a_actor_history_refs (id, user_version, x_version) VALUES (?, ?, ?)').bind('cleanup-no-fk', cleanupNoFkVersions.user_version, cleanupNoFkVersions.x_version),",
+    "  ]);",
+    "  const cleanupNoFkRow = (await all(db, historySql, [cleanupNoFkVersions.x_version, 'admin-1', cleanupNoFkVersions.user_version]))[0] ?? null;",
+    "  const cleanupNoFk = { allSuccess: cleanupNoFkResults.every(r => r.success === true), refCount: Number((await all(db, 'SELECT COUNT(*) AS n FROM u04a_actor_history_refs WHERE id=?', ['cleanup-no-fk']))[0].n), historyAvailable: !!cleanupNoFkRow, resource: await getResource() };",
+    "  await resetActor();",
+    "  const cleanupFkVersions = await getVersions();",
+    "  await run(db, 'DELETE FROM u04a_user_history WHERE version=?', [cleanupFkVersions.user_version]);",
+    "  await run(db, 'DELETE FROM u04a_x_users_history WHERE version=?', [cleanupFkVersions.x_version]);",
+    "  const cleanupFkFailed = await batchFailed([",
+    "    db.prepare('UPDATE u04a_resource SET value=? WHERE id=?').bind('cleanup-fk', 'target'),",
+    "    db.prepare('INSERT INTO u04a_actor_history_refs_fk (id, user_version, x_version) VALUES (?, ?, ?)').bind('cleanup-fk', cleanupFkVersions.user_version, cleanupFkVersions.x_version),",
+    "  ]);",
+    "  const cleanupFk = { failed: cleanupFkFailed, refCount: Number((await all(db, 'SELECT COUNT(*) AS n FROM u04a_actor_history_refs_fk WHERE id=?', ['cleanup-fk']))[0].n), resource: await getResource() };",
+    "  await resetActor();",
+    "  await resetActor();",
     "  const beforeRollback = await getVersions();",
     "  const seqBefore = await getSeq();",
     "  const rollbackStatements = fencedBatch('fence-rollback', beforeRollback, [db.prepare(\"UPDATE u04a_x_users SET x_name='X after' WHERE id='u04a-x'\")]);",
@@ -303,7 +341,7 @@ test("U04a: local workerd/D1 preserves raw actor snapshot bytes and version-fenc
     "  const missingFailed = await batchFailed([db.prepare(\"UPDATE OR IGNORE u04a_x_users SET x_name='after-missing' WHERE id='u04a-x'\")]);",
     "  const missing = { failed: missingFailed, versions: await getVersions(), name: (await all(db, sourceSql, ['admin-1']))[0]?.x_name, rows: (await all(db, 'SELECT n FROM u04a_actor_sequence')).length };",
     "  const allocator = { fractionalRejected, oldVersions, atMaxSeq, maxToken, allocatorOut, overflowBatch, missing };",
-    "  return { cases: casesOut, blobCanonicalJson: blobCase?.sourceJson ?? null, blobJson1FixtureMatches, json1, json1Error, staleChanges, staleCount, rollbackFailed, rollbackCount, abandonedCount, successRef, fenceOut, positive, interleaving, interleavingFence, interleavingFailure, interleavingFailureFence, immutableHistory, immutableHistoryFailureOut, lateRollback, allocator };",
+    "return { cases: casesOut, blobCanonicalJson: blobCase?.sourceJson ?? null, blobJson1FixtureMatches, json1, json1Error, staleChanges, staleCount, rollbackFailed, rollbackCount, abandonedCount, successRef, fenceOut, positive, interleaving, interleavingFence, interleavingFailure, interleavingFailureFence, immutableHistory, immutableHistoryFailureOut, immutableHistoryLifecycle, cleanupRace: { noFk: cleanupNoFk, fk: cleanupFk }, lateRollback, allocator };",
     "}",
     "export default {",
     "  async fetch(request, env) {",
@@ -423,6 +461,14 @@ test("U04a: local workerd/D1 preserves raw actor snapshot bytes and version-fenc
       historyJson: body.immutableHistoryFailureOut.admissionJson,
       liveName: "X history reinserted",
     });
+    assert.equal(body.immutableHistoryLifecycle.allSuccess, true);
+    assert.equal(body.immutableHistoryLifecycle.historyJson, body.immutableHistoryLifecycle.admissionJson);
+    assert.notEqual(body.immutableHistoryLifecycle.liveJson, body.immutableHistoryLifecycle.admissionJson);
+    assert.equal(body.immutableHistoryLifecycle.historyBytesMatch, true);
+    assert.equal(body.immutableHistoryLifecycle.resource, "history-lifecycle");
+    assert.deepEqual({ refCount: body.immutableHistoryLifecycle.refCount, userHistoryCount: body.immutableHistoryLifecycle.userHistoryCount, xHistoryCount: body.immutableHistoryLifecycle.xHistoryCount }, { refCount: 1, userHistoryCount: 1, xHistoryCount: 1 });
+    assert.deepEqual(body.cleanupRace.noFk, { allSuccess: true, refCount: 1, historyAvailable: false, resource: "cleanup-no-fk" });
+    assert.deepEqual(body.cleanupRace.fk, { failed: true, refCount: 0, resource: "before" });
     const late = body.lateRollback;
     assert.equal(late.failed, true);
     assert.equal(late.snapshotCount, 0);
