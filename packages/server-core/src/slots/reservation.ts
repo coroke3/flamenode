@@ -1147,6 +1147,18 @@ export async function extendSlotGroupCore(
         -- unselected alternative invalidate the mandatory snapshot.
         SELECT CASE WHEN instr(neighbor_json, '"__invalid_projection":1') > 0
           THEN json_object('edge_id', edge_id, 'neighbor', NULL, 'invalid_neighbor', 1)
+          -- A reserved neighbor already in group_rows is independently
+          -- carried and validated by the mandatory group/anchor projection.
+          -- Only its unavailable outcome is needed. Keep all external
+          -- neighbors, including occupied rows, in their existing full form.
+          WHEN neighbor_json IS NOT NULL
+            AND json_extract(neighbor_json, '$.status') = 'reserved'
+            AND EXISTS (
+              SELECT 1 FROM group_rows member
+              WHERE CAST(member."id" AS BLOB) = CAST(json_extract(neighbor_json, '$.id') AS BLOB)
+                AND member."status" = 'reserved'
+            )
+          THEN json_object('edge_id', edge_id, 'neighbor', NULL, 'unavailable_neighbor', 1)
           ELSE json_object('edge_id', edge_id, 'neighbor', json(neighbor_json))
         END AS item
         FROM alternate_neighbors WHERE edge_id IS NOT NULL
@@ -1258,6 +1270,7 @@ export async function extendSlotGroupCore(
       edge_id: string;
       neighbor: SlotRow | null;
       invalid_neighbor?: 1;
+      unavailable_neighbor?: 1;
     }[]>(snapshot.alternate_neighbors_json, []);
     const alternate = alternatives.find((entry) => entry.edge_id === edge.id);
     // A present null neighbor is authoritative. If the optional projection
@@ -1267,7 +1280,7 @@ export async function extendSlotGroupCore(
       if (alternate.invalid_neighbor === 1) {
         return failOutcome(503, GENERIC_MUTATION_ERROR_MESSAGE);
       }
-      candidate = alternate.neighbor ?? undefined;
+      candidate = alternate.unavailable_neighbor === 1 ? undefined : alternate.neighbor ?? undefined;
     } else {
       callerQueryCount += 1;
       const fallback = await loadOrderedNeighborFallback(rawDb, edge, input.direction);

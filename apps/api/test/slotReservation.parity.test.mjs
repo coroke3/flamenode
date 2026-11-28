@@ -1667,7 +1667,10 @@ if (runUnderRootTsx(import.meta.url)) {
 
   test("S3 #725: tied legacy group edges preserve CURRENT neighbor and three reads", async () => {
     for (const direction of ["forward", "backward"]) {
-      for (const [availableBetween, wide] of [[true, false], [false, false], [true, true]]) {
+      for (const [availableBetween, wide, crowded] of [
+        [true, false, false], [false, false, false], [true, true, false],
+        [false, true, true],
+      ]) {
         const a = world();
         const b = world();
         for (const w of [a, b]) {
@@ -1689,7 +1692,10 @@ if (runUnderRootTsx(import.meta.url)) {
             reserved_x_id_snapshot: "x_owner", reservation_group_id: "legacy_tied_group",
             display_name: wide ? "\\".repeat(512) : "Legacy", updated_at: 100, version: 1,
           };
-          for (const id of ["tie_A", "tie_a"]) {
+          const groupIds = crowded
+            ? direction === "forward" ? ["tie_A", "tie_a", "tie_B"] : ["tie_A", "tie_a", "tie_b"]
+            : ["tie_A", "tie_a"];
+          for (const id of groupIds) {
             insert(w.sqlite, "slots", { ...group, id, slot_label: wide ? "\\".repeat(1565) : id });
           }
           if (availableBetween) {
@@ -1729,10 +1735,35 @@ if (runUnderRootTsx(import.meta.url)) {
                 assert.equal(row.invalid_snapshot, 0);
                 assert.ok(Buffer.byteLength(JSON.stringify(row), "utf8") < 64 * 1024);
                 assert.equal(JSON.parse(row.group_json).filter(item => item.__anchor_reference === 1).length, 1);
-                const edgeId = direction === "forward" ? "tie_A" : "tie_a";
-                const alternate = JSON.parse(row.alternate_neighbors_json).find(entry => entry.edge_id === edgeId);
-                assert.equal(alternate.neighbor.id, "tie_Z", "valid alternate must fit without a fourth read");
-                assert.equal(alternate.neighbor.slot_label, "\\".repeat(2048));
+                const edgeId = direction === "forward" ? crowded ? "tie_B" : "tie_A" : "tie_a";
+                const alternates = JSON.parse(row.alternate_neighbors_json);
+                const alternate = alternates.find(entry => entry.edge_id === edgeId);
+                if (crowded) {
+                  assert.deepEqual(alternate, { edge_id: edgeId, neighbor: null, unavailable_neighbor: 1 });
+                  assert.equal(alternates.length, 2);
+                  // Reconstruct the exact former full alternate items from the
+                  // mandatory snapshot. Every tied neighbor is another group
+                  // row here. The former wire budget would omit both items.
+                  const group = JSON.parse(row.group_json)
+                    .map(item => item.__anchor_reference === 1 ? JSON.parse(row.anchor_json) : item)
+                    .sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+                  const prior = alternates.map(item => {
+                    assert.equal(item.unavailable_neighbor, 1);
+                    const index = group.findIndex(g => g.id === item.edge_id);
+                    const neighbor = group[index + (direction === "forward" ? 1 : -1)];
+                    assert.ok(neighbor);
+                    assert.equal(neighbor.status, "reserved");
+                    return { edge_id: item.edge_id, neighbor };
+                  });
+                  const mandatoryBytes = Object.entries(row)
+                    .filter(([key]) => key !== "alternate_neighbors_json" && key !== "invalid_snapshot")
+                    .reduce((sum, [, value]) => sum + Buffer.byteLength(JSON.stringify(value), "utf8"), 0);
+                  const oldOptionalBytes = Buffer.byteLength(JSON.stringify(JSON.stringify(prior)), "utf8");
+                  assert.ok(mandatoryBytes + oldOptionalBytes > 58 * 1024, "former full projection must overflow");
+                } else {
+                  assert.equal(alternate.neighbor.id, "tie_Z", "valid alternate must fit without a fourth read");
+                  assert.equal(alternate.neighbor.slot_label, "\\".repeat(2048));
+                }
                 return row;
               };
               return bound;
