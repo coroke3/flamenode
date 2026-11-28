@@ -152,8 +152,8 @@ test("MIG-0639 native KV runner separates reset miss, warm hit, elapsed expiry a
   const fixture = buildOperationModeMirrorFixture("malformed-tail:65537");
   const body = JSON.stringify(fixture.expected), sha = "a".repeat(64);
   const opts = { samples: 2, warmup: 1, coldSamples: 2, skipCold: false };
-  function fake({ early = false, bad = null } = {}) {
-    let t = 0, build = 0, ordinal = 0, phase = 0, seeds = 0;
+  function fake({ early = false, bad = null, discontinuity = null, atRound = 2 } = {}) {
+    let t = 0, build = 0, ordinal = 0, phase = 0, seeds = 0, round = 0;
     const make = kind => {
       ordinal++;
       const n = ordinal;
@@ -166,7 +166,19 @@ test("MIG-0639 native KV runner separates reset miss, warm hit, elapsed expiry a
           cacheControl: "no-store", contentType: "application/json" } };
     };
     const target = {
-      seedOperationModeKv: async (_fixture, { reset }) => { ordinal++; seeds++; if (reset) phase = 0; return { bytes: fixture.bytes, sha256: sha, reset }; },
+      seedOperationModeKv: async (_fixture, { reset }) => {
+        if (reset) {
+          phase = 0;
+          if (++round === atRound) {
+            if (discontinuity === "build") { build++; ordinal = 0; }
+            if (discontinuity === "reset") ordinal = 0;
+            if (discontinuity === "extra") ordinal++;
+            if (discontinuity === "jump") ordinal += 9;
+          }
+        }
+        ordinal++; seeds++;
+        return { bytes: fixture.bytes, sha256: sha, reset };
+      },
       run: async () => {
         const kind = ["miss", "hit", "expiry"][phase++];
         const result = make(kind);
@@ -198,6 +210,23 @@ test("MIG-0639 native KV runner separates reset miss, warm hit, elapsed expiry a
   }
   const f = fake({ bad: "cold" });
   assert.equal((await collectOperationModeKvSamples(f.target, fixture, opts, f)).stopReason, "STOP_COLD");
+  // A discontinuity between rounds is just as invalid as one inside a round.
+  // Cover both warmup-to-warmup and warmup-to-measurement/measurement-to-measurement.
+  for (const warmup of [1, 2]) {
+    for (const atRound of [2, 3]) {
+      for (const discontinuity of ["build", "reset", "extra", "jump"]) {
+        const input = fake({ discontinuity, atRound });
+        const r = await collectOperationModeKvSamples(input.target, fixture, { ...opts, warmup }, input);
+        assert.equal(r.stopReason, "STOP_RECEIPT");
+        assert.equal(r.warmupFailures.length, atRound <= warmup ? 1 : 0);
+        const previousMeasured = Math.max(0, atRound - 1 - warmup);
+        assert.equal(r.samples.length, 3 * previousMeasured + (atRound > warmup ? 1 : 0));
+        const failure = atRound <= warmup ? r.warmupFailures[0] : r.samples.at(-1);
+        assert.equal(failure.kind, "miss");
+        assert.equal(failure.unexpected, true);
+      }
+    }
+  }
 });
 
 test("MIG-0639 native KV diagnostic requires both quiet baselines, complete phases and cold provenance, never global acceptance", () => {

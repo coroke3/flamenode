@@ -2845,14 +2845,20 @@ export async function collectOperationModeKvSamples(target, fixture, opts, { clo
     return !sample.unexpected;
   };
   let lastWarmBuild = null;
+  let previousExpiry = null;
   for (let i = 0; i < opts.warmup + opts.samples; i++) {
     const warmup = i < opts.warmup;
     const seed = await target.seedOperationModeKv(fixture, { reset: true });
     const start = clock();
     const miss = await target.run(spec);
     const missComplete = clock();
+    // Between rounds: previous expiry receipt GET, seed PUT, then miss GET.
+    // A reset of the ordinal or a build change must not pass as warm evidence.
+    const continuous = buildValid(miss) && (previousExpiry === null ||
+      (miss.workerBuild === previousExpiry.workerBuild &&
+       miss.requestOrdinal === previousExpiry.requestOrdinal + 3));
+    if (!accept(makeSample("miss", miss, seed, continuous), warmup)) return finish("STOP_RECEIPT");
     lastWarmBuild = miss.workerBuild;
-    if (!accept(makeSample("miss", miss, seed, buildValid(miss)), warmup)) return finish("STOP_RECEIPT");
     const hit = await target.run(spec);
     const hitElapsed = clock() - start;
     if (!accept(makeSample("hit", hit, seed, follows(miss, hit) && Number.isFinite(hitElapsed) && hitElapsed >= 0 && hitElapsed < 30_000, hitElapsed), warmup)) return finish("STOP_RECEIPT");
@@ -2862,6 +2868,7 @@ export async function collectOperationModeKvSamples(target, fixture, opts, { clo
     const elapsed = clock() - missComplete;
     const expired = await target.run(spec);
     if (!accept(makeSample("expiry", expired, seed, follows(hit, expired) && Number.isFinite(elapsed) && elapsed >= 30_000, elapsed), warmup)) return finish("STOP_RECEIPT");
+    previousExpiry = expired;
   }
   if (!opts.skipCold) {
     for (let i = 0; i < opts.coldSamples; i++) {
