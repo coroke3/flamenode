@@ -486,6 +486,16 @@ export async function projectLegacyVideoCreate(input: {
   };
 }
 
+const VIDEO_REPLACEMENT_SNAPSHOT_SETS = [
+  { kind: "video", table: "videos", columns: getTableColumns(videos), lookup: "id", sort1: "id", sort2: null, cap: 1 },
+  { kind: "events", table: "video_events", columns: getTableColumns(videoEvents), lookup: "video_id", sort1: "event_id", sort2: null, cap: MAX_LEGACY_VIDEO_EVENTS_PER_VIDEO },
+  { kind: "members", table: "video_members", columns: getTableColumns(videoMembers), lookup: "video_id", sort1: "id", sort2: null, cap: MAX_LEGACY_VIDEO_MEMBERS_PER_VIDEO },
+  { kind: "chapters", table: "video_chapters", columns: getTableColumns(videoChapters), lookup: "video_id", sort1: "id", sort2: null, cap: MAX_LEGACY_VIDEO_CHAPTERS_PER_VIDEO },
+  { kind: "softwares", table: "video_softwares", columns: getTableColumns(videoSoftwares), lookup: "video_id", sort1: "software_id", sort2: null, cap: MAX_LEGACY_VIDEO_SOFTWARES_PER_VIDEO },
+  { kind: "metadata", table: "video_youtube_metadata", columns: getTableColumns(videoYoutubeMetadata), lookup: "video_id", sort1: "video_id", sort2: null, cap: 1 },
+  { kind: "answers", table: "video_custom_answers", columns: getTableColumns(videoCustomAnswers), lookup: "video_id", sort1: "event_id", sort2: "question_id", cap: MAX_LEGACY_CUSTOM_ANSWERS_PER_VIDEO },
+] as const;
+
 /**
  * U02am: read-only provenance check for an existing imported video.
  * Retain raw SQL JSON as the future same-batch full-row CAS input, but hash
@@ -494,15 +504,7 @@ export async function projectLegacyVideoCreate(input: {
  */
 export async function readLegacyVideoReplacementSnapshot(db: ServerCoreDb, videoId: string) {
   const targetId = entitySnapshotTargetId("video", videoId);
-  const sets = [
-    { kind: "video", table: "videos", columns: getTableColumns(videos), lookup: "id", sort1: "id", sort2: null, cap: 1 },
-    { kind: "events", table: "video_events", columns: getTableColumns(videoEvents), lookup: "video_id", sort1: "event_id", sort2: null, cap: MAX_LEGACY_VIDEO_EVENTS_PER_VIDEO },
-    { kind: "members", table: "video_members", columns: getTableColumns(videoMembers), lookup: "video_id", sort1: "id", sort2: null, cap: MAX_LEGACY_VIDEO_MEMBERS_PER_VIDEO },
-    { kind: "chapters", table: "video_chapters", columns: getTableColumns(videoChapters), lookup: "video_id", sort1: "id", sort2: null, cap: MAX_LEGACY_VIDEO_CHAPTERS_PER_VIDEO },
-    { kind: "softwares", table: "video_softwares", columns: getTableColumns(videoSoftwares), lookup: "video_id", sort1: "software_id", sort2: null, cap: MAX_LEGACY_VIDEO_SOFTWARES_PER_VIDEO },
-    { kind: "metadata", table: "video_youtube_metadata", columns: getTableColumns(videoYoutubeMetadata), lookup: "video_id", sort1: "video_id", sort2: null, cap: 1 },
-    { kind: "answers", table: "video_custom_answers", columns: getTableColumns(videoCustomAnswers), lookup: "video_id", sort1: "event_id", sort2: "question_id", cap: MAX_LEGACY_CUSTOM_ANSWERS_PER_VIDEO },
-  ] as const;
+  const sets = VIDEO_REPLACEMENT_SNAPSHOT_SETS;
   // ORDER BY uses SQLite BINARY ordering, the same as CURRENT's support read.
   // Every table has its own cap+1 sentinel. The global byte cap also covers
   // the proof and unmanaged video columns used by the later CAS.
@@ -624,6 +626,83 @@ export async function readLegacyVideoReplacementSnapshot(db: ServerCoreDb, video
     // Preserve unmodified payloads for a later transaction-time CAS.
     raw: Object.fromEntries([...sets.map((set) => set.kind), "proof"].map((kind) => [kind, payloads(kind)])),
   };
+}
+
+/**
+ * U02an: construct an unexecuted transaction-time CAS assertion for a proven
+ * existing video. The read-only provenance helper supplies the raw SQL JSON;
+ * callers must put this assertion before all replacement writes in the SAME
+ * D1 batch. In particular an entity digest does not cover unmanaged fields,
+ * so comparing just the seven digests cannot substitute for this assertion.
+ * This helper does not authorize a replacement, mutate any rows, or send wakes.
+ */
+export function buildLegacyVideoReplacementAssertion(
+  db: ServerCoreDb,
+  snapshot: Awaited<ReturnType<typeof readLegacyVideoReplacementSnapshot>>,
+) {
+  const videoId = snapshot.video.id;
+  const targetId = typeof videoId === "string" ? entitySnapshotTargetId("video", videoId) : null;
+  const error = "旧形式インポートの作品置換snapshotを確認できません。";
+  if (!targetId || snapshot.audit.target_id !== targetId ||
+      snapshot.audit.context !== ENTITY_SNAPSHOT_AUDIT_CONTEXT ||
+      typeof snapshot.audit.id !== "string" ||
+      typeof snapshot.audit.after_json !== "string" ||
+      !Number.isSafeInteger(snapshot.audit.created_at) ||
+      !Array.isArray(snapshot.raw.video) || snapshot.raw.video.length !== 1 ||
+      !Array.isArray(snapshot.raw.proof) || snapshot.raw.proof.length !== 1) {
+    return fixedFailure(error);
+  }
+  const clauses = VIDEO_REPLACEMENT_SNAPSHOT_SETS.map((set) => {
+    const raw = snapshot.raw[set.kind];
+    if (!Array.isArray(raw) || raw.length > set.cap ||
+        raw.some((row) => typeof row !== "string") ||
+        new Set(raw).size !== raw.length) {
+      return fixedFailure(error);
+    }
+    const payload = JSON.stringify(raw);
+    if (new TextEncoder().encode(payload).byteLength > MAX_LEGACY_IMPORT_STEP_BYTES) {
+      return fixedFailure(error);
+    }
+    // Compare the exact same SQL JSON text as the original read, including
+    // all unmanaged columns. Count equality catches insertions/deletions;
+    // the anti-join catches changed rows. Static schema identifiers only.
+    const table = sql.raw(set.table);
+    const lookup = sql.raw(set.lookup);
+    const currentJson = canonicalRowJson(set.columns, set.table);
+    return sql`
+      (SELECT COUNT(*) FROM ${table} WHERE ${lookup} = ${videoId})
+        = json_array_length(${payload})
+      AND NOT EXISTS (
+        SELECT 1 FROM json_each(${payload}) AS expected
+        WHERE NOT EXISTS (
+          SELECT 1 FROM ${table} WHERE ${lookup} = ${videoId}
+            AND ${currentJson} = expected.value
+        )
+      )
+    `;
+  });
+  return db.run(sql`
+    SELECT CASE WHEN
+      ${sql.join(clauses, sql` AND `)}
+      AND EXISTS (
+        SELECT 1 FROM audit_logs AS proof
+        WHERE proof.id = ${snapshot.audit.id}
+          AND proof.table_name = ${ENTITY_SNAPSHOT_AUDIT_TABLE}
+          AND proof.target_id = ${targetId}
+          AND proof.context = ${ENTITY_SNAPSHOT_AUDIT_CONTEXT}
+          AND proof.after_json IS ${snapshot.audit.after_json}
+          AND proof.created_at = ${snapshot.audit.created_at as number}
+          AND NOT EXISTS (
+            SELECT 1 FROM audit_logs AS competing
+            WHERE competing.table_name = proof.table_name
+              AND competing.target_id = proof.target_id
+              AND competing.context = proof.context
+              AND (competing.created_at > proof.created_at OR
+                (competing.created_at = proof.created_at AND competing.id <> proof.id))
+          )
+      )
+    THEN 1 ELSE json_extract('legacy_import_video_replacement_snapshot_mismatch', '$') END
+  `);
 }
 
 /** U02al supports new-video creation and the existing marker-only paths; replacement is disabled. */

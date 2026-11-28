@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { Hono } from "hono";
+import { sql } from "drizzle-orm";
 import { normalizeLegacyFiles } from "@flamenode/server-core/legacyImport/normalize";
 import { createLegacyImportPreview } from "@flamenode/server-core/legacyImport/previewStore";
 import {
@@ -35,6 +36,7 @@ import { legacyImportD1ApplyStep } from "../src/routes/admin/legacyImportD1Apply
 import {
   projectLegacyVideoCreate,
   readLegacyVideoReplacementSnapshot,
+  buildLegacyVideoReplacementAssertion,
 } from "@flamenode/server-core/legacyImport/d1Apply";
 import { createAdminD1, seedBase, seedEvent } from "./helpers/sqliteD1.mjs";
 
@@ -1500,6 +1502,49 @@ test("MIG-0645 U02al Hono: new video rows, provenance, queue and receipt are ato
     assert.deepEqual((await readLegacyVideoReplacementSnapshot(serverDb, video.id)).proof, proof);
     assert.equal(stats.batches, snapshotBatches, "proof checks never execute a D1 write batch");
     assert.equal(wakes.length, wakesBefore + 2, "proof checks never send queue wakes");
+
+    // U02an: build the assertion before the mutation race, execute it
+    // through the same D1 batch interface used by the future replacement.
+    // A sentinel UPDATE following a rejected assertion must never execute.
+    const assertBatch = async (captured) => serverDb.batch([
+      buildLegacyVideoReplacementAssertion(serverDb, captured),
+    ]);
+    await assertBatch(snapshot);
+    const guardedBatch = async (captured) => serverDb.batch([
+      buildLegacyVideoReplacementAssertion(serverDb, captured),
+      serverDb.run(sql`UPDATE videos SET score = 99 WHERE id = ${video.id}`),
+    ]);
+    sqlite.prepare("UPDATE videos SET app_like_count = 8 WHERE id = ?").run(video.id);
+    await assert.rejects(guardedBatch(snapshot), "unmanaged column race must abort the D1 batch");
+    assert.equal(sqlite.prepare("SELECT score FROM videos WHERE id = ?").get(video.id).score, 0);
+    const currentCounterSnapshot = await readLegacyVideoReplacementSnapshot(serverDb, video.id);
+    await assertBatch(currentCounterSnapshot);
+    sqlite.prepare("UPDATE videos SET app_like_count = 0 WHERE id = ?").run(video.id);
+
+    for (const [table, field, changed, original, key] of drifts) {
+      const update = sqlite.prepare("UPDATE " + table + " SET " + field + " = ? WHERE " + key + " = ?");
+      update.run(changed, video.id);
+      await assert.rejects(guardedBatch(snapshot), "transaction guard must catch drift in " + table);
+      assert.equal(sqlite.prepare("SELECT score FROM videos WHERE id = ?").get(video.id).score, 0);
+      update.run(original, video.id);
+    }
+    sqlite.prepare("INSERT INTO video_events(video_id, event_id) VALUES (?, ?)").run(video.id, "ev-extra");
+    await assert.rejects(guardedBatch(snapshot), "additional related row must abort");
+    sqlite.prepare("DELETE FROM video_events WHERE video_id = ? AND event_id = ?").run(video.id, "ev-extra");
+    sqlite.prepare("DELETE FROM video_events WHERE video_id = ?").run(video.id);
+    await assert.rejects(guardedBatch(snapshot), "removed related row must abort");
+    sqlite.prepare("INSERT INTO video_events(video_id, event_id) VALUES (?, ?)").run(video.id, "ev-1");
+
+    sqlite.prepare("INSERT INTO audit_logs (" + auditColumns.map(quote).join(", ") + ") SELECT " +
+      auditColumns.map((column) => column === "id" ? "?" : quote(column)).join(", ") +
+      " FROM audit_logs WHERE id = ?").run("competing-video-proof", snapshot.audit.id);
+    await assert.rejects(guardedBatch(snapshot), "ambiguous latest proof must abort");
+    sqlite.prepare("UPDATE audit_logs SET created_at = created_at + 1 WHERE id = ?").run("competing-video-proof");
+    await assert.rejects(guardedBatch(snapshot), "newer latest proof must abort");
+    sqlite.prepare("DELETE FROM audit_logs WHERE id = ?").run("competing-video-proof");
+    await assertBatch(snapshot);
+    assert.equal(sqlite.prepare("SELECT score FROM videos WHERE id = ?").get(video.id).score, 0);
+    assert.equal(wakes.length, wakesBefore + 2, "transaction assertions never send queue wakes");
 
     const replacement = await createApplyCredential(bucket, ADMIN.id, plan, "replace_imported");
     await reachQuestionStage(request, replacement.form);
