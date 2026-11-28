@@ -328,9 +328,10 @@ function parseReceipt(value: Record<string, unknown>) {
 }
 
 /**
- * First bounded real Hono D1 apply unit for RH-002.
- * This deliberately supports only CURRENT's system_user stage. Later stages
- * fail closed until their own parity units are ported.
+ * Bounded real Hono D1 apply units for RH-002.
+ * system_user, x_users, software catalog, and new-event create/preview-confirmed
+ * skip are supported. Existing-event replacement and later stages fail closed
+ * until visibility-fence/R2 and their own parity units are ported.
  */
 export async function legacyImportD1ApplyStep(
   input: ApplyInput,
@@ -523,7 +524,7 @@ export async function legacyImportD1ApplyStep(
                   FROM event_staff
                  WHERE event_id = ${eventIdForRead}
                    AND NOT EXISTS (SELECT 1 FROM marker_rows)
-                 LIMIT 2
+                 LIMIT 1
               )
               SELECT 'marker' AS kind, payload FROM marker_rows
               UNION ALL
