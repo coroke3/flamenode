@@ -422,6 +422,55 @@ test("SA-056/057 U03h: notification Outbox write failure rolls back slot, video,
   }
 });
 
+test("SA-056/057 U03h: throwing diagnostic sink cannot replace the fixed 503 after an atomic Outbox failure",async()=>{
+  const originalError=console.error;
+  for(const kind of ["force-release","keep-reservation"]){
+    const s=setup({kind});
+    try{
+      s.sqlite.exec("DROP TABLE notification_outbox");
+      console.error=(...args)=>{
+        if(args[0]==="[MIG-0656] submitted danger mutation failed"){
+          throw new Error("diagnostic sink unavailable");
+        }
+        return originalError.apply(console,args);
+      };
+      const res=await s.post();
+      assert.equal(res.status,503,kind+" "+await res.clone().text());
+      assert.equal(res.headers.get("Cache-Control"),"private, no-store");
+      for(const id of ["s0","s1"]){
+        assert.equal(s.row("slots",id).status,"submitted");
+        assert.equal(s.row("slots",id).video_id,"vid");
+        assert.equal(s.row("slots",id).version,1);
+      }
+      assert.equal(s.row("videos","vid").scheduling_type,"slotted");
+      assert.equal(s.countRows("audit_logs"),0);
+      assert.equal(s.countRows("static_rebuild_queue"),0);
+      assert.equal(s.stats.batches,1,"failed atomic batch remains rolled back");
+    }finally{
+      console.error=originalError;
+      s.sqlite.close();
+    }
+  }
+});
+
+test("SA-056/057 U03h: hostile provider error inspection falls back to the fixed 503",async()=>{
+  const hostile=new Proxy(new Error("UNIQUE constraint failed: private.provider.detail"),{
+    getPrototypeOf(){throw new Error("hostile prototype inspection");},
+    get(target,key,receiver){
+      if(key==="message")throw new Error("hostile message inspection");
+      return Reflect.get(target,key,receiver);
+    },
+  });
+  const s=setup({onFirst:(sql)=>{if(sql.includes("AS anchor_json"))throw hostile;}});
+  try{
+    const res=await s.post();
+    assert.equal(res.status,503,await res.clone().text());
+    assert.equal(res.headers.get("Cache-Control"),"private, no-store");
+    assert.deepEqual(countEffects(s),{audits:0,outbox:0,queue:0});
+    assert.equal(s.stats.batches,0);
+  }finally{s.sqlite.close();}
+});
+
 test("SA-056/057 U03f: missing strict audit table rolls back slot, video, Outbox, Queue",async()=>{
   const s=setup();
   try{

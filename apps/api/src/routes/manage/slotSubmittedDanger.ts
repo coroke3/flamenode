@@ -163,10 +163,20 @@ async function submittedDanger(c: Context<AppEnv>, kind: SubmittedDangerKind) {
       ...(queue.statements.length ? { pendingPublicReflection: true } : {}),
     }, 200);
   } catch (error) {
-    console.error("[MIG-0656] submitted danger mutation failed");
+    let conflict = false;
+    try {
+      conflict = isWriteConflict(error);
+    } catch {
+      // Hostile error inspection must not replace the fixed unavailable response.
+    }
+    try {
+      console.error("[MIG-0656] submitted danger mutation failed");
+    } catch {
+      // A failing diagnostic sink must not replace the fixed fail-closed response.
+    }
     return c.json(
       { ok: false, message: WRITE_FAILED },
-      isWriteConflict(error) ? 409 : 503,
+      conflict ? 409 : 503,
     );
   }
 }
