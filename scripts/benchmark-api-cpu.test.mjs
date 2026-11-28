@@ -23,8 +23,11 @@ async function loadReplayWorker(generation, script, body) {
 
 test("MIG-0639 / #918: lazy operation-mode KV workload catalog has exact UTF-8 sizes and strict banner receipts", () => {
   const ids = operationModeMirrorFixtureCases();
-  assert.equal(ids.length, 67);
-  assert.equal(new Set(ids).size, 67);
+  assert.equal(ids.length, 85);
+  assert.equal(new Set(ids).size, 85);
+  for (const shape of ["dense-string-array", "mixed-string-array", "malformed-string-array"]) {
+    assert.equal(ids.filter(id => id.startsWith(shape + ":")).length, 6, shape);
+  }
   for (const id of ids) {
     const f = buildOperationModeMirrorFixture(id);
     let parsed;
@@ -128,7 +131,7 @@ test("MIG-0639 / #918 native KV diagnostic transport: seed, exact read receipt, 
 
 test("MIG-0639 native KV diagnostic pins the separate #918 scanner source blob", () => {
   assert.equal(operationModeScannerBlobSha("hello\n"), "ce013625030ba8dba906f756967f9e9ca394464a");
-  assert.equal(EXPECTED_OPERATION_MODE_SCANNER_BLOB_SHA, "0c03d46d469a8b585e20b6e6875f7aec27bdc845");
+  assert.equal(EXPECTED_OPERATION_MODE_SCANNER_BLOB_SHA, "aa576714a174166a37aa0e15c116be40a13488be");
   assert.throws(() => assertOperationModeScannerSource("hello\n"), /pinned #918 scanner source/);
 });
 test("MIG-0639 native KV CLI requires an explicit workload and native sim; default stays unchanged", () => {

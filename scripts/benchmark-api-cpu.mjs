@@ -35,7 +35,7 @@ import { isMainThread, parentPort, threadId, Worker, workerData } from "node:wor
 // This catalog alone does not register a scenario or establish CPU acceptance.
 export function operationModeMirrorFixtureCases() {
   const sizes = [65535, 65536, 65537, 256 * 1024, 1024 * 1024, 4 * 1024 * 1024];
-  const shapes = ["plain-reason", "multibyte", "escaped-reason", "deep-array", "deep-object", "dense-array", "dense-object", "long-integer", "long-exponent", "duplicate-mode", "malformed-tail"];
+  const shapes = ["plain-reason", "multibyte", "escaped-reason", "deep-array", "deep-object", "dense-array", "dense-string-array", "mixed-string-array", "malformed-string-array", "dense-object", "long-integer", "long-exponent", "duplicate-mode", "malformed-tail"];
   return ["canonical", ...sizes.flatMap(size => shapes.map(shape => `${shape}:${size}`))];
 }
 
@@ -81,6 +81,12 @@ export function buildOperationModeMirrorFixture(id) {
       raw = nested('{"x":', "}", 32768); break;
     case "dense-array":
       raw = fit(prefix + "[", "0,", "0]}"); break;
+    case "dense-string-array":
+      raw = fit(prefix + "[0,", '"","日","🚀","a,b","{}[]",', "0]}"); break;
+    case "mixed-string-array":
+      raw = fit(prefix + "[0,", '"short","' + "x".repeat(32) + '","' + "y".repeat(33) + '","\\u0061",{},[1,2],', "0]}"); break;
+    case "malformed-string-array":
+      raw = fit(prefix + "[0,", '"","日","🚀","a,b","{}[]",', '"\\x"]}'); valid = false; expectedMode = "normal"; expectedReason = null; updatedAt = null; break;
     case "dense-object":
       raw = fit(prefix + "{", '"x":0,', '"z":0}}'); break;
     case "long-integer":
@@ -180,7 +186,9 @@ export function operationModeScannerBlobSha(content) {
   return createHash("sha1").update(Buffer.from("blob " + bytes.length + "\0", "ascii")).update(bytes).digest("hex");
 }
 
-export function assertOperationModeScannerSource(content, expectedSha = "0c03d46d469a8b585e20b6e6875f7aec27bdc845") {
+export const EXPECTED_OPERATION_MODE_SCANNER_BLOB_SHA = "aa576714a174166a37aa0e15c116be40a13488be";
+
+export function assertOperationModeScannerSource(content, expectedSha = EXPECTED_OPERATION_MODE_SCANNER_BLOB_SHA) {
   const actualSha = operationModeScannerBlobSha(content);
   if (actualSha !== expectedSha) {
     throw new Error("operation-mode KV diagnostic requires the pinned #918 scanner source; expected " + expectedSha + ", got " + actualSha);
@@ -188,7 +196,6 @@ export function assertOperationModeScannerSource(content, expectedSha = "0c03d46
   return actualSha;
 }
 
-export const EXPECTED_OPERATION_MODE_SCANNER_BLOB_SHA = "0c03d46d469a8b585e20b6e6875f7aec27bdc845";
 
 export function operationModeKvEvidenceMismatch(fixture, seed, evidence, ordinal, phase) {
   if (!["miss", "hit", "expiry"].includes(phase)) return true;
