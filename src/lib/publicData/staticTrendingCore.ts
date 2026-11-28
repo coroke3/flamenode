@@ -1,6 +1,5 @@
 import {
   normalizeCount,
-  normalizeNumericUnix as normalizeUnix,
   normalizePresentString as normalizeNullableString,
   normalizePresentString as normalizeString,
 } from "./normalize.ts";
@@ -8,6 +7,9 @@ import { normalizeStaticVideoCardBase } from "./staticVideoCardCore.ts";
 
 export const TRENDING_OBJECT_KEY = "analytics/trending.json";
 export const TRENDING_STALE_MAX_AGE_SEC = 3 * 60 * 60;
+// UTC clock drift beyond five minutes is not a valid last-success timestamp.
+// Do not allow an implausibly future-dated R2 artifact to masquerade as fresh.
+export const TRENDING_MAX_FUTURE_SKEW_SEC = 5 * 60;
 export const TRENDING_TOO_OLD_FOR_HOME_SEC = 24 * 60 * 60;
 
 /** workers/ga-analytics/ranking.ts の TrendingItem と整合 */
@@ -40,6 +42,23 @@ export interface StaticTrendingPayload {
 export interface StaticTrendingData {
   generatedAt: number;
   items: TrendingItem[];
+}
+
+/**
+ * Request-time visibility guard for an R2/Cache API ranking. The writer's old
+ * snapshot may predate a video/event depublication. This function never
+ * mutates the cached object; callers must provide a validated current fence.
+ * This is a fence filter, not a guarantee of D1 visibility freshness.
+ */
+export function filterStaticTrendingByVisibilityFence(
+  data: StaticTrendingData,
+  isBlocked: (entityType: "video" | "event", entityId: string) => boolean,
+): StaticTrendingData {
+  const items = data.items.filter((item) =>
+    !isBlocked("video", item.id) &&
+    !(item.primary_event_id && isBlocked("event", item.primary_event_id)),
+  );
+  return items.length === data.items.length ? data : { ...data, items };
 }
 
 export interface StaticTrendingStaleMeta {
@@ -78,6 +97,7 @@ function normalizeTrendingItem(value: unknown): TrendingItem | null {
   }
 
   if (row.status != null && row.status !== "public") return null;
+  if (row.visibility_status != null && row.visibility_status !== "public") return null;
 
   const rank =
     row.rank !== undefined && row.rank !== null
@@ -112,10 +132,21 @@ function normalizeTrendingItem(value: unknown): TrendingItem | null {
 
 export function normalizeStaticTrending(
   payload: StaticTrendingPayload,
+  nowSec = Math.floor(Date.now() / 1000),
 ): StaticTrendingData | null {
+  // A corrupted or non-integer injected build/request clock must not
+  // accidentally authorize an implausibly future-dated public artifact.
+  if (!Number.isSafeInteger(nowSec) || nowSec < 0) return null;
   if (payload.schema_version !== STATIC_TRENDING_SCHEMA_VERSION) return null;
-  const generatedAt = normalizeUnix(payload.generated_at);
-  if (generatedAt == null) return null;
+  // The GA4 writer serializes generated_at as an integer number. Generic
+  // numeric coercion would turn null, false and "" into Unix epoch zero,
+  // allowing malformed R2 wire data through the public reader.
+  const generatedAt = payload.generated_at;
+  if (
+    typeof generatedAt !== "number" ||
+    !Number.isSafeInteger(generatedAt) || generatedAt < 0 ||
+    generatedAt > nowSec + TRENDING_MAX_FUTURE_SKEW_SEC
+  ) return null;
   if (!Array.isArray(payload.items)) return null;
 
   const items = payload.items
@@ -129,7 +160,15 @@ export function resolveStaticTrendingStaleMeta(
   generatedAt: number | null,
   nowSec: number,
 ): StaticTrendingStaleMeta {
-  if (generatedAt == null) {
+  // Stale metadata is also used independently of the payload normalizer.
+  // NaN, Infinity or unsafe/negative clock values must never produce
+  // ageSeconds=NaN and an incorrectly "fresh" public response.
+  if (
+    generatedAt == null ||
+    !Number.isSafeInteger(generatedAt) || generatedAt < 0 ||
+    !Number.isSafeInteger(nowSec) || nowSec < 0 ||
+    generatedAt > nowSec + TRENDING_MAX_FUTURE_SKEW_SEC
+  ) {
     return { stale: true, ageSeconds: null, tooOldForHome: true };
   }
   const ageSeconds = Math.max(0, nowSec - generatedAt);
