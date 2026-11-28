@@ -25,44 +25,58 @@ function runtime(getOperationModeKv, Date, setTimeout, console) {
 
 function createFixture(runtime, { initial = 19, fault = null, badLogger = false } = {}) {
   let now = 60000;
-  let faultPending = fault !== null;
+  const faults = Array.isArray(fault) ? [...fault] : fault === null ? [] : [fault];
   const openKey = "public:degraded_circuit:open";
   const hitKey = "public:degraded_circuit:hit_streak";
   const missKey = "public:degraded_circuit:miss:1";
   const values = new Map([[missKey, String(initial)], [hitKey, "2"]]);
-  const writes = [], warnings = [];
+  const writes = [], warnings = [], writeTimes = [], rateViolations = [];
+  const expirations = new Map();
   let gate = null;
   let reached = null;
   let release = null;
   const lastWrite = new Map();
+  function recordWrite(op, key, value) {
+    writes.push(value === undefined ? [op, key] : [op, key, value]);
+    writeTimes.push([op, key, now]);
+    if (now - (lastWrite.get(key) ?? -Infinity) < 1000) {
+      rateViolations.push([op, key, now]);
+      throw new Error("test rate limit");
+    }
+    lastWrite.set(key, now);
+  }
   const kv = {
-    async get(key) { return values.get(key) ?? null; },
-    async put(key, value) {
-      writes.push(["put", key, value]);
-      if (now - (lastWrite.get(key) ?? -Infinity) < 1000) throw new Error("test rate limit");
-      lastWrite.set(key, now);
+    async get(key) {
+      if (now >= (expirations.get(key) ?? Infinity)) values.delete(key);
+      return values.get(key) ?? null;
+    },
+    async put(key, value, options) {
+      recordWrite("put", key, value);
       if (gate && key === openKey) { reached(); await gate; gate = null; }
-      if (faultPending && ((fault === "marker" && key === openKey) ||
-        (fault === "counter" && key === missKey))) {
-        faultPending = false;
+      if ((faults[0] === "marker" && key === openKey) ||
+        (faults[0] === "counter" && key === missKey)) {
+        faults.shift();
         throw new Error("synthetic PUT failure");
       }
       values.set(key, value);
+      if (options?.expirationTtl !== undefined) expirations.set(key, now + options.expirationTtl * 1000);
     },
     async delete(key) {
-      writes.push(["delete", key]);
-      if (faultPending && fault === "cleanup" && key === hitKey) {
-        faultPending = false;
+      recordWrite("delete", key);
+      if (faults[0] === "cleanup" && key === hitKey) {
+        faults.shift();
         throw new Error("synthetic DELETE failure");
       }
       values.delete(key);
+      expirations.delete(key);
     },
   };
   const api = runtime(() => kv, { now: () => now },
     (resolve, ms) => { now += ms; resolve(); }, {
       warn(message) { warnings.push(JSON.parse(message)); if (badLogger) throw new Error("logger"); },
     });
-  return { ...api, values, writes, warnings, openKey, hitKey, missKey,
+  return { ...api, values, writes, warnings, writeTimes, rateViolations, openKey, hitKey, missKey,
+    get: key => kv.get(key),
     tick(ms) { now += ms; }, now: () => now,
     pauseMarker() {
       const started = new Promise(resolve => { reached = resolve; });
@@ -209,6 +223,58 @@ function registerTests(test, equal, runtime) {
     equal(f.snapshot().open, false);
     equal(f.snapshot().stage, null);
     equal(f.values.get(f.missKey), "20");
+  });
+  test("SEC-798: late acknowledged marker has its own cleanup deadline", async () => {
+    const f = make({fault:["marker", "cleanup"]});
+    await f.miss(f.now());
+    equal(f.snapshot().stage, "marker");
+    f.tick(89000); await f.miss(f.now());
+    equal(f.snapshot().stage, "cleanup");
+    equal(f.values.get(f.hitKey), "2");
+    f.tick(1000); await f.miss(f.now());
+    equal(f.snapshot().stage, null);
+    equal(f.values.has(f.hitKey), false);
+    equal(f.values.get(f.openKey), "1");
+    equal(f.values.get(f.missKey), "20");
+    equal(f.writes.filter(x=>x[1]===f.missKey).length, 1);
+    equal(f.warnings.length, 1);
+    equal(f.rateViolations.length, 0);
+  });
+  test("SEC-798: cleanup does not run after the acknowledged marker TTL expires", async () => {
+    const f = make({fault:["marker", "cleanup"]});
+    await f.miss(f.now());
+    f.tick(89000); await f.miss(f.now());
+    equal(f.snapshot().stage, "cleanup");
+    f.tick(90000);
+    equal(await f.get(f.openKey), null);
+    await f.miss(f.now());
+    equal(f.snapshot().stage, null);
+    equal(f.values.get(f.hitKey), "2");
+    equal(f.writes.filter(x=>x[0]==="delete"&&x[1]===f.hitKey).length, 1);
+    equal(f.writes.filter(x=>x[0]==="put"&&x[1]===f.openKey).length, 2);
+  });
+  test("SEC-798: immediate three-hit close respects the shared cleanup write interval", async () => {
+    const f = make();
+    await f.miss(f.now());
+    await f.hit(); await f.hit(); await f.hit();
+    equal(f.snapshot().open, false);
+    equal(f.values.has(f.openKey), false);
+    equal(f.rateViolations.length, 0);
+    const deletes = f.writeTimes.filter(x=>x[0]==="delete"&&x[1]===f.hitKey);
+    equal(deletes.length, 2);
+    equal(deletes[1][2]-deletes[0][2] >= 1000, true);
+  });
+  test("SEC-798: acknowledged close is not reopened by cleanup failure", async () => {
+    const f = make({fault:["marker", "cleanup", "cleanup"]});
+    await f.miss(f.now());
+    f.tick(1000); await f.miss(f.now());
+    equal(f.snapshot().stage, "cleanup");
+    await f.hit(); await f.hit(); await f.hit();
+    equal(f.snapshot().open, false);
+    equal(f.snapshot().stage, null);
+    equal(f.values.has(f.openKey), false);
+    equal(f.values.get(f.missKey), "20");
+    equal(f.rateViolations.length, 0);
   });
 }
 

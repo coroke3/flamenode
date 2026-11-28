@@ -93,7 +93,7 @@ async function putOpenMarkerIfNeeded(
   kv: KVNamespace,
   nowMs: number,
   expiresAt = Number.POSITIVE_INFINITY,
-): Promise<void> {
+): Promise<number | null> {
   const key = degradedCircuitOpenKey();
   if (Date.now() >= expiresAt) throw new Error("degraded circuit repair expired");
   if (
@@ -101,12 +101,12 @@ async function putOpenMarkerIfNeeded(
     localCircuitState.open &&
     nowMs < localCircuitState.openUntil
   ) {
-    return;
+    return null;
   }
   if ((await kv.get(key)) === "1") {
     openMarkerKnown = true;
     markCircuitOpen(nowMs);
-    return;
+    return null;
   }
 
   await waitForKvWriteSlot(key);
@@ -117,22 +117,25 @@ async function putOpenMarkerIfNeeded(
     localCircuitState.open &&
     Date.now() < localCircuitState.openUntil
   ) {
-    return;
+    return null;
   }
   if ((await kv.get(key)) === "1") {
     openMarkerKnown = true;
     markCircuitOpen(nowMs);
-    return;
+    return null;
   }
 
   if (Date.now() >= expiresAt) throw new Error("degraded circuit repair expired");
-  lastKvWriteAttemptAt.set(key, Date.now());
+  const writeStartedAt = Date.now();
+  lastKvWriteAttemptAt.set(key, writeStartedAt);
   try {
     await kv.put(key, "1", {
       expirationTtl: DEGRADED_CIRCUIT_OPEN_TTL_SEC,
     });
     openMarkerKnown = true;
-    markCircuitOpen(nowMs);
+    markCircuitOpen(writeStartedAt);
+    // Only our acknowledged PUT provides a conservative known TTL boundary.
+    return writeStartedAt + DEGRADED_CIRCUIT_OPEN_TTL_SEC * 1_000;
   } catch (error) {
     openMarkerKnown = false;
     throw error;
@@ -214,7 +217,7 @@ async function reconcileOpenRepair(kv: KVNamespace, nowMs: number): Promise<void
   openRepairInFlight = true;
   try {
     if (repair.stage === "marker") {
-      await putOpenMarkerIfNeeded(kv, nowMs, repair.expiresAt);
+      const writtenUntil = await putOpenMarkerIfNeeded(kv, nowMs, repair.expiresAt);
       if (openRepair !== repair) return;
       if (repair.missCount === null) {
         // Preserve the local-threshold fast-open path: no new cleanup/log.
@@ -222,13 +225,26 @@ async function reconcileOpenRepair(kv: KVNamespace, nowMs: number): Promise<void
         return;
       }
       repair.stage = "cleanup";
+      if (writtenUntil !== null) repair.expiresAt = writtenUntil;
     } else if ((await kv.get(degradedCircuitOpenKey())) !== "1") {
       // An acknowledged marker may have been closed elsewhere.
       // Cleanup must not reopen that marker.
       if (openRepair === repair) openRepair = null;
       return;
     }
-    await kv.delete(degradedCircuitHitStreakKey());
+    // The OPEN retry deadline is not the cleanup deadline after our own PUT.
+    // Do not start a cleanup after expiry, or repeat a write on this key inside
+    // the existing one-second budget. A later miss can retry without waiting.
+    const cleanupNow = Date.now();
+    if (cleanupNow >= repair.expiresAt) {
+      if (openRepair === repair) openRepair = null;
+      return;
+    }
+    const streakKey = degradedCircuitHitStreakKey();
+    const lastCleanupAt = lastKvWriteAttemptAt.get(streakKey) ?? Number.NEGATIVE_INFINITY;
+    if (cleanupNow - lastCleanupAt < DEGRADED_CIRCUIT_KV_WRITE_INTERVAL_MS) return;
+    lastKvWriteAttemptAt.set(streakKey, cleanupNow);
+    await kv.delete(streakKey);
     if (openRepair !== repair) return;
     openRepair = null;
     try {
@@ -476,10 +492,11 @@ export async function recordDegradedCircuitR2Hit(): Promise<void> {
     await waitForKvWriteSlot(openKey);
     lastKvWriteAttemptAt.set(openKey, Date.now());
     await kv.delete(openKey);
-    // Do not replay stale OPEN intent after an acknowledged close.
-    openRepair = null;
-    await kv.delete(streakKey);
+    // Acknowledged close is final locally even if diagnostic cleanup fails.
     markCircuitClosed(now);
+    await waitForKvWriteSlot(streakKey);
+    lastKvWriteAttemptAt.set(streakKey, Date.now());
+    await kv.delete(streakKey);
     console.warn(
       JSON.stringify({
         service: "degraded-circuit",
