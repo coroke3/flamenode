@@ -27,7 +27,7 @@ const csv = (preset = "public_staff") => ({
   }],
 });
 
-function setup({ user = ADMIN, fault, failQueue = false } = {}) {
+function setup({ user = ADMIN, fault, failQueue = false, failRouteDb = false } = {}) {
   const { db, sqlite, stats } = createAdminD1();
   seedBase(sqlite);
   seedEvent(sqlite);
@@ -47,7 +47,10 @@ function setup({ user = ADMIN, fault, failQueue = false } = {}) {
   const count = (table) => sqlite.prepare(`SELECT COUNT(*) AS n FROM "${table}"`).get().n;
   const before = () => ["event_staff", "x_users", "audit_logs", "static_rebuild_queue"].map(count);
   const initial = before();
-  const receipt = { readFaults: 0, queueFaults: 0, committedAtQueueFailure: null };
+  const receipt = {
+    readFaults: 0, queueFaults: 0, routeFaults: 0,
+    committedAtQueueFailure: null, committedAtRouteFailure: null,
+  };
   const originalPrepare = db.prepare;
   db.prepare = (sql) => {
     if (fault?.match(sql)) {
@@ -71,6 +74,20 @@ function setup({ user = ADMIN, fault, failQueue = false } = {}) {
     c.set("user", user);
     c.set("db", drizzle(c.env.DB, { schema }));
     c.set("actorSnapshotJsonById", { [user.id]: JSON.stringify({ id: user.id, role: user.role }) });
+    if (failRouteDb) {
+      // Inject at the route's post-commit boundary, independently of whether
+      // SEC-782's shared enqueue implementation catches its own diagnostics.
+      const get = c.get.bind(c);
+      c.get = (key) => {
+        if (key === "db" && receipt.routeFaults === 0 &&
+            count("audit_logs") === initial[2] + 2) {
+          receipt.routeFaults++;
+          receipt.committedAtRouteFailure = before();
+          throw new Error(CANARY);
+        }
+        return get(key);
+      };
+    }
     await next();
   });
   registerStaffWriteRoutes(app);
@@ -89,8 +106,8 @@ async function withThrowingDiagnostics(run) {
   let warnings = 0;
   try {
     console.error = (...args) => { errors.push(args); throw new Error("diagnostic sink failed"); };
-    // Shared enqueue's warning is a separate issue (#782). Make it throw to
-    // force the already-committed request through this route's catch.
+    // The shared enqueue warning may escape on current main or be swallowed
+    // by SEC-782. Both outcomes must preserve the committed request.
     console.warn = () => { warnings++; throw new Error("warning sink failed"); };
     await run({ errors, warnings: () => warnings });
   } finally {
@@ -183,23 +200,37 @@ test("SEC-800: preserve exact trusted owner and confirmation messages, and CSV a
 });
 
 test("SEC-800: projection and diagnostic failure after strict audit preserves original success", async () => {
-  const s = setup({ failQueue: true });
-  try {
-    await withThrowingDiagnostics(async ({ errors, warnings }) => {
-      const result = await s.send("POST", "/", upsert);
-      assert.equal(result.status, 200, await result.clone().text());
-      assert.deepEqual(await result.json(), { ok: true, pendingPublicReflection: true });
-      assert.equal(warnings(), 1);
-      assert.deepEqual(errors, [["[MIG-0654] post-commit staff projection enqueue failed"]]);
-    });
-    assert.equal(s.receipt.queueFaults, 1);
-    assert.deepEqual(s.receipt.committedAtQueueFailure, [
-      s.initial[0] + 1, s.initial[1] + 1, s.initial[2] + 2, s.initial[3],
-    ]);
-    assert.deepEqual(s.before(), s.receipt.committedAtQueueFailure);
-    assert.equal(s.sqlite.prepare("SELECT COUNT(*) AS n FROM event_staff WHERE x_user_id='added_user'").get().n, 1);
-    assert.equal(s.sqlite.prepare("SELECT COUNT(*) AS n FROM x_users WHERE id='added_user'").get().n, 1);
-  } finally {
-    s.sqlite.close();
+  const expectedRouteLog = [["[MIG-0654] post-commit staff projection enqueue failed"]];
+  for (const mode of ["queue", "route"]) {
+    const s = setup({ failQueue: mode === "queue", failRouteDb: mode === "route" });
+    try {
+      await withThrowingDiagnostics(async ({ errors, warnings }) => {
+        const result = await s.send("POST", "/", upsert);
+        assert.equal(result.status, 200, await result.clone().text());
+        assert.deepEqual(await result.json(), { ok: true, pendingPublicReflection: true });
+        if (mode === "queue") {
+          assert.equal(warnings(), 1);
+          // Current main lets the failed shared warning escape to the route.
+          // SEC-782 (#436) contains it. No duplicate/raw route logs in either
+          // order; the independent route fault below always covers its catch.
+          assert.deepEqual(errors, errors.length === 0 ? [] : expectedRouteLog);
+        } else {
+          assert.equal(warnings(), 0);
+          assert.deepEqual(errors, expectedRouteLog);
+        }
+      });
+      assert.equal(s.receipt.queueFaults, mode === "queue" ? 1 : 0);
+      assert.equal(s.receipt.routeFaults, mode === "route" ? 1 : 0);
+      const committed = mode === "queue"
+        ? s.receipt.committedAtQueueFailure : s.receipt.committedAtRouteFailure;
+      assert.deepEqual(committed, [
+        s.initial[0] + 1, s.initial[1] + 1, s.initial[2] + 2, s.initial[3],
+      ]);
+      assert.deepEqual(s.before(), committed);
+      assert.equal(s.sqlite.prepare("SELECT COUNT(*) AS n FROM event_staff WHERE x_user_id='added_user'").get().n, 1);
+      assert.equal(s.sqlite.prepare("SELECT COUNT(*) AS n FROM x_users WHERE id='added_user'").get().n, 1);
+    } finally {
+      s.sqlite.close();
+    }
   }
 });
