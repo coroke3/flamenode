@@ -578,3 +578,74 @@ test("SEC-800: CSV assignment and X validation precedence matches CURRENT for mi
     s.sqlite.close();
   }
 });
+
+test("SEC-800: CSV stored duplicate and atomic-budget denials preserve CURRENT messages", async () => {
+  const storedDuplicate = "同じX IDを指す既存スタッフ行が複数あるため、先に整理してください。";
+  const snapshot = (s) => ["event_staff", "x_users", "audit_logs", "static_rebuild_queue", "public_build_state"]
+    .map((table) => s.sqlite.prepare('SELECT * FROM "' + table + '" ORDER BY id').all());
+  const s = setup();
+  try {
+    s.sqlite.exec(`
+      INSERT INTO event_staff (id, event_id, x_user_id, display_name, permission_preset, is_public, created_at, updated_at)
+      VALUES ('s-csv-a', 'ev-1', 'csv_staff', 'A', 'public_staff', 0, 1, 1),
+             ('s-csv-b', 'ev-1', '@CSV_STAFF', 'B', 'public_staff', 0, 1, 1);
+    `);
+    const before = snapshot(s);
+    await withThrowingDiagnostics(async ({ errors, warnings }) => {
+      for (const rows of [csv().rows, [csv().rows[0], { ...csv().rows[0], lineNumber: 9 }]]) {
+        const res = await s.send("POST", "/csv", { reason: "Stored duplicate", rows });
+        assert.equal(res.status, 409, await res.clone().text());
+        assert.equal(res.headers.get("cache-control"), "private, no-store");
+        assert.deepEqual(await res.json(), { ok: false, message: storedDuplicate });
+      }
+      assert.deepEqual(errors, []);
+      assert.equal(warnings(), 0);
+    });
+    assert.equal(s.stats.batches, 0);
+    assert.deepEqual(snapshot(s), before);
+  } finally {
+    s.sqlite.close();
+  }
+  const fault = setup({ fault: { match: staffRead, error: new Error(storedDuplicate) } });
+  try {
+    const before = snapshot(fault);
+    await withThrowingDiagnostics(async ({ errors, warnings }) => {
+      const res = await fault.send("POST", "/csv", csv());
+      assert.equal(res.status, 503, await res.clone().text());
+      assert.equal(res.headers.get("cache-control"), "private, no-store");
+      assert.deepEqual(await res.json(), { ok: false, message: GENERIC });
+      assert.deepEqual(errors, [["[MIG-0654] CSV staff mutation unavailable"]]);
+      assert.equal(warnings(), 0);
+    });
+    assert.equal(fault.receipt.readFaults, 1);
+    assert.equal(fault.stats.batches, 0);
+    assert.deepEqual(snapshot(fault), before);
+  } finally {
+    fault.sqlite.close();
+  }
+  for (const [total, knownCount, expectedQueries] of [[13, 13, 54], [7, 0, 56], [12, 11, 54], [100, 100, 270]]) {
+    const s = setup();
+    try {
+      const rows = Array.from({ length: total }, (_, i) => ({
+        ...csv().rows[0], lineNumber: i + 2, x_user_id: "limit_" + i,
+      }));
+      const insert = s.sqlite.prepare("INSERT INTO x_users (id, x_name, approval_status) VALUES (?, ?, 'approved')");
+      for (const row of rows.slice(0, knownCount)) insert.run(row.x_user_id, row.display_name);
+      const before = snapshot(s);
+      await withThrowingDiagnostics(async ({ errors, warnings }) => {
+        const res = await s.send("POST", "/csv", { reason: "Budget denial", rows });
+        assert.equal(res.status, 400, await res.clone().text());
+        assert.equal(res.headers.get("cache-control"), "private, no-store");
+        assert.deepEqual(await res.json(), { ok: false,
+          message: `このCSVは1回の原子更新上限を超えています（${expectedQueries}/50 query）。件数を分けて登録してください`,
+        });
+        assert.deepEqual(errors, []);
+        assert.equal(warnings(), 0);
+      });
+      assert.equal(s.stats.batches, 0);
+      assert.deepEqual(snapshot(s), before);
+    } finally {
+      s.sqlite.close();
+    }
+  }
+});

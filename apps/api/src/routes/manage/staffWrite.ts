@@ -442,7 +442,7 @@ export function registerStaffWriteRoutes(app: Hono<AppEnv>): void {
         const canonical = parseCanonicalXId(row.x_user_id);
         if (!canonical || !requestedX.has(canonical)) continue;
         if (byX.has(canonical)) {
-          return deny(c, "同じX IDを指す既存スタッフ行が複数あります。", 409);
+          return deny(c, "同じX IDを指す既存スタッフ行が複数あるため、先に整理してください。", 409);
         }
         byX.set(canonical, row);
       }
@@ -483,7 +483,7 @@ export function registerStaffWriteRoutes(app: Hono<AppEnv>): void {
         auditEntryCount: mutations, distinctActorCount: 1,
       });
       if (!budget.withinLimit) {
-        return deny(c, `このCSVは原子更新上限を超えています（${budget.totalQueryCount}/${budget.limit} query）。件数を分けてください`, 400);
+        return deny(c, `このCSVは1回の原子更新上限を超えています（${budget.totalQueryCount}/${budget.limit} query）。件数を分けて登録してください`, 400);
       }
       const extras: EventStaffBulkAtomicExtras = {
         mutationStatements: newX.map((row) => c.get("db").run(sql`
