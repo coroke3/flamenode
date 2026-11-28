@@ -615,14 +615,74 @@ export function buildSlotSubmissionPartAndEventAssertions(
   ];
 }
 
+/** Same-batch freshness checks for every stage/general question used by SA-088. */
+export function buildSlotSubmissionQuestionPolicyAssertions(
+  receipt: SlotSubmissionVideoEventReceipt,
+): SQL[] {
+  if (!Array.isArray(receipt.targetEventIds) ||
+      receipt.targetEventIds.some((id) => typeof id !== "string" || !id) ||
+      typeof receipt.generalQuestionPolicyJson !== "string" ||
+      !receipt.generalQuestionPolicyJson.startsWith("[") ||
+      typeof receipt.stageQuestionPolicyJson !== "string" ||
+      !receipt.stageQuestionPolicyJson.startsWith("[")) {
+    throw new Error("slot_submission_question_policy_receipt_invalid");
+  }
+  const eventIdsJson = JSON.stringify(receipt.targetEventIds);
+  const actualGeneral = sql\`(
+    SELECT json_group_array(json_array(
+      id, event_id, question_key, label, type, required, options_json,
+      max_length, sort_order, visibility, updated_at
+    ))
+    FROM (
+      SELECT id, event_id, question_key, label, type, required, options_json,
+             max_length, sort_order, visibility, updated_at
+      FROM event_custom_questions
+      WHERE event_id IN (
+        SELECT CAST(value AS TEXT) FROM json_each(\${eventIdsJson})
+      )
+        AND is_active = 1
+        AND NOT (\${stagePermissionQuestionKeyCondition()})
+      ORDER BY event_id ASC, sort_order ASC, id ASC
+      LIMIT \${receipt.targetEventIds.length * MAX_VIDEO_CUSTOM_QUESTIONS_READ + 1}
+    )
+  )\`;
+  const actualStage = sql\`(
+    SELECT json_group_array(json_array(
+      id, event_id, question_key, label, description, placeholder,
+      required, is_active, sort_order, updated_at
+    ))
+    FROM (
+      SELECT id, event_id, question_key, label, description, placeholder,
+             required, is_active, sort_order, updated_at
+      FROM event_custom_questions
+      WHERE event_id IN (
+        SELECT CAST(value AS TEXT) FROM json_each(\${eventIdsJson})
+      )
+        AND \${stagePermissionQuestionKeyCondition()}
+      ORDER BY event_id ASC, sort_order ASC
+    )
+  )\`;
+  return [
+    assertCondition(sql\`\${actualGeneral} = \${receipt.generalQuestionPolicyJson}\`),
+    assertCondition(sql\`\${actualStage} = \${receipt.stageQuestionPolicyJson}\`),
+  ];
+}
+
+export function decodeSlotSubmissionGeneralQuestions(
+  receipt: SlotSubmissionVideoEventReceipt,
+): LoadedGeneralCustomQuestion[] {
+  return decodeGeneralCustomQuestionPolicyForEvents(
+    receipt.generalQuestionPolicyJson,
+    receipt.targetEventIds,
+  );
+}
+
 type SlotSubmissionVideoEventProjection = {
   [K in keyof SlotSubmissionExistingVideo]: SlotSubmissionExistingVideo[K] | null;
 } & {
-  receipt_event_id: string | null;
-  receipt_event_title: string | null;
-  receipt_parts_json: string | null;
-  receipt_gap_minutes: number | null;
-  receipt_required_json: string | null;
+  receipt_events_json: string;
+  receipt_general_questions_json: string;
+  receipt_stage_questions_json: string;
   receipt_youtube_duplicate: number;
 };
 
@@ -637,24 +697,102 @@ type SlotSubmissionVideoEventProjection = {
  * building block for the future combined preflight, NOT an extra allowed
  * read in the final S3 path; raw legacy scalar bytes and CAS remain open.
  */
+function decodeSlotSubmissionEventPolicyProjection(
+  json: string,
+  expectedEventIds: readonly string[],
+): SlotSubmissionEventConfig[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    throw new Error("slot_submission_event_policy_projection_invalid");
+  }
+  const expected = new Set(expectedEventIds);
+  if (!Array.isArray(parsed)) throw new Error("slot_submission_event_policy_projection_invalid");
+  const seen = new Set<string>();
+  return parsed.map((tuple: unknown) => {
+    if (!Array.isArray(tuple) || tuple.length !== 5) {
+      throw new Error("slot_submission_event_policy_projection_invalid");
+    }
+    const [id, title, partsJson, gapMinutes, requiredJson] = tuple;
+    if (typeof id !== "string" || !expected.has(id) || seen.has(id) ||
+        typeof title !== "string" ||
+        (partsJson !== null && typeof partsJson !== "string") ||
+        (gapMinutes !== null && !Number.isSafeInteger(gapMinutes)) ||
+        (requiredJson !== null && typeof requiredJson !== "string")) {
+      throw new Error("slot_submission_event_policy_projection_invalid");
+    }
+    seen.add(id);
+    return {
+      id,
+      title,
+      parts_json: partsJson,
+      slot_part_gap_minutes: gapMinutes,
+      required_video_fields_json: requiredJson,
+    } as SlotSubmissionEventConfig;
+  });
+}
+
 export async function readSlotSubmissionVideoEventReceipt(
   db: Pick<ServerCoreDb, "all">,
   anchor: Pick<SlotSubmissionReceiptRow, "event_id" | "video_id">,
   submittedYoutubeId: string | null,
+  targetEventIds: readonly string[] = [anchor.event_id],
 ): Promise<SlotSubmissionVideoEventReceipt> {
-  // Explicit schema-derived projection, not SELECT v.* (legacy columns may
-  // remain in a migrated database). Only static identifiers enter this SQL.
+  const ids = Array.from(new Set([anchor.event_id, ...targetEventIds].filter(Boolean)));
+  const eventIdsJson = JSON.stringify(ids);
   const videoColumns = sql.join(
-    Object.values(getTableColumns(videos)).map((column) => sql`v.${sql.identifier(column.name)}`),
-    sql`, `,
+    Object.values(getTableColumns(videos)).map((column) => sql\`v.\${sql.identifier(column.name)}\`),
+    sql\`, \`,
   );
-  const rows = await db.all<SlotSubmissionVideoEventProjection>(sql`WITH submission_input AS (
-    SELECT ${anchor.event_id} AS event_id, ${anchor.video_id || null} AS video_id, ${submittedYoutubeId || null} AS youtube_id
+  const rows = await db.all<SlotSubmissionVideoEventProjection>(sql\`WITH submission_input AS (
+    SELECT \${anchor.event_id} AS event_id,
+      \${anchor.video_id || null} AS video_id,
+      \${submittedYoutubeId || null} AS youtube_id,
+      \${eventIdsJson} AS event_ids_json
   )
-  SELECT ${videoColumns},
-    e.id AS receipt_event_id, e.title AS receipt_event_title,
-    e.parts_json AS receipt_parts_json, e.slot_part_gap_minutes AS receipt_gap_minutes,
-    e.required_video_fields_json AS receipt_required_json,
+  SELECT \${videoColumns},
+    (SELECT json_group_array(json_array(
+      id, title, parts_json, slot_part_gap_minutes, required_video_fields_json
+    ))
+    FROM (
+      SELECT events.id, events.title, events.parts_json,
+             events.slot_part_gap_minutes, events.required_video_fields_json
+      FROM events
+      INNER JOIN json_each(input.event_ids_json) requested
+        ON events.id = CAST(requested.value AS TEXT)
+      ORDER BY CAST(requested.key AS INTEGER)
+    )) AS receipt_events_json,
+    (SELECT json_group_array(json_array(
+      id, event_id, question_key, label, type, required, options_json,
+      max_length, sort_order, visibility, updated_at
+    ))
+    FROM (
+      SELECT id, event_id, question_key, label, type, required, options_json,
+             max_length, sort_order, visibility, updated_at
+      FROM event_custom_questions
+      WHERE event_id IN (
+        SELECT CAST(value AS TEXT) FROM json_each(input.event_ids_json)
+      )
+        AND is_active = 1
+        AND NOT (\${stagePermissionQuestionKeyCondition()})
+      ORDER BY event_id ASC, sort_order ASC, id ASC
+      LIMIT (json_array_length(input.event_ids_json) * \${MAX_VIDEO_CUSTOM_QUESTIONS_READ} + 1)
+    )) AS receipt_general_questions_json,
+    (SELECT json_group_array(json_array(
+      id, event_id, question_key, label, description, placeholder,
+      required, is_active, sort_order, updated_at
+    ))
+    FROM (
+      SELECT id, event_id, question_key, label, description, placeholder,
+             required, is_active, sort_order, updated_at
+      FROM event_custom_questions
+      WHERE event_id IN (
+        SELECT CAST(value AS TEXT) FROM json_each(input.event_ids_json)
+      )
+        AND \${stagePermissionQuestionKeyCondition()}
+      ORDER BY event_id ASC, sort_order ASC
+    )) AS receipt_stage_questions_json,
     CASE WHEN input.youtube_id IS NULL THEN 0 ELSE EXISTS (
       SELECT 1 FROM videos candidate WHERE candidate.youtube_video_id = input.youtube_id
         AND candidate.visibility_status <> 'voided'
@@ -663,30 +801,33 @@ export async function readSlotSubmissionVideoEventReceipt(
     ) END AS receipt_youtube_duplicate
   FROM submission_input input
   LEFT JOIN videos v ON v.id = input.video_id
-  LEFT JOIN events e ON e.id = input.event_id
-  LIMIT 1`);
+  LIMIT 1\`);
   if (rows.length !== 1) throw new Error("slot_submission_video_event_receipt_invalid");
   const {
-    receipt_event_id, receipt_event_title, receipt_parts_json,
-    receipt_gap_minutes, receipt_required_json, receipt_youtube_duplicate,
+    receipt_events_json, receipt_general_questions_json,
+    receipt_stage_questions_json, receipt_youtube_duplicate,
     ...video
   } = rows[0];
   if ((receipt_youtube_duplicate !== 0 && receipt_youtube_duplicate !== 1) ||
       (video.id !== null && video.id !== (anchor.video_id || null)) ||
-      (receipt_event_id !== null && (receipt_event_id !== anchor.event_id || typeof receipt_event_title !== "string"))) {
+      typeof receipt_events_json !== "string" ||
+      typeof receipt_general_questions_json !== "string" ||
+      typeof receipt_stage_questions_json !== "string") {
     throw new Error("slot_submission_video_event_receipt_invalid");
   }
+  const eventsSnapshot = decodeSlotSubmissionEventPolicyProjection(receipt_events_json, ids);
+  const stageQuestions = decodeSlotSubmissionStageQuestionProjection(receipt_stage_questions_json, ids);
   return {
     existing: anchor.video_id
       ? video.id === null ? { kind: "missing" } : { kind: "found", row: video as SlotSubmissionExistingVideo }
       : { kind: "none" },
-    event: receipt_event_id === null ? null : {
-      id: receipt_event_id,
-      title: receipt_event_title!,
-      parts_json: receipt_parts_json,
-      slot_part_gap_minutes: receipt_gap_minutes,
-      required_video_fields_json: receipt_required_json,
-    },
+    targetEventIds: ids,
+    events: eventsSnapshot,
+    event: eventsSnapshot.find((event) => event.id === anchor.event_id) ?? null,
+    eventPolicyJson: receipt_events_json,
+    generalQuestionPolicyJson: receipt_general_questions_json,
+    stageQuestionPolicyJson: receipt_stage_questions_json,
+    stageQuestions,
     youtubeDuplicate: receipt_youtube_duplicate === 1,
   };
 }
