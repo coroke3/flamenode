@@ -551,9 +551,19 @@ async function closeCircuitIfReady(
     }
 
     const openKey = degradedCircuitOpenKey();
+    const closeRevision = circuitRevision;
     await waitForKvWriteSlot(openKey);
+    // The old OPEN may expire while waiting for the write slot. Do not
+    // delete a marker on behalf of a superseded local transition.
+    if (closeRevision !== circuitRevision) return;
     lastKvWriteAttemptAt.set(openKey, Date.now());
     await kv.delete(openKey);
+    if (closeRevision !== circuitRevision) {
+      // A newer repair can be established while DELETE is outstanding.
+      // Its request-local reconciliation must not reuse our old marker receipt.
+      openMarkerKnown = false;
+      return;
+    }
     // Acknowledged close is final locally even if diagnostic cleanup fails.
     markCircuitClosed(now);
     await waitForKvWriteSlot(streakKey);

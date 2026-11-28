@@ -84,7 +84,12 @@ function createFixture(runtime, { initial = 19, fault = null, badLogger = false 
     },
   };
   const api = runtime(() => kv, { now: () => now },
-    (resolve, ms) => { now += ms; resolve(); }, {
+    (resolve, ms) => {
+      const finish = () => { now += ms; resolve(); };
+      if (gate && gatedOp === "wait" && gatedKey === openKey) {
+        void pauseIfSelected("wait", openKey).then(finish);
+      } else finish();
+    }, {
       warn(message) { warnings.push(JSON.parse(message)); if (badLogger) throw new Error("logger"); },
     });
   return { ...api, values, writes, warnings, writeTimes, rateViolations, openKey, hitKey, missKey,
@@ -565,6 +570,40 @@ function registerTests(test, equal, runtime) {
     equal(f.snapshot().pending, 1);
     equal(f.rateViolations.length, 0);
   });
+  for (const point of ["wait", "delete"]) {
+    for (const newerHits of [0, 3]) {
+      test("SEC-798: expired old OPEN close " + point + " cannot erase newer repair (" + newerHits + " hits)", async () => {
+        const f = make();
+        await f.miss(f.now());
+        await f.hit(); await f.hit();
+        if (point === "delete") f.tick(1000);
+        const pause = f.pause(point, f.openKey);
+        const closing = f.hit();
+        await pause.started;
+        // Both the original remote marker and the close's local TTL expire.
+        // A fresh probe releases the old OPEN; a new bucket crosses threshold
+        // while the old close still owns its asynchronous write lock.
+        f.tick(90001);
+        equal(await f.isOpen(), false);
+        f.seed({bucket:Math.floor(f.now()/60000),observed:19,pending:0,lastFlushAt:-Infinity});
+        await f.miss(f.now());
+        equal(f.snapshot().stage, "marker");
+        equal(await f.isOpen(), true);
+        for (let i=0; i<newerHits; i++) await f.hit();
+        pause.resume(); await closing;
+        equal(f.snapshot().stage, null);
+        equal(f.snapshot().pending, 1);
+        equal(f.snapshot().open, newerHits === 0);
+        equal(f.values.has(f.openKey), newerHits === 0);
+        // Initial OPEN cleanup is the only streak delete; stale close must
+        // neither erase the new intent nor clean up its hit bookkeeping.
+        equal(f.writes.filter(x=>x[0]==="delete"&&x[1]===f.hitKey).length, 1);
+        equal(f.writes.filter(x=>x[0]==="delete"&&x[1]===f.openKey).length, point === "delete" ? 1 : 0);
+        equal(f.writes.filter(x=>x[0]==="put"&&x[1]===f.openKey).length, newerHits === 0 ? 2 : 1);
+        equal(f.rateViolations.length, 0);
+      });
+    }
+  }
 }
 
 registerTests(test, assert.equal, runtime);
