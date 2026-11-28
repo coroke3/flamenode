@@ -3183,14 +3183,27 @@ export function createReplayTarget(inproc, wr) {
 
 export async function collectOperationModeKvSamples(target, fixture, opts, { clock = () => performance.now(), pause = ms => new Promise(resolve => setTimeout(resolve, ms)) } = {}) {
   const spec = { method: "GET", path: "/api/operation-mode/banner", expect: [200], operationModeKv: true };
-  const samples = [], warmupFailures = [], generations = new Set();
+  const samples = [], warmupFailures = [], warmupReceipts = [], generations = new Set();
   const makeSample = (kind, result, seed, provenance, elapsedMs = null) => {
     const e = result?.nativeKv;
     const bannerPhase = kind === "cold" ? "miss" : kind;
     const unexpected = !provenance || !Number.isFinite(result?.cpuMs) || result.cpuMs < 0
       || operationModeBannerReceiptMismatch(fixture, { ...e, status: result?.status, bytes: result?.bytes }, bannerPhase)
       || operationModeKvEvidenceMismatch(fixture, seed, e, result?.requestOrdinal, kind);
+    // Persist the same evidence that the live predicates consumed, not just
+    // their boolean verdict. Keep the synthetic banner body bounded; the raw
+    // seeded KV value is deliberately never copied into the report.
+    const body = typeof e?.body === "string" && e.body.length <= 64 * 1024
+      && Buffer.byteLength(e.body, "utf8") <= 64 * 1024 ? e.body : null;
     return { kind, cpuMs: result?.cpuMs ?? null, status: result?.status ?? null, bytes: result?.bytes ?? null,
+      seed: { bytes: seed?.bytes ?? null, sha256: seed?.sha256 ?? null, reset: seed?.reset ?? null,
+        workerBuild: seed?.workerBuild ?? null, requestOrdinal: seed?.requestOrdinal ?? null },
+      receipt: { ordinal: e?.ordinal ?? null, workerBuild: e?.workerBuild ?? null,
+        requestOrdinal: e?.requestOrdinal ?? null, receiptWorkerBuild: e?.receiptWorkerBuild ?? null,
+        receiptRequestOrdinal: e?.receiptRequestOrdinal ?? null, cacheControl: e?.cacheControl ?? null,
+        contentType: e?.contentType ?? null, body, bodyOmitted: typeof e?.body === "string" && body === null },
+      provenanceValid: provenance, coldGeneration: result?.coldGeneration ?? null,
+      reportedFirstIsolateRequest: result?.isFirstIsolateRequest ?? null,
       d1: e?.d1 ?? null, kvGets: e?.kvGets ?? null, kvPuts: e?.kvPuts ?? null, kvDeletes: e?.kvDeletes ?? null,
       kvOther: e?.kvOther ?? null, kvGetFailures: e?.kvGetFailures ?? null,
       readBytes: e?.readBytes ?? null, readSha256: e?.readSha256 ?? null,
@@ -3201,10 +3214,13 @@ export async function collectOperationModeKvSamples(target, fixture, opts, { clo
   const buildValid = r => typeof r?.workerBuild === "string" && /^[A-Za-z0-9._-]{1,128}$/.test(r.workerBuild);
   const follows = (prev, next) => buildValid(prev) && next?.workerBuild === prev.workerBuild
     && next.requestOrdinal === prev.requestOrdinal + 2;
-  const finish = stopReason => ({ samples, warmupFailures, stopReason });
+  const finish = stopReason => ({ samples, warmupFailures, warmupReceipts, stopReason });
   const accept = (sample, warmup) => {
     if (!warmup) samples.push(sample);
-    else if (sample.unexpected) warmupFailures.push(sample);
+    else {
+      warmupReceipts.push(sample);
+      if (sample.unexpected) warmupFailures.push(sample);
+    }
     return !sample.unexpected;
   };
   let lastWarmBuild = null;
@@ -3309,7 +3325,7 @@ async function runOperationModeKvCli(plan, opts) {
   const baseline = buildScenarios(plan).find(s => s.id === "BASELINE");
   const state = { tagSeq: 0 };
   let pre = null, post = null;
-  let collected = { samples: [], warmupFailures: [], stopReason: null };
+  let collected = { samples: [], warmupFailures: [], warmupReceipts: [], stopReason: null };
   let preRows = [], postRows = [];
   try {
     preRows = await runScenario(target, baseline, opts, state);
@@ -3329,7 +3345,7 @@ async function runOperationModeKvCli(plan, opts) {
     resolutionMs: target.resolutionMs, calibration: target.calibration, samplesPerPhase: opts.samples,
     warmupDiscarded: opts.warmup, coldSamplesRequested: opts.skipCold ? 0 : opts.coldSamples,
     expiryWaitMs: 31000, localNativeKv: true, migrationAcceptance: false, productionAcceptance: false },
-    baseline: { pre, post }, summary, ...collected };
+    baseline: { pre, post, preRows, postRows }, summary, ...collected };
   console.log(JSON.stringify(report, null, 2));
   if (opts.out) fs.writeFileSync(opts.out, JSON.stringify(report, null, 2));
   if (summary.verdict !== "LOCAL_DIAGNOSTIC_WITHIN_S2") process.exitCode = 2;

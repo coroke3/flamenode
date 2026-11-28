@@ -191,6 +191,7 @@ test("MIG-0639 native KV runner separates reset miss, warm hit, elapsed expiry a
         d1: 0, kvGets: gets, kvPuts: 0, kvDeletes: 0, kvOther: 0, kvGetFailures: 0,
         readBytes: gets ? fixture.bytes : null, readSha256: gets ? sha : null, body,
         cacheControl: "no-store", contentType: "application/json" };
+      if (bad === "large-body") nativeKv.body = "日".repeat(65536);
       if (bad === "receipt-build") nativeKv.receiptWorkerBuild = "other";
       if (bad === "receipt-ordinal") nativeKv.receiptRequestOrdinal = n + 2;
       if (bad === kind) nativeKv.readSha256 = "b".repeat(64);
@@ -231,6 +232,34 @@ test("MIG-0639 native KV runner separates reset miss, warm hit, elapsed expiry a
   assert.deepEqual(out.samples.map(r => r.kind), ["miss","hit","expiry","miss","hit","expiry","cold","cold"]);
   assert.ok(out.samples.every(r => !r.unexpected));
   assert.equal(m.seeds(), 5);
+  // The persisted artifact must allow a reviewer to replay the predicates
+  // and link warmups to measured rounds without trusting "unexpected:false".
+  const saved = JSON.parse(JSON.stringify(out));
+  assert.deepEqual(saved.warmupReceipts.map(r => r.kind), ["miss", "hit", "expiry"]);
+  const all = [...saved.warmupReceipts, ...saved.samples];
+  for (const row of all) {
+    const evidence = { ...row, ...row.receipt };
+    assert.equal(row.provenanceValid, true);
+    assert.equal(row.receipt.bodyOmitted, false);
+    assert.equal(row.receipt.body, body);
+    assert.equal(operationModeBannerReceiptMismatch(fixture, evidence, row.kind === "cold" ? "miss" : row.kind), false);
+    assert.equal(operationModeKvEvidenceMismatch(fixture, row.seed, evidence, row.requestOrdinal, row.kind), false);
+    assert.equal(Object.hasOwn(row.seed, "raw"), false);
+    if (row.kind === "cold") {
+      assert.equal(row.coldGeneration, row.workerBuild);
+      assert.equal(row.reportedFirstIsolateRequest, true);
+    }
+  }
+  assert.equal(saved.warmupReceipts.at(-1).requestOrdinal + 2, saved.samples[0].seed.requestOrdinal);
+  const tampered = { ...saved.samples[0], ...saved.samples[0].receipt, receiptRequestOrdinal: 99 };
+  assert.equal(operationModeKvEvidenceMismatch(fixture, saved.samples[0].seed, tampered, saved.samples[0].requestOrdinal, "miss"), true);
+  const oversized = fake({ bad: "large-body" });
+  const rejected = await collectOperationModeKvSamples(oversized.target, fixture, opts, oversized);
+  assert.equal(rejected.stopReason, "STOP_RECEIPT");
+  assert.equal(rejected.warmupReceipts.length, 1);
+  assert.equal(rejected.warmupReceipts[0].receipt.body, null);
+  assert.equal(rejected.warmupReceipts[0].receipt.bodyOmitted, true);
+  assert.deepEqual(rejected.warmupFailures, rejected.warmupReceipts);
   assert.ok(out.samples.filter(r => r.kind === "expiry").every(r => r.elapsedMs >= 30000));
   assert.ok(out.samples.filter(r => r.kind === "cold").every(r => r.isFirstIsolateRequest && r.requestOrdinal === 1));
   for (const input of [{ bad: "miss" }, { bad: "hit" }, { bad: "expiry" }, { bad: "seed-build" }, { bad: "seed-ordinal" }, { bad: "receipt-build" }, { bad: "receipt-ordinal" }, { early: true }]) {
