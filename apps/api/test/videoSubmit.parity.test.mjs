@@ -1134,13 +1134,23 @@ if (runUnderRootTsx(import.meta.url)) {
         ],
       },
       {
-        name: "unsafe numeric timestamp uses full-event fallback",
+        name: "unsafe numeric prefix uses full-event fallback",
+        anchor: "anchor",
+        kind: "fallback",
+        rows: [
+          { id: "before", rawStartTimeSql: "CAST(-9007199254740992 AS REAL)", sort_order: 0 },
+          { id: "anchor", start_time: 1000, sort_order: 1 },
+          { id: "future", start_time: 1500, sort_order: 2 },
+        ],
+      },
+      {
+        name: "unsafe anchor timestamp uses full-event fallback",
         anchor: "anchor",
         kind: "fallback",
         rows: [
           { id: "before", start_time: 1000, sort_order: 0 },
-          { id: "anchor", start_time: Number.MAX_SAFE_INTEGER + 1, sort_order: 1 },
-          { id: "after", start_time: Number.MAX_SAFE_INTEGER + 2, sort_order: 2 },
+          { id: "anchor", rawStartTimeSql: "CAST(9007199254740992 AS REAL)", sort_order: 1 },
+          { id: "after", rawStartTimeSql: "CAST(9007199254740994 AS REAL)", sort_order: 2 },
         ],
       },
       {
@@ -1162,16 +1172,23 @@ if (runUnderRootTsx(import.meta.url)) {
         ).run('["第一部","第二部","第三部","第四部"]', 15, "ev_open");
         for (let index = 0; index < scenario.rows.length; index += 1) {
           const row = scenario.rows[index];
-          insert(w.sqlite, "slots", {
-            id: row.id,
-            event_id: "ev_open",
-            reservation_group_id: null,
-            start_time: row.start_time,
-            sort_order: row.sort_order ?? index,
-            status: "reserved",
-            updated_at: 100,
-            version: 1,
-          });
+          if (row.rawStartTimeSql) {
+            w.sqlite.prepare(
+              "INSERT INTO slots (id, event_id, reservation_group_id, start_time, sort_order, status, updated_at, version) VALUES (?, ?, NULL, " +
+                row.rawStartTimeSql + ", ?, 'reserved', 100, 1)",
+            ).run(row.id, "ev_open", row.sort_order ?? index);
+          } else {
+            insert(w.sqlite, "slots", {
+              id: row.id,
+              event_id: "ev_open",
+              reservation_group_id: null,
+              start_time: row.start_time,
+              sort_order: row.sort_order ?? index,
+              status: "reserved",
+              updated_at: 100,
+              version: 1,
+            });
+          }
         }
         const anchorRow = w.sqlite.prepare("SELECT * FROM slots WHERE id=?").get(scenario.anchor);
         assert.ok(anchorRow, scenario.name);

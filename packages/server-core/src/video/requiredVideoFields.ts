@@ -192,29 +192,32 @@ export async function readSlotSubmissionReceipt(
     END AS fallback_required
     FROM anchor
   ), unsupported_prefix AS (
-    SELECT CASE WHEN EXISTS (
-      SELECT 1 FROM slots
-      WHERE event_id = (SELECT event_id FROM anchor)
-        AND typeof(start_time) IN ('integer', 'real')
-        AND abs(CAST(start_time AS REAL)) > 9007199254740991
-        AND start_time <= (SELECT start_time FROM anchor)
-    ) THEN 1 ELSE 0 END AS unsupported
+    SELECT CASE
+      WHEN (SELECT fallback_required FROM anchor_meta) = 1 THEN 0
+      WHEN EXISTS (
+        SELECT 1 FROM slots
+        WHERE event_id = (SELECT event_id FROM anchor)
+          AND typeof(start_time) IN ('integer', 'real')
+          AND start_time < -9007199254740991
+        LIMIT 1
+      ) THEN 1 ELSE 0
+    END AS unsupported
   ), part_projection AS (
     SELECT id, start_time, sort_order FROM slots
     WHERE event_id = (SELECT event_id FROM anchor)
       AND (SELECT fallback_required FROM anchor_meta) = 0
+      AND (SELECT unsupported FROM unsupported_prefix) = 0
       AND typeof(start_time) IN ('integer', 'real')
-      AND abs(CAST(start_time AS REAL)) <= 9007199254740991
       AND start_time <= (SELECT start_time FROM anchor)
     ORDER BY start_time ASC
-    LIMIT ${sql.raw(String(MAX_SLOT_PART_PROJECTION_ROWS + 1))}
+    LIMIT 513
   ), part_projection_meta AS (
     SELECT COUNT(*) AS row_count FROM part_projection
   ), part_meta AS (
     SELECT CASE
       WHEN (SELECT fallback_required FROM anchor_meta) = 1
         OR (SELECT unsupported FROM unsupported_prefix) = 1
-        OR (SELECT row_count FROM part_projection_meta) > ${MAX_SLOT_PART_PROJECTION_ROWS}
+        OR (SELECT row_count FROM part_projection_meta) > 512
       THEN 1 ELSE 0
     END AS fallback_required
   ), part_rows AS (
