@@ -9,6 +9,8 @@ import { AdminEvents } from "./admin/AdminEvents.js";
 import { AdminNotifications } from "./admin/AdminNotifications.js";
 import { AdminCompatRedirect } from "./admin/AdminRedirects.js";
 import { AdminTop } from "./admin/AdminTop.js";
+import { AdminXLinkRequests } from "./admin/AdminXLinkRequests.js";
+import { AdminXIdMerges } from "./admin/AdminXIdMerges.js";
 import { AnnouncementCreatePage, AnnouncementEditPage } from "./admin/AnnouncementEditor.js";
 import { AnnouncementsPage } from "./admin/Announcements.js";
 import { EventGroupCreatePage, EventGroupEditPage } from "./admin/EventGroupEdit.js";
@@ -96,6 +98,8 @@ export function OpsRoutes({ api }: { api: OpsApi }): React.ReactElement {
             <Route path="/manage/*" element={manage} />
             <Route path="/admin" element={adminFrame}>
               <Route index element={<AdminTop />} />
+              <Route path="x-link-requests" element={<AdminXLinkRequests />} />
+              <Route path="x-id-merges" element={<AdminXIdMerges />} />
               <Route path="permissions/simulator" element={<PermissionSimulator />} />
               <Route path="announcements" element={<AnnouncementsPage />} />
               <Route path="announcements/new" element={<AnnouncementCreatePage />} />

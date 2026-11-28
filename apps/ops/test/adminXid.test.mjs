@@ -1,0 +1,175 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { createRoot } from "react-dom/client";
+import { MemoryRouter } from "react-router-dom";
+import { JSDOM } from "jsdom";
+import { createXidLinkRequestsApi } from "../.test-dist/apps/ops/src/api/xidLinkRequests.js";
+import { XLinkRequestTable, formatRequestTime } from "../.test-dist/apps/ops/src/components/xid/XLinkRequestTable.js";
+import { AdminXLinkRequests } from "../.test-dist/apps/ops/src/routes/admin/AdminXLinkRequests.js";
+
+const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+const pending = {
+  id: "request-1", requested_x_id: "example", requested_by_auth_user_id: "auth-1", discord_name: "Example",
+  discord_image: null, requested_at: 1_700_000_000, request_type: "new_link", target_x_user_id: null,
+  requested_x_name: null, requested_icon_url: null, requested_approval_status: null,
+  target_icon_url: null, target_approval_status: null,
+};
+const body = { pending: [pending], recentRejected: [], recentAudit: [] };
+
+test("MIG-0732 U01: admin read uses the authorized GET with no-store and validates DTO", async () => {
+  const seen = [];
+  const api = createXidLinkRequestsApi(async (path, init) => {
+    seen.push({ path, init });
+    return json(200, body);
+  });
+  assert.deepEqual(await api.get(), { status: "ok", data: body });
+  assert.equal(seen[0].path, "/api/admin-read/x-link-requests");
+  assert.equal(seen[0].init.method, "GET");
+  assert.equal(seen[0].init.credentials, "same-origin");
+  assert.equal(seen[0].init.cache, "no-store");
+});
+test("MIG-0732 U01: read fails closed for malformed and unavailable response", async () => {
+  assert.deepEqual(await createXidLinkRequestsApi(async () => json(200, { pending: "not-an-array" })).get(),
+    { status: "unavailable" });
+  assert.deepEqual(await createXidLinkRequestsApi(async () => json(403, { redirect: "/dashboard" })).get(),
+    { status: "forbidden", redirect: "/dashboard" });
+  assert.deepEqual(await createXidLinkRequestsApi(async () => json(503, {})).get(),
+    { status: "unavailable" });
+});
+test("MIG-0732 U01: mutations fail closed by default; enabled client preserves request ID and trimmed reason", async () => {
+  const calls = [];
+  const mockFetch = async (path, init) => {
+    calls.push({ path, init });
+    return json(200, { ok: true, message: "処理しました。" });
+  };
+  const readOnly = createXidLinkRequestsApi(mockFetch);
+  assert.deepEqual(await readOnly.approve("a/b"), { status: "unavailable" });
+  assert.deepEqual(await readOnly.reject("a/b", "  理由  "), { status: "unavailable" });
+  assert.deepEqual(calls, [], "inactive controls must never call an unmounted backend");
+  // Explicit opt-in is tested only in this isolated client fixture; the Ops
+  // production route keeps allowMutations=false until MIG-0605/0644 parity.
+  const api = createXidLinkRequestsApi(mockFetch, true);
+  assert.equal((await api.approve("a/b")).status, "ok");
+  assert.equal((await api.reject("a/b", "  理由  ")).status, "ok");
+  assert.equal(calls[0].path, "/api/xid/link-requests/a%2Fb/approve");
+  assert.equal(calls[1].path, "/api/xid/link-requests/a%2Fb/reject");
+  assert.equal(calls[1].init.body, JSON.stringify({ reason: "理由" }));
+  for (const call of calls) {
+    assert.equal(call.init.method, "POST");
+    assert.equal(call.init.credentials, "same-origin");
+  }
+});
+test("MIG-0732 U01: read-only table hides destructive controls; opt-in preserves labels", () => {
+  const api = createXidLinkRequestsApi(async () => json(200, { ok: true }));
+  const readOnlyHtml = renderToStaticMarkup(React.createElement(XLinkRequestTable, {
+    rows: [pending], api, onChanged: () => {},
+  }));
+  assert.ok(readOnlyHtml.includes("閲覧のみ可能です"), "production uses read-only state");
+  assert.ok(!readOnlyHtml.includes(">承認</button>"));
+  assert.ok(!readOnlyHtml.includes(">却下</button>"));
+  const html = renderToStaticMarkup(React.createElement(XLinkRequestTable, {
+    rows: [pending], api, onChanged: () => {}, allowMutations: true,
+  }));
+  for (const label of ["承認", "却下", "Xで確認", "FlameNode", "Discord", "example"]) {
+    assert.ok(html.includes(label === "Discord" ? "Example" : label), label);
+  }
+  assert.ok(html.includes("https://x.com/example"));
+  const empty = renderToStaticMarkup(React.createElement(XLinkRequestTable, {
+    rows: [], api, onChanged: () => {},
+  }));
+  assert.ok(empty.includes("承認待ちの X ID 連携申請はありません"));
+  assert.notEqual(formatRequestTime(1_700_000_000), "-");
+});
+
+test("MIG-0732 U01: mounted read-only screen retains CURRENT history times and Discord fallback", async (t) => {
+  const now = 1_700_000_600;
+  t.mock.method(Date, "now", () => now * 1000);
+  const fixture = {
+    pending: [
+      pending,
+      { ...pending, id: "request-2", discord_name: "With image", discord_image: "https://cdn.example.test/avatar.png" },
+    ],
+    recentRejected: [{
+      id: "rejected-1", requested_x_id: "rejected", requested_by_auth_user_id: "auth-2",
+      request_type: "alias", requested_at: now - 300,
+    }],
+    recentAudit: [{
+      id: "audit-1", table_name: "x_identity_requests", operation: "update",
+      target_id: "request-1", created_at: now - 3600,
+      changedKeys: ["status", "decision_reason"],
+    }],
+  };
+  const dom = new JSDOM("<!doctype html><html><body><div id='root'></div></body></html>", {
+    url: "https://flamenode.test/admin/x-link-requests",
+  });
+  // TableScroll uses the native browser ResizeObserver. JSDOM has no layout
+  // engine, so provide the observer lifecycle without faking any layout result.
+  const observedTables = new Set();
+  class TestResizeObserver {
+    elements = new Set();
+    observe(element) { this.elements.add(element); observedTables.add(element); }
+    unobserve(element) { this.elements.delete(element); observedTables.delete(element); }
+    disconnect() { for (const element of this.elements) observedTables.delete(element); this.elements.clear(); }
+  }
+  const globals = {
+    window: dom.window, document: dom.window.document, navigator: dom.window.navigator,
+    HTMLElement: dom.window.HTMLElement, Element: dom.window.Element, Node: dom.window.Node,
+    ResizeObserver: TestResizeObserver, IS_REACT_ACT_ENVIRONMENT: true,
+  };
+  const calls = [];
+  globals.fetch = async (path, init) => {
+    calls.push({ path, method: init.method, cache: init.cache });
+    return json(200, fixture);
+  };
+  const original = new Map(Object.keys(globals).map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  // React.act can report an AggregateError with an empty top-level message.
+  // Keep underlying failures visible in Node's CI TAP output.
+  async function actWithDiagnostics(callback) {
+    try { await React.act(callback); }
+    catch (error) {
+      if (error instanceof AggregateError) {
+        throw new Error(error.errors.map(item => item?.stack ?? String(item)).join("\n"), { cause: error });
+      }
+      throw error;
+    }
+  }
+  let root;
+  try {
+    for (const [key, value] of Object.entries(globals)) {
+      Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
+    }
+    const target = document.getElementById("root");
+    root = createRoot(target);
+    await actWithDiagnostics(async () => {
+      root.render(React.createElement(MemoryRouter, { initialEntries: ["/admin/x-link-requests"] },
+        React.createElement(AdminXLinkRequests)));
+    });
+    assert.deepEqual(calls, [{ path: "/api/admin-read/x-link-requests", method: "GET", cache: "no-store" }]);
+    const tables = target.querySelectorAll("table");
+    assert.equal(tables.length, 3);
+    assert.equal(observedTables.size, 3, "all mounted tables register scroll observers");
+    const applicants = tables[0].querySelectorAll("tbody tr");
+    assert.equal(applicants[0].cells[3].querySelector("svg[aria-hidden='true']")?.getAttribute("width"), "14");
+    assert.equal(applicants[1].cells[3].querySelector("img")?.getAttribute("src"), "https://cdn.example.test/avatar.png");
+    assert.equal(tables[1].querySelector("tbody tr").cells[3].textContent, "5分前");
+    const auditTime = tables[2].querySelector("tbody tr").cells[0];
+    assert.equal(auditTime.children[0].textContent, formatRequestTime(now - 3600));
+    assert.equal(auditTime.children[1].textContent, "1時間前");
+    assert.match(tables[2].textContent, /status, decision_reason/);
+    assert.ok([...target.querySelectorAll("button")].every(button =>
+      !["承認", "却下", "理由を添えて却下"].includes(button.textContent.trim())));
+  } finally {
+    try {
+      if (root) await actWithDiagnostics(async () => { root.unmount(); });
+      assert.equal(observedTables.size, 0, "unmount disconnects all table observers");
+    } finally {
+      dom.window.close();
+      for (const [key, descriptor] of original) {
+        if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+        else delete globalThis[key];
+      }
+    }
+  }
+});
