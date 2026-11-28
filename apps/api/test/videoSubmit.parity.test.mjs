@@ -1984,6 +1984,108 @@ test("U03a SA-088: stage/general question policy changes fail the same audited b
     }
   });
 
+  test("U03a SA-088: event-selection receipt CAS rechecks links, policies and identity in one batch", async () => {
+    const {
+      readSlotSubmissionEventSelection,
+      buildSlotSubmissionEventSelectionAssertions,
+    } = await import("@flamenode/server-core/video/requiredVideoFields");
+    const { mutateWithAudit } = await import("@flamenode/server-core/audit/mutate");
+    const { sql } = await import("drizzle-orm");
+    const cases = [
+      { name: "unchanged non-admin receipt", isAdmin: false, accept: true },
+      {
+        name: "existing video-event link changes",
+        isAdmin: false,
+        mutate: (sqlite) => insert(sqlite, "video_events", { video_id: "v_link", event_id: "ev_open" }),
+      },
+      {
+        name: "event allow policy changes",
+        isAdmin: false,
+        mutate: (sqlite) => sqlite.prepare("UPDATE events SET allow_user_video_event_links=1 WHERE id='ev_open'").run(),
+      },
+      {
+        name: "approved-X staff policy changes",
+        isAdmin: false,
+        mutate: (sqlite) => sqlite.prepare("UPDATE event_staff SET permission_preset='public_staff' WHERE id='staff_link'").run(),
+      },
+      {
+        name: "actor approved-X membership changes",
+        isAdmin: false,
+        mutate: (sqlite) => insert(sqlite, "x_user_account_links", {
+          auth_user_id: "u_owner", x_user_id: "x_canon", link_role: "manager",
+        }),
+      },
+      {
+        name: "actor role changes from user to admin",
+        isAdmin: false,
+        mutate: (sqlite) => sqlite.prepare("UPDATE user SET role='admin' WHERE id='u_owner'").run(),
+      },
+      {
+        name: "admin role is revoked",
+        isAdmin: true,
+        initialRole: "admin",
+        mutate: (sqlite) => sqlite.prepare("UPDATE user SET role='user' WHERE id='u_owner'").run(),
+      },
+    ];
+    for (const scenario of cases) {
+      const w = seedWorld();
+      try {
+        if (scenario.initialRole) {
+          w.sqlite.prepare("UPDATE user SET role=? WHERE id='u_owner'").run(scenario.initialRole);
+        }
+        insert(w.sqlite, "videos", {
+          id: "v_link", submitted_by_user_id: "u_owner", creator_x_user_id: "x_owner",
+          creator_display_name: "Owner", title: "Before", visibility_status: "pending",
+          created_at: 100, updated_at: 100,
+        });
+        insert(w.sqlite, "event_staff", {
+          id: "staff_link", event_id: "ev_open", x_user_id: "x_owner",
+          display_name: "Staff", permission_preset: "reviewer",
+          custom_permission_keys_json: null, created_at: 100, updated_at: 100,
+        });
+        const db = drizzle(w.d1);
+        const input = {
+          videoId: "v_link", requested: ["ev_open"], anchorEventId: "ev_closed",
+          isAdmin: scenario.isAdmin, approvedXIds: ["x_owner"],
+        };
+        const { receipt } = await readSlotSubmissionEventSelection(db, input);
+        const assertions = buildSlotSubmissionEventSelectionAssertions({
+          ...input, actorUserId: "u_owner",
+        }, receipt);
+        assert.equal(assertions.length, 1, scenario.name);
+        if (scenario.mutate) scenario.mutate(w.sqlite);
+        const before = snapshotDb(w.sqlite);
+        const video = { ...w.sqlite.prepare("SELECT * FROM videos WHERE id='v_link'").get() };
+        const write = () => mutateWithAudit(db, {
+          preMutationAssertions: assertions.map((condition) => db.run(condition)),
+          mutationStatements: [db.run(sql`UPDATE videos SET title='After' WHERE id='v_link'`)],
+          expectedMutationChanges: [1],
+          audits: [{
+            table_name: "videos", target_id: "v_link", operation: "UPDATE",
+            before: video, after: { ...video, title: "After" }, actor_user_id: "u_owner",
+            context: "video-save:submit-slot", retention_class: "normal", strict: true,
+          }],
+          callerQueryCount: 1,
+        });
+        if (scenario.accept) {
+          const ids = await write();
+          assert.equal(ids.length, 1, scenario.name);
+          assert.equal(w.sqlite.prepare("SELECT title FROM videos WHERE id='v_link'").get().title, "After", scenario.name);
+          assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE target_id='v_link' AND table_name='videos'").get().n, 1, scenario.name);
+        } else {
+          await assert.rejects(write, /malformed JSON/i, scenario.name);
+          assert.deepEqual(snapshotDb(w.sqlite), before, scenario.name);
+          assert.equal(w.sqlite.prepare("SELECT title FROM videos WHERE id='v_link'").get().title, "Before", scenario.name);
+          assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE target_id='v_link' AND table_name='videos'").get().n, 0, scenario.name);
+        }
+        assert.equal(w.d1.stats.batches, 1, scenario.name);
+        assert.ok(w.d1.stats.maxBinds <= 100, scenario.name);
+      } finally {
+        w.sqlite.close();
+      }
+    }
+  });
+
   test("U03a SA-088: CURRENT reservation group denial order and absolute cap, no writes (including preflight)", async () => {
     const { submitSlotVideo } = await import("../../../src/lib/actions/video/submitSlotVideo.ts");
     const inconsistent = "連続枠の予約者情報が不整合です。運営へ連絡してください。";

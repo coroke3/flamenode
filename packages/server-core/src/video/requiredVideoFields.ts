@@ -1,5 +1,5 @@
 import { and, eq, getTableColumns, inArray, sql, type SQL } from "drizzle-orm";
-import { eventCustomQuestions, eventStaff, events, slots, videos } from "@flamenode/db/schema";
+import { eventCustomQuestions, eventStaff, events, slots, users, videoEvents, videos, xUserAccountLinks, xUsers } from "@flamenode/db/schema";
 import { MAX_ATOMIC_VIDEO_EVENTS } from "@flamenode/domain/video/atomicLimits";
 import { resolveStaffPermissionKeys } from "@flamenode/domain/auth/permissions/resolver";
 import { approvedXIdsWhere } from "../auth/approvedXPredicate.ts";
@@ -875,7 +875,7 @@ export function validateSlotSubmissionRequiredFields(
 export type SlotSubmissionEventSelectionReceipt = {
   current: string[];
   eventPolicies: { id: string; allow: number }[];
-  staffPolicies: { event_id: string; permission_preset: string; custom_permission_keys_json: string | null }[];
+  staffPolicies: { event_id: string; x_user_id: string; permission_preset: string; custom_permission_keys_json: string | null }[];
 };
 
 /** SA-088 event link selection, distinct from SA-086 unslotted eligibility.
@@ -948,6 +948,7 @@ export async function readSlotSubmissionEventSelection(
     // existing count. Later write-plan limits still apply to the target.
     const rows = await db.all<{ event_id: string }>(sql`
       SELECT event_id FROM video_events WHERE video_id = ${input.videoId}
+      ORDER BY event_id ASC
       LIMIT ${MAX_ATOMIC_VIDEO_EVENTS + 1}`);
     receipt.current = rows.map((row) => row.event_id);
   } else {
@@ -956,10 +957,11 @@ export async function readSlotSubmissionEventSelection(
     const requestIds = Array.from(new Set([input.anchorEventId, ...input.requested]))
       .slice(0, MAX_ATOMIC_VIDEO_EVENTS + 1);
     const rows = await db.all<{
-      receipt_kind: number; id: string; allow: number | null;
+      receipt_kind: number; id: string; allow: number | null; x_user_id: string | null;
       permission_preset: string | null; custom_permission_keys_json: string | null;
     }>(sql`WITH current_rows AS (
       SELECT event_id FROM video_events WHERE video_id = ${input.videoId}
+      ORDER BY event_id ASC
       LIMIT ${MAX_ATOMIC_VIDEO_EVENTS + 1}
     ), universe AS (
       SELECT event_id AS id FROM current_rows
@@ -969,32 +971,178 @@ export async function readSlotSubmissionEventSelection(
       SELECT events.id, events.allow_user_video_event_links AS allow
       FROM events WHERE id IN (SELECT id FROM universe)
         AND (SELECT COUNT(*) FROM universe) <= ${MAX_ATOMIC_VIDEO_EVENTS}
+      ORDER BY events.id ASC
       LIMIT ${MAX_ATOMIC_VIDEO_EVENTS}
     ), staff_rows AS (
-      SELECT event_id, permission_preset, custom_permission_keys_json
+      SELECT event_id, x_user_id, permission_preset, custom_permission_keys_json
       FROM event_staff
       WHERE event_id IN (SELECT id FROM universe WHERE id <> '')
         AND (SELECT COUNT(*) FROM universe) <= ${MAX_ATOMIC_VIDEO_EVENTS}
         AND ${approvedXIdsWhere(eventStaff.x_user_id, input.approvedXIds)}
+      ORDER BY event_id ASC, x_user_id ASC
       LIMIT ${MAX_ATOMIC_VIDEO_EVENTS * 4 + 1}
     )
     SELECT 0 AS receipt_kind, event_id AS id, NULL AS allow,
-      NULL AS permission_preset, NULL AS custom_permission_keys_json FROM current_rows
+      NULL AS x_user_id, NULL AS permission_preset, NULL AS custom_permission_keys_json FROM current_rows
     UNION ALL
-    SELECT 1, id, allow, NULL, NULL FROM event_rows
+    SELECT 1, id, allow, NULL, NULL, NULL FROM event_rows
     UNION ALL
-    SELECT 2, event_id, NULL, permission_preset, custom_permission_keys_json FROM staff_rows`);
+    SELECT 2, event_id, NULL, x_user_id, permission_preset, custom_permission_keys_json FROM staff_rows`);
     for (const row of rows) {
       if (row.receipt_kind === 0) receipt.current.push(row.id);
       else if (row.receipt_kind === 1 && typeof row.allow === "number") {
         receipt.eventPolicies.push({ id: row.id, allow: row.allow });
-      } else if (row.receipt_kind === 2 && typeof row.permission_preset === "string") {
-        receipt.staffPolicies.push({ event_id: row.id, permission_preset: row.permission_preset,
+      } else if (row.receipt_kind === 2 && typeof row.x_user_id === "string" &&
+          typeof row.permission_preset === "string") {
+        receipt.staffPolicies.push({ event_id: row.id, x_user_id: row.x_user_id,
+          permission_preset: row.permission_preset,
           custom_permission_keys_json: row.custom_permission_keys_json });
       } else throw new Error("slot_submission_event_selection_receipt_invalid");
     }
   }
+  const compareIds = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
+  receipt.current.sort(compareIds);
+  receipt.eventPolicies.sort((a, b) => compareIds(a.id, b.id));
+  receipt.staffPolicies.sort((a, b) =>
+    compareIds(a.event_id, b.event_id) || compareIds(a.x_user_id, b.x_user_id)
+  );
   return { receipt, targetEventIds: resolveSlotSubmissionEventSelection(
     receipt, input.requested, input.anchorEventId, input.isAdmin,
   ) };
+}
+
+export type SlotSubmissionEventSelectionAssertionInput = {
+  actorUserId: string;
+  videoId: string;
+  requested: readonly string[];
+  anchorEventId: string;
+  isAdmin: boolean;
+  approvedXIds: readonly string[];
+};
+
+function compareSlotSelectionIds(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/**
+ * Same-batch freshness guard for the SA-088 event-link receipt. It rechecks
+ * existing video links, event allow flags, approved-X staff rows, the actor's
+ * complete approved-X set and admin mode. Keep it in mutateWithAudit with the
+ * video/event/slot mutations; a preflight-only check is not sufficient.
+ */
+export function buildSlotSubmissionEventSelectionAssertions(
+  input: SlotSubmissionEventSelectionAssertionInput,
+  receipt: SlotSubmissionEventSelectionReceipt,
+): SQL[] {
+  const approvedXIds = Array.from(new Set(
+    input.approvedXIds.map((id) => id.trim()).filter(Boolean),
+  )).sort(compareSlotSelectionIds);
+  const current = [...receipt.current].sort(compareSlotSelectionIds);
+  const eventPolicies = [...receipt.eventPolicies]
+    .sort((a, b) => compareSlotSelectionIds(a.id, b.id))
+    .map((row) => [row.id, row.allow]);
+  const staffPolicies = [...receipt.staffPolicies]
+    .sort((a, b) =>
+      compareSlotSelectionIds(a.event_id, b.event_id) ||
+      compareSlotSelectionIds(a.x_user_id, b.x_user_id)
+    )
+    .map((row) => [
+      row.event_id, row.x_user_id, row.permission_preset, row.custom_permission_keys_json,
+    ]);
+  const unique = (values: readonly string[]) => new Set(values).size === values.length;
+  if (!input.actorUserId.trim() || !input.videoId.trim() || !input.anchorEventId.trim() ||
+      current.length > MAX_ATOMIC_VIDEO_EVENTS || !unique(current) ||
+      eventPolicies.length > MAX_ATOMIC_VIDEO_EVENTS ||
+      new Set(eventPolicies.map((row) => row[0])).size !== eventPolicies.length ||
+      staffPolicies.length > MAX_ATOMIC_VIDEO_EVENTS * 4 ||
+      new Set(staffPolicies.map((row) => `${row[0]}\0${row[1]}`)).size !== staffPolicies.length ||
+      (input.isAdmin && (eventPolicies.length !== 0 || staffPolicies.length !== 0))) {
+    throw new Error("slot_submission_event_selection_receipt_invalid");
+  }
+
+  const expectedCurrent = JSON.stringify(current);
+  const expectedApproved = JSON.stringify(approvedXIds);
+  const expectedEvents = JSON.stringify(eventPolicies);
+  const expectedStaff = JSON.stringify(staffPolicies);
+  const approvedSnapshot = sql`(
+    SELECT json_group_array(x_user_id) FROM (
+      SELECT ${xUserAccountLinks.x_user_id} AS x_user_id
+      FROM ${xUserAccountLinks}
+      INNER JOIN ${xUsers} ON ${xUsers.id} = ${xUserAccountLinks.x_user_id}
+      WHERE ${xUserAccountLinks.auth_user_id} = ${input.actorUserId}
+        AND ${xUsers.approval_status} = 'approved'
+      ORDER BY ${xUserAccountLinks.x_user_id} ASC
+    )
+  )`;
+  const adminSnapshot = sql`COALESCE((
+    SELECT CASE WHEN ${users.role} = 'admin' THEN 1 ELSE 0 END
+    FROM ${users}
+    WHERE ${users.id} = ${input.actorUserId}
+  ), -1)`;
+
+  if (input.isAdmin) {
+    return [assertCondition(sql`
+      (SELECT json_group_array(event_id) FROM (
+        SELECT ${videoEvents.event_id} AS event_id
+        FROM ${videoEvents}
+        WHERE ${videoEvents.video_id} = ${input.videoId}
+        ORDER BY ${videoEvents.event_id} ASC
+        LIMIT ${MAX_ATOMIC_VIDEO_EVENTS + 1}
+      )) = ${expectedCurrent}
+      AND ${approvedSnapshot} = ${expectedApproved}
+      AND ${adminSnapshot} = 1
+    `)];
+  }
+
+  const requestIds = Array.from(new Set([input.anchorEventId, ...input.requested]))
+    .slice(0, MAX_ATOMIC_VIDEO_EVENTS + 1);
+  const assertion = sql`(
+    WITH current_rows AS (
+      SELECT ${videoEvents.event_id} AS event_id
+      FROM ${videoEvents}
+      WHERE ${videoEvents.video_id} = ${input.videoId}
+      ORDER BY ${videoEvents.event_id} ASC
+      LIMIT ${MAX_ATOMIC_VIDEO_EVENTS + 1}
+    ), universe AS (
+      SELECT event_id AS id FROM current_rows
+      UNION
+      SELECT CAST(value AS TEXT) AS id FROM json_each(${JSON.stringify(requestIds)})
+    ), event_rows AS (
+      SELECT ${events.id} AS id,
+             ${events.allow_user_video_event_links} AS allow
+      FROM ${events}
+      WHERE ${events.id} IN (SELECT id FROM universe)
+        AND (SELECT COUNT(*) FROM universe) <= ${MAX_ATOMIC_VIDEO_EVENTS}
+      ORDER BY ${events.id} ASC
+      LIMIT ${MAX_ATOMIC_VIDEO_EVENTS}
+    ), staff_rows AS (
+      SELECT ${eventStaff.event_id} AS event_id,
+             ${eventStaff.x_user_id} AS x_user_id,
+             ${eventStaff.permission_preset} AS permission_preset,
+             ${eventStaff.custom_permission_keys_json} AS custom_permission_keys_json
+      FROM ${eventStaff}
+      WHERE ${eventStaff.event_id} IN (SELECT id FROM universe WHERE id <> '')
+        AND (SELECT COUNT(*) FROM universe) <= ${MAX_ATOMIC_VIDEO_EVENTS}
+        AND ${approvedXIdsWhere(eventStaff.x_user_id, approvedXIds)}
+      ORDER BY ${eventStaff.event_id} ASC, ${eventStaff.x_user_id} ASC
+      LIMIT ${MAX_ATOMIC_VIDEO_EVENTS * 4 + 1}
+    )
+    SELECT (
+      (SELECT json_group_array(event_id) FROM (
+        SELECT event_id FROM current_rows ORDER BY event_id ASC
+      )) = ${expectedCurrent}
+      AND ${approvedSnapshot} = ${expectedApproved}
+      AND ${adminSnapshot} = 0
+      AND (SELECT json_group_array(json_array(id, allow)) FROM (
+        SELECT id, allow FROM event_rows ORDER BY id ASC
+      )) = ${expectedEvents}
+      AND (SELECT json_group_array(json_array(
+        event_id, x_user_id, permission_preset, custom_permission_keys_json
+      )) FROM (
+        SELECT event_id, x_user_id, permission_preset, custom_permission_keys_json
+        FROM staff_rows ORDER BY event_id ASC, x_user_id ASC
+      )) = ${expectedStaff}
+    )
+  )`;
+  return [assertCondition(assertion)];
 }
