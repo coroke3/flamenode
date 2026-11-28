@@ -190,6 +190,17 @@ function staffDiagnostic(message: string): void {
   }
 }
 
+// CURRENT separates direct preparation-read failures from domain mutation
+// failures. Discard the provider exception even if its text is identical
+// to an allowlisted domain error or a confirmation prompt.
+async function staffPreparationRead<T>(read: () => Promise<T>): Promise<T> {
+  try {
+    return await read();
+  } catch {
+    throw new Error("staff preparation read failed");
+  }
+}
+
 async function queueProjection(c: import("hono").Context<AppEnv>, ctx: StaffContext, reason: string, includeUsers: boolean) {
   // CURRENT performs post-commit best-effort projection. Hono has no Queue binding
   // here: persist the same D1 intent; polling recovers the wake (D-15-6).
@@ -238,9 +249,9 @@ async function upsert(c: import("hono").Context<AppEnv>, targetId: string | null
     // Authorization is done before any private staff/X-user record is read.
     // Bounded legacy scan prevents two differently formatted rows from creating
     // duplicate canonical X identities. Fail closed when coverage is incomplete.
-    const { results } = await c.env.DB.prepare(
+    const { results } = await staffPreparationRead(() => c.env.DB.prepare(
       "SELECT * FROM event_staff WHERE event_id = ? LIMIT 101",
-    ).bind(access.eventId).all<EventStaffRow>();
+    ).bind(access.eventId).all<EventStaffRow>());
     if (results.length > 100) return deny(c, GENERIC_FAILURE, 503);
     const matches = results.filter((r) => parseCanonicalXId(r.x_user_id) === xId);
     if (matches.length > 1) return deny(c, "同じX IDを指す既存スタッフ行が複数あります。", 409);
@@ -259,9 +270,9 @@ async function upsert(c: import("hono").Context<AppEnv>, targetId: string | null
       await assertActorMayAssignOwner({ db: c.get("db"), eventId: access.eventId,
         actorUserId: access.user.id, isSiteAdmin: isAdmin });
     }
-    const userExists = await c.env.DB.prepare(
+    const userExists = await staffPreparationRead(() => c.env.DB.prepare(
       "SELECT id FROM x_users WHERE id = ? LIMIT 1",
-    ).bind(xId).first<{ id: string }>();
+    ).bind(xId).first<{ id: string }>());
     const extras: EventStaffAtomicExtras | undefined = userExists ? undefined : {
       mutationStatements: [c.get("db").run(sql`
         INSERT INTO x_users (id, x_name, approval_status)
@@ -413,9 +424,9 @@ export function registerStaffWriteRoutes(app: Hono<AppEnv>): void {
     try {
       // Bound the legacy-canonical scan; never create duplicate staff grants
       // if the event has more rows than we can reliably examine.
-      const staff = await c.env.DB.prepare(
+      const staff = await staffPreparationRead(() => c.env.DB.prepare(
         "SELECT * FROM event_staff WHERE event_id = ? LIMIT 101",
-      ).bind(access.eventId).all<EventStaffRow>();
+      ).bind(access.eventId).all<EventStaffRow>());
       if (staff.results.length > 100) return deny(c, GENERIC_FAILURE, 503);
       const byX = new Map<string, EventStaffRow>();
       const requestedX = new Set(normalized.map((row) => row.xId));
@@ -427,9 +438,9 @@ export function registerStaffWriteRoutes(app: Hono<AppEnv>): void {
         }
         byX.set(canonical, row);
       }
-      const known = await c.env.DB.prepare(
+      const known = await staffPreparationRead(() => c.env.DB.prepare(
         `SELECT id FROM x_users WHERE id IN (${normalized.map(() => "?").join(",")})`,
-      ).bind(...normalized.map((row) => row.xId)).all<{ id: string }>();
+      ).bind(...normalized.map((row) => row.xId)).all<{ id: string }>());
       const knownIds = new Set(known.results.map((row) => row.id));
       const context = `event-staff-csv:${generateId("batch")}`;
       const newX = normalized.filter((row) => !knownIds.has(row.xId));
@@ -506,9 +517,9 @@ app.delete(`${base}/:staffId`, async (c) => {
   const access = await permitted(c);
   if (access instanceof Response) return access;
   try {
-    const existing = await c.env.DB.prepare(
+    const existing = await staffPreparationRead(() => c.env.DB.prepare(
       "SELECT * FROM event_staff WHERE event_id = ? AND id = ? LIMIT 1",
-    ).bind(access.eventId, staffId).first<EventStaffRow>();
+    ).bind(access.eventId, staffId).first<EventStaffRow>());
     if (!existing) return c.json({ ok: true }, 200);
     await deleteEventStaffWithProtection({
       db: c.get("db"), existing, actorUserId: access.user.id,

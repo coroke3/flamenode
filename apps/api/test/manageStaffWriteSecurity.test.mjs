@@ -146,6 +146,38 @@ test("SEC-800: provider prefix and throwing diagnostic cannot escape staff write
   }
 });
 
+test("SEC-800: direct preparation reads never classify provider text as a domain conflict", async () => {
+  const singleXRead = (sql) => /SELECT id FROM x_users WHERE id = \? LIMIT 1/i.test(sql);
+  const csvXRead = (sql) => /SELECT id FROM x_users WHERE id IN \(/i.test(sql);
+  for (const [method, path, body, match, log] of [
+    ["POST", "/", upsert, staffRead, "staff upsert unavailable"],
+    ["PUT", "/s-owner", { ...upsert, staff_id: "s-owner" }, staffRead, "staff upsert unavailable"],
+    ["POST", "/", upsert, singleXRead, "staff upsert unavailable"],
+    ["PUT", "/s-owner", { ...upsert, staff_id: "s-owner" }, singleXRead, "staff upsert unavailable"],
+    ["POST", "/csv", csv(), staffRead, "CSV staff mutation unavailable"],
+    ["POST", "/csv", csv(), csvXRead, "CSV staff mutation unavailable"],
+    ["DELETE", "/s-owner", { reason: "remove" }, staffRead, "staff delete unavailable"],
+  ]) {
+    for (const message of [LAST_OWNER_ERROR, "確認のため「REMOVE SELF ev-1」と入力してください。"]) {
+      const s = setup({ fault: { match, error: new Error(message) } });
+      try {
+        await withThrowingDiagnostics(async ({ errors }) => {
+          const result = await s.send(method, path, body);
+          assert.equal(result.status, 503, await result.clone().text());
+          assert.equal(result.headers.get("cache-control"), "private, no-store");
+          assert.deepEqual(await result.json(), { ok: false, message: GENERIC });
+          assert.deepEqual(errors, [["[MIG-0654] " + log]]);
+        });
+        assert.equal(s.receipt.readFaults, 1);
+        assert.equal(s.stats.batches, 0);
+        assert.deepEqual(s.before(), s.initial);
+      } finally {
+        s.sqlite.close();
+      }
+    }
+  }
+});
+
 test("SEC-800: hostile error inspection and permission diagnostics fail closed", async () => {
   const getter = new Error();
   Object.defineProperty(getter, "message", { get() { throw new Error(CANARY); } });
