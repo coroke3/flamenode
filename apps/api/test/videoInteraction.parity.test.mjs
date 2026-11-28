@@ -104,7 +104,7 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.deepEqual(state(b), state(a), `database ${user} / ${videoId} / ${kind}`);
     assert.equal(actual.status, expectedStatus);
     if (kind === "like" && videoId === "v_pub") {
-      assert.equal(b.d1.stats.reads, 3, "D-13-45: two guard reads + one snapshot read; audit is preloaded");
+      assert.equal(b.d1.stats.reads, 2, "MIG-0689: one joined admission + one snapshot read; session injected; audit preloaded");
       assert.equal(b.d1.stats.batches, 1, "interaction, count, queue and audit are one transaction");
     }
     return { expected, actual, a, b };

@@ -226,8 +226,8 @@ export async function requireAdminWrite(feature) {
     assert.equal(auditRows(cur.sqlite).length, 1, "CURRENT wrote one audit row");
     assert.deepStrictEqual(auditRows(hono.sqlite), auditRows(cur.sqlite));
 
-    // Reported, not asserted as a parity fact: the Hono D1 budget.
-    assert.equal(hono.stats.reads, 3, `Hono reads (actual ${hono.stats.reads})`);
+    // Session is injected; joined admission + resource read (MIG-0689).
+    assert.equal(hono.stats.reads, 2, `Hono reads (actual ${hono.stats.reads}; session injected)`);
     assert.equal(hono.stats.batches, 1, `Hono batches (actual ${hono.stats.batches})`);
   });
 

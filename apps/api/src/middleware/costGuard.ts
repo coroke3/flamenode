@@ -10,6 +10,7 @@
  */
 import {
   evaluateCostGuardCore,
+  WRITE_FEATURE_KEYS,
   type WriteFeatureKey,
 } from "@flamenode/domain/admin";
 import type { Context, Next } from "hono";
@@ -18,7 +19,102 @@ import type { AuditLogSettings } from "@flamenode/server-core/audit/types";
 import { MAX_SINGLE_ROW_LIMIT } from "../lib/limits.ts";
 import { writeGuardDenyResponse } from "./writeOrigin.ts";
 
-type CostGuardRow = AuditSettingsRow & {
+// Keep joined and standalone admission receipts small without changing CostGuard's
+// exception-first decision order. Invalid input remains invalid JSON, not NULL.
+const KNOWN_WRITE_FEATURE_BLOBS_SQL = WRITE_FEATURE_KEYS.map(
+  (key) => "CAST('" + key.replaceAll("'", "''") + "' AS BLOB)",
+).join(",");
+export function compactWriteFeatureListSql(
+  col: 's."disabled_features_json"' | 's."cost_guard_exception_features_json"',
+): string {
+  return `CASE
+    WHEN ${col} IS NULL OR (typeof(${col})='text' AND length(CAST(${col} AS BLOB))=0) THEN NULL
+    WHEN typeof(${col})<>'text' OR instr(CAST(${col} AS BLOB), X'00')>0 THEN '!'
+    WHEN json_valid(${col})<>1 THEN '!'
+    WHEN json_type(${col})<>'array' THEN '!'
+    WHEN json_array_length(${col})>100 THEN '!'
+    WHEN EXISTS (
+      SELECT 1 FROM json_each(${col}) AS j
+      WHERE j.type<>'text' OR CAST(j.atom AS BLOB) NOT IN (${KNOWN_WRITE_FEATURE_BLOBS_SQL})
+    ) THEN '!'
+    ELSE (SELECT json_group_array(v) FROM (
+      SELECT DISTINCT j.atom AS v FROM json_each(${col}) AS j ORDER BY v
+    ))
+  END`;
+}
+
+// Only these canonical mode strings are consumed by CostGuard. Preserve
+// recognized values and NULL; an unknown value remains non-allowing without
+// copying arbitrary TEXT/BLOB bytes into the request-local receipt. Compare
+// bytes explicitly so a case-insensitive collation cannot widen acceptance.
+export const COMPACT_COST_GUARD_MODE_SQL = `CASE
+  WHEN s."operation_mode" IS NULL THEN NULL
+  WHEN typeof(s."operation_mode")='text'
+    AND CAST(s."operation_mode" AS BLOB) IN (
+      CAST('normal' AS BLOB), CAST('economy' AS BLOB),
+      CAST('read_only' AS BLOB), CAST('static_only' AS BLOB),
+      CAST('maintenance' AS BLOB)
+    ) THEN s."operation_mode"
+  ELSE '!'
+END`;
+
+// The domain uses exceptionUntil only in a numeric relational comparison.
+// Oversized legacy TEXT may contain padding around a JS numeric string
+// (e.g. hexadecimal); SQLite CAST would change that decision. A subset of
+// ASCII characters cannot occur anywhere in an ECMAScript numeric string,
+// and x/X/o/O can occur at most once (as a radix prefix). Map only those
+// provably nonnumeric strings to a fixed nonnumeric marker. Otherwise strip
+// ASCII edge whitespace. For a fully validated ASCII unsigned radix literal,
+// dropping leading zeroes preserves its Number value. A significant length
+// above 256 hex / 342 octal / 1024 binary digits proves overflow to Infinity.
+// Shorter literals keep all significant digits, including rounding boundaries.
+// Keep NUL-containing, non-TEXT and other ambiguous values on the old path.
+// This preserves numeric comparison decisions, NOT a universal row bound.
+export const COMPACT_COST_GUARD_EXCEPTION_UNTIL_SQL = `CASE
+  WHEN typeof(s."cost_guard_exception_until") = 'text'
+    AND length(CAST(s."cost_guard_exception_until" AS BLOB)) > 8192
+    AND instr(CAST(s."cost_guard_exception_until" AS BLOB), X'00') = 0
+  THEN CASE
+    WHEN s."cost_guard_exception_until" GLOB '*[GHJKLMNPQRSTUVWYZghjklmpqrsuvwz_:@!?;,/(){}=]*'
+      OR s."cost_guard_exception_until" GLOB '*[xXoO]*[xXoO]*'
+    THEN '!'
+    ELSE (
+      WITH trimmed(v) AS MATERIALIZED (
+        SELECT trim(s."cost_guard_exception_until", char(9,10,11,12,13,32))
+      ), radix(v, prefix, digits) AS MATERIALIZED (
+        SELECT v, lower(substr(v,1,2)), substr(v,3) FROM trimmed
+      )
+      SELECT CASE WHEN length(CAST(v AS BLOB)) = length(v)
+        AND length(digits) > 0
+        AND ((prefix = '0x' AND digits NOT GLOB '*[^0-9a-fA-F]*')
+          OR (prefix = '0o' AND digits NOT GLOB '*[^0-7]*')
+          OR (prefix = '0b' AND digits NOT GLOB '*[^01]*'))
+        THEN (SELECT CASE
+          WHEN length(significant) > CASE prefix WHEN '0x' THEN 256 WHEN '0o' THEN 342 ELSE 1024 END
+            THEN 'Infinity'
+          WHEN significant = '' THEN prefix || '0'
+          ELSE prefix || significant END
+          FROM (SELECT ltrim(digits,'0') AS significant))
+        ELSE v END FROM radix
+    )
+  END
+  ELSE s."cost_guard_exception_until"
+END`;
+
+// Audit settings in admission receipts are only a preload. The audit logger
+// accepts a complete snapshot of nonnegative safe integers, otherwise its
+// existing planner/runtime charge and execute the authoritative settings read.
+// SQLite's INTEGER affinity can hold huge TEXT/BLOB values. Such values
+// cannot be valid preloads; send NULL (still invalid), never a default or a
+// numeric cast. Preserve every numeric value and the missing-row distinction.
+// This bounds these five receipt fields, not the authoritative fallback read.
+export function compactAuditSettingSql(column: keyof AuditSettingsRow): string {
+  const col = `s."${column}"`;
+  return `CASE WHEN typeof(${col}) IN ('integer', 'real', 'null')
+    THEN ${col} ELSE NULL END`;
+}
+
+export type CostGuardRow = AuditSettingsRow & {
   operation_mode: string | null;
   disabled_features_json: string | null;
   cost_guard_exception_until: number | null;
@@ -32,37 +128,75 @@ export type CostGuardDenyReason = "maintenance_mode" | "cost_guard_blocked";
  * settings (ZERO_1102 S3: at most 3 D1 pre-reads). auditSettings is the
  * mapAuditSettings result of the same row (CURRENT reads the same row twice).
  */
+export type CostGuardSnapshot = {
+  row: CostGuardRow | null;
+  /** True only when the joined read and the source-specific fallback both failed. */
+  unavailable?: boolean;
+};
+
+/** Read the canonical default row; used only on the joined-read fallback path. */
+export async function loadCostGuardSettingsRow(
+  db: D1Database,
+): Promise<CostGuardRow | null> {
+  return db
+    .prepare(
+      `SELECT ${COMPACT_COST_GUARD_MODE_SQL} AS operation_mode,
+              ${compactWriteFeatureListSql('s."disabled_features_json"')} AS disabled_features_json,
+              ${COMPACT_COST_GUARD_EXCEPTION_UNTIL_SQL} AS cost_guard_exception_until,
+              ${compactWriteFeatureListSql('s."cost_guard_exception_features_json"')} AS cost_guard_exception_features_json,
+              ${compactAuditSettingSql("audit_normal_retention_days")} AS audit_normal_retention_days,
+              ${compactAuditSettingSql("audit_restorable_retention_days")} AS audit_restorable_retention_days,
+              ${compactAuditSettingSql("audit_long_retention_days")} AS audit_long_retention_days,
+              ${compactAuditSettingSql("audit_max_payload_bytes")} AS audit_max_payload_bytes,
+              ${compactAuditSettingSql("audit_compact_after_days")} AS audit_compact_after_days
+       FROM system_settings s WHERE s."id" = ? LIMIT ${MAX_SINGLE_ROW_LIMIT}`,
+    )
+    .bind("default")
+    .first<CostGuardRow>();
+}
+
+export function evaluateCostGuardFromRow(
+  row: CostGuardRow | null,
+  feature: WriteFeatureKey,
+  now: number = Math.floor(Date.now() / 1000),
+): { denied: CostGuardDenyReason | null; auditSettings?: AuditLogSettings } {
+  if (!row) return { denied: "maintenance_mode" };
+  const decision = evaluateCostGuardCore({
+    feature,
+    operationMode: row.operation_mode,
+    disabledFeaturesJson: row.disabled_features_json,
+    exceptionUntil: row.cost_guard_exception_until,
+    exceptionFeaturesJson: row.cost_guard_exception_features_json,
+    now,
+  });
+  if (decision.blocked) {
+    return {
+      denied: decision.reason === "mode" ? "maintenance_mode" : "cost_guard_blocked",
+    };
+  }
+  return { denied: null, auditSettings: mapAuditSettings(row) };
+}
+
+export function evaluateCostGuardSnapshot(
+  snapshot: CostGuardSnapshot,
+  feature: WriteFeatureKey,
+  now: number = Math.floor(Date.now() / 1000),
+): { denied: CostGuardDenyReason | null; auditSettings?: AuditLogSettings } {
+  if (snapshot.unavailable) return { denied: "cost_guard_blocked" };
+  return evaluateCostGuardFromRow(snapshot.row, feature, now);
+}
+
+/**
+ * Existing standalone adapter. Routes outside the shared write guard keep
+ * the same one-read behavior and fixed-code provider failure mapping.
+ */
 export async function evaluateCostGuardWithSettings(
   db: D1Database,
   feature: WriteFeatureKey,
   now: number = Math.floor(Date.now() / 1000),
 ): Promise<{ denied: CostGuardDenyReason | null; auditSettings?: AuditLogSettings }> {
   try {
-    const row = await db
-      .prepare(
-        `SELECT operation_mode, disabled_features_json,
-                cost_guard_exception_until, cost_guard_exception_features_json,
-                audit_normal_retention_days, audit_restorable_retention_days,
-                audit_long_retention_days, audit_max_payload_bytes, audit_compact_after_days
-         FROM system_settings WHERE id = ? LIMIT ${MAX_SINGLE_ROW_LIMIT}`,
-      )
-      .bind("default")
-      .first<CostGuardRow>();
-    if (!row) return { denied: "maintenance_mode" };
-    const decision = evaluateCostGuardCore({
-      feature,
-      operationMode: row.operation_mode,
-      disabledFeaturesJson: row.disabled_features_json,
-      exceptionUntil: row.cost_guard_exception_until,
-      exceptionFeaturesJson: row.cost_guard_exception_features_json,
-      now,
-    });
-    if (decision.blocked) {
-      return {
-        denied: decision.reason === "mode" ? "maintenance_mode" : "cost_guard_blocked",
-      };
-    }
-    return { denied: null, auditSettings: mapAuditSettings(row) };
+    return evaluateCostGuardFromRow(await loadCostGuardSettingsRow(db), feature, now);
   } catch {
     return { denied: "cost_guard_blocked" };
   }
@@ -95,9 +229,12 @@ export function costGuardMiddleware(feature: WriteFeatureKey) {
       return writeGuardDenyResponse(c, "cost_guard_blocked", 503);
     }
     // writeGuardMiddleware already returned 503 db_unavailable without a DB.
-    const result = db
-      ? await evaluateCostGuardWithSettings(db, feature)
-      : { denied: "cost_guard_blocked" as const };
+    const snapshot = c.get("costGuardSnapshot") as CostGuardSnapshot | undefined;
+    const result = snapshot
+      ? evaluateCostGuardSnapshot(snapshot, feature)
+      : db
+        ? await evaluateCostGuardWithSettings(db, feature)
+        : { denied: "cost_guard_blocked" as const };
     if (result.denied) {
       return writeGuardDenyResponse(c, result.denied, 503);
     }

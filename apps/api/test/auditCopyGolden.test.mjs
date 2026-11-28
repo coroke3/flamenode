@@ -4,7 +4,7 @@
 // whitespace-normalised SQL text and the bind parameters of each batch statement (mutation,
 // changes() assertion, queue UPSERT, audit INSERT, audit count assertion), the D1 read count,
 // the HTTP status and body. Dates and ids are frozen, so the audit bytes are comparable.
-// Regenerate only on purpose: FLAMENODE_UPDATE_GOLDEN=1 node --test apps/api/test/auditCopyGolden.test.mjs
+// Keep the historical pre-copy baseline; MIG-0689 deliberately changes only read counts.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
@@ -168,13 +168,33 @@ async function capture() {
   return out;
 }
 
-test("MIG-0617 golden: audited write batches (SQL text, params, reads, status, body) are unchanged", async () => {
+test("MIG-0617 golden: batch SQL/binds, status, body and audit unchanged; MIG-0689 removes one admission read", async () => {
   const actual = `${JSON.stringify(await capture(), null, 2)}\n`;
-  if (process.env.FLAMENODE_UPDATE_GOLDEN === "1") {
-    fs.writeFileSync(SNAPSHOT_URL, actual);
-    return;
+  const baselineText = fs.readFileSync(SNAPSHOT_URL, "utf8");
+  const baseline = JSON.parse(baselineText);
+  assert.equal(`${JSON.stringify(baseline, null, 2)}\n`, baselineText, "historical baseline formatting");
+  // All twelve worlds inject the session. Exact CI 45955597093 proved that
+  // only these read counts changed; the historical fixture stays immutable.
+  const expectedReads = {
+    "SA-004 create announcement": 1,
+    "SA-005 update announcement": 2,
+    "SA-005 update announcement, race after preflight": 2,
+    "SA-006 delete announcement": 2,
+    "SA-007 enable public API": 2,
+    "SA-008 disable public API": 2,
+    "SA-036 delete event template": 2,
+    "SA-036 delete event template, CAS conflict": 2,
+    "SA-012 create chapter": 2,
+    "SA-013 update chapter": 2,
+    "SA-014 delete chapter": 2,
+    "SA-015 bulk chapters (5 audit rows, 2 audit chunks)": 2,
+  };
+  assert.deepEqual(Object.keys(baseline), Object.keys(expectedReads));
+  for (const [name, reads] of Object.entries(expectedReads)) {
+    assert.equal(baseline[name].reads, reads + 1, `${name}: historical guard read count`);
+    baseline[name].reads = reads;
   }
-  assert.equal(actual, fs.readFileSync(SNAPSHOT_URL, "utf8"));
+  assert.equal(actual, `${JSON.stringify(baseline, null, 2)}\n`);
 });
 
 test("MIG-0617 golden: every scenario ran at most one batch; committed ones wrote an audit row", async () => {

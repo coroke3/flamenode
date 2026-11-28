@@ -31,7 +31,16 @@ import type { Context, Next } from "hono";
 import type { D1DatabaseLike, SessionUser } from "../auth/session.ts";
 import { actorSnapshotFromRow, type ActorSnapshotRow } from "@flamenode/server-core/audit/logger";
 import { MAX_SINGLE_ROW_LIMIT } from "../lib/limits.ts";
-import { evaluateCostGuardWithSettings } from "./costGuard.ts";
+import {
+  compactWriteFeatureListSql,
+  COMPACT_COST_GUARD_MODE_SQL,
+  COMPACT_COST_GUARD_EXCEPTION_UNTIL_SQL,
+  compactAuditSettingSql,
+  evaluateCostGuardSnapshot,
+  loadCostGuardSettingsRow,
+  type CostGuardRow,
+  type CostGuardSnapshot,
+} from "./costGuard.ts";
 
 export type WriteGuardDenyReason =
   | "origin_verification_unavailable"
@@ -97,8 +106,43 @@ export type WriteRequiredRole = "admin" | null;
 
 /** Bounds for the approved linked X ID list folded into the user read. */
 export const MAX_APPROVED_X_IDS = 100;
-/** X IDs are <= 15 chars; 100 quoted ids + separators fit well under this. */
+/** Historical JS string-length limit (UTF-16 code units, despite the name).
+ * Keep existing acceptance for legacy Unicode IDs until their policy is coordinated. */
 export const MAX_APPROVED_X_IDS_JSON_BYTES = 8192;
+/** Valid UTF-8 uses at most 3 bytes per UTF-16 code unit. This SQL receipt cap
+ * cannot reject any JSON string that passed the existing JS length check. */
+const MAX_APPROVED_X_IDS_JSON_PROJECTION_BYTES = 3 * MAX_APPROVED_X_IDS_JSON_BYTES;
+const APPROVED_X_RECEIPT_CHUNK_BYTES = 512;
+
+/** Large SQL receipts use an ASCII hex envelope to bound replacement-character
+ * expansion during decoding. Ordinary receipts stay plain. */
+function decodeApprovedXIdsReceipt(raw: string): string {
+  if (!raw.startsWith("~")) return raw;
+  if (raw.length > 1 + 2 * MAX_APPROVED_X_IDS_JSON_PROJECTION_BYTES) {
+    throw new Error("approved_x_ids_too_large");
+  }
+  const hex = raw.slice(1);
+  if (!hex.length || hex.length % 2 !== 0 || /[^0-9A-F]/.test(hex)) {
+    throw new Error("approved_x_ids_invalid_receipt");
+  }
+  const decoder = new TextDecoder("utf-8", { ignoreBOM: true });
+  const buffer = new Uint8Array(APPROVED_X_RECEIPT_CHUNK_BYTES);
+  const parts: string[] = [];
+  let units = 0;
+  const nibble = (code: number) => code <= 57 ? code - 48 : code - 55;
+  for (let offset = 0; offset < hex.length; offset += APPROVED_X_RECEIPT_CHUNK_BYTES * 2) {
+    const n = Math.min(APPROVED_X_RECEIPT_CHUNK_BYTES, (hex.length - offset) / 2);
+    for (let i = 0; i < n; i++) {
+      buffer[i] = (nibble(hex.charCodeAt(offset + 2 * i)) << 4)
+        | nibble(hex.charCodeAt(offset + 2 * i + 1));
+    }
+    const part = decoder.decode(buffer.subarray(0, n), { stream: offset + 2 * n < hex.length });
+    units += part.length;
+    if (units > MAX_APPROVED_X_IDS_JSON_BYTES) throw new Error("approved_x_ids_too_large");
+    parts.push(part);
+  }
+  return parts.join("");
+}
 
 /** CURRENT WriteGuardOptions.requireActiveXId / requireApprovedActiveXId. */
 export type WriteActiveXOptions = {
@@ -211,11 +255,13 @@ export async function loadTosState(
   db: D1DatabaseLike,
   userId: string,
   activeX: WriteActiveXOptions | undefined = undefined,
+  includeCostGuardSettings = false,
 ): Promise<{
   is_tos_accepted: number;
   terms_reaccept_required: number;
   actor_snapshot_json: string;
   active_x: ActiveXRow | null;
+  cost_guard_settings?: CostGuardRow | null;
 } | null> {
   const needActive = Boolean(
     activeX?.requireActiveXId || activeX?.requireApprovedActiveXId,
@@ -225,77 +271,123 @@ export async function loadTosState(
   // requireApprovedActiveXId, the approved linked X IDs as a JSON array
   // (CURRENT getApprovedXIds = x_user_account_links INNER JOIN x_users
   // WHERE approval_status = 'approved', distinct).
+  // The guard distinguishes only NULL, approved, rejected, and other values.
+  // Emit only fixed ASCII categories (no arbitrary or malformed TEXT bytes).
+  // Bound the approval receipt to 9 UTF-8 bytes. Keep a canonical status plus
+  // a NUL byte when present so drivers that truncate TEXT at NUL and drivers
+  // that preserve it both retain their existing decision semantics.
   const activeXColumns = !needActive
     ? ""
     : `,
-         x."approval_status" AS x_approval_status${
+         CASE
+           WHEN x."approval_status" IS NULL THEN NULL
+           WHEN typeof(x."approval_status") = 'text' THEN
+             CASE substr(CAST(x."approval_status" AS BLOB), 1, 9)
+               WHEN CAST('approved' AS BLOB) THEN 'approved'
+               WHEN CAST('rejected' AS BLOB) THEN 'rejected'
+               WHEN CAST('approved' || char(0) AS BLOB) THEN 'approved' || char(0)
+               WHEN CAST('rejected' || char(0) AS BLOB) THEN 'rejected' || char(0)
+               ELSE '!'
+             END
+           ELSE '!'
+         END AS x_approval_status${
            activeX?.requireApprovedActiveXId
              ? `,
-         (SELECT json_group_array(approved."x_user_id") FROM (
-            SELECT DISTINCT l."x_user_id" AS x_user_id
-              FROM "x_user_account_links" l
-              INNER JOIN "x_users" ax ON ax."id" = l."x_user_id"
-             WHERE l."auth_user_id" = u."id" AND ax."approval_status" = 'approved'
-             LIMIT ${MAX_APPROVED_X_IDS}
-         ) approved) AS approved_x_ids_json`
+         (WITH approved AS NOT MATERIALIZED (
+            SELECT CASE
+                     WHEN typeof(x_user_id) = 'text' AND length(CAST(x_user_id AS BLOB)) > ${MAX_APPROVED_X_IDS_JSON_PROJECTION_BYTES}
+                       THEN NULL ELSE x_user_id END AS x_user_id,
+                   CASE
+                     WHEN typeof(x_user_id) = 'text' AND length(CAST(x_user_id AS BLOB)) > ${MAX_APPROVED_X_IDS_JSON_PROJECTION_BYTES}
+                       THEN 1 ELSE 0 END AS oversized
+              FROM (SELECT DISTINCT l."x_user_id" AS x_user_id
+                      FROM "x_user_account_links" l
+                      INNER JOIN "x_users" ax ON ax."id" = l."x_user_id"
+                     WHERE l."auth_user_id" = u."id" AND ax."approval_status" = 'approved'
+                     LIMIT ${MAX_APPROVED_X_IDS})
+         ), receipt AS MATERIALIZED (SELECT CASE
+           WHEN COALESCE(MAX(receipt_bytes), 2) > ${MAX_APPROVED_X_IDS_JSON_PROJECTION_BYTES} THEN '!'
+           ELSE json_group_array(CASE WHEN receipt_bytes <= ${MAX_APPROVED_X_IDS_JSON_PROJECTION_BYTES}
+             THEN x_user_id ELSE NULL END)
+         END AS value FROM (
+           SELECT x_user_id,
+                  SUM(CASE WHEN oversized = 1 THEN ${MAX_APPROVED_X_IDS_JSON_PROJECTION_BYTES} + 1
+                    ELSE length(CAST(json_quote(x_user_id) AS BLOB)) + 1 END) OVER ()
+                    + 1 AS receipt_bytes
+             FROM approved
+         )) SELECT CASE WHEN length(CAST(value AS BLOB)) <= ${MAX_APPROVED_X_IDS_JSON_BYTES} THEN value
+              WHEN length(value) > ${MAX_APPROVED_X_IDS_JSON_BYTES} THEN '!'
+              ELSE '~' || hex(CAST(value AS BLOB)) END FROM receipt) AS approved_x_ids_json`
              : ""
          }`;
+  const costGuardColumns = includeCostGuardSettings
+    ? `,
+         s."id" AS cost_guard_settings_id,
+         ${COMPACT_COST_GUARD_MODE_SQL} AS cost_guard_operation_mode,
+         ${compactWriteFeatureListSql('s."disabled_features_json"')} AS cost_guard_disabled_features_json,
+         ${COMPACT_COST_GUARD_EXCEPTION_UNTIL_SQL} AS cost_guard_exception_until,
+         ${compactWriteFeatureListSql('s."cost_guard_exception_features_json"')} AS cost_guard_exception_features_json,
+         ${compactAuditSettingSql("audit_normal_retention_days")} AS cost_guard_audit_normal_retention_days,
+         ${compactAuditSettingSql("audit_restorable_retention_days")} AS cost_guard_audit_restorable_retention_days,
+         ${compactAuditSettingSql("audit_long_retention_days")} AS cost_guard_audit_long_retention_days,
+         ${compactAuditSettingSql("audit_max_payload_bytes")} AS cost_guard_audit_max_payload_bytes,
+         ${compactAuditSettingSql("audit_compact_after_days")} AS cost_guard_audit_compact_after_days`
+    : "";
+  const costGuardJoin = includeCostGuardSettings
+    ? `LEFT JOIN "system_settings" s ON s."id" = 'default'`
+    : "";
+  // Normalize the already strict numeric ToS flag in SQL; never transfer a
+  // malformed large value. Reuse one latest-major row in the
+  // correlated CASE; the derived SELECT avoids a materialized CTE and keeps
+  // the existing ordering and non-NULL predicate. CURRENT and Personal read
+  // treat a selected major with published_at=0 as no reaccept requirement;
+  // test after LIMIT 1 so an older negative timestamp cannot replace it.
+  // actorSnapshotFromRow prefers a nonempty X icon over the user image.
+  // Do not transfer a shadowed fallback image. TEXT length (rather than BLOB
+  // length) conservatively keeps the fallback for leading-NUL legacy text.
   const row = await db
     .prepare(
       `SELECT
-         u."is_tos_accepted" AS is_tos_accepted,
-         CASE
-           WHEN u."is_tos_accepted" = 1
-            AND (
-              SELECT "published_at" FROM "terms_versions"
-              WHERE "severity" = 'major' AND "published_at" IS NOT NULL
-              ORDER BY "published_at" DESC, "updated_at" DESC LIMIT 1
-            ) IS NOT NULL
-            AND NOT (
-              EXISTS (
-                SELECT 1 FROM "terms_versions" accepted_terms
-                WHERE accepted_terms."id" = u."accepted_terms_version_id"
-                  AND accepted_terms."published_at" IS NOT NULL
-                  AND (
-                    accepted_terms."id" = (
-                      SELECT "id" FROM "terms_versions"
-                      WHERE "severity" = 'major' AND "published_at" IS NOT NULL
-                      ORDER BY "published_at" DESC, "updated_at" DESC LIMIT 1
-                    )
-                    OR accepted_terms."published_at" > (
-                      SELECT "published_at" FROM "terms_versions"
-                      WHERE "severity" = 'major' AND "published_at" IS NOT NULL
-                      ORDER BY "published_at" DESC, "updated_at" DESC LIMIT 1
-                    )
-                  )
-              )
-              OR EXISTS (
-                SELECT 1 FROM "user_tos_consents" consent
-                INNER JOIN "terms_versions" consent_terms
-                  ON consent_terms."id" = consent."terms_version_id"
-                WHERE consent."user_id" = u."id"
-                  AND consent_terms."published_at" IS NOT NULL
-                  AND (
-                    consent_terms."id" = (
-                      SELECT "id" FROM "terms_versions"
-                      WHERE "severity" = 'major' AND "published_at" IS NOT NULL
-                      ORDER BY "published_at" DESC, "updated_at" DESC LIMIT 1
-                    )
-                    OR consent_terms."published_at" > (
-                      SELECT "published_at" FROM "terms_versions"
-                      WHERE "severity" = 'major' AND "published_at" IS NOT NULL
-                      ORDER BY "published_at" DESC, "updated_at" DESC LIMIT 1
-                    )
-                  )
-              )
-            )
-           THEN 1 ELSE 0
-         END AS terms_reaccept_required,
+         CASE WHEN typeof(u."is_tos_accepted") IN ('integer', 'real')
+                    AND u."is_tos_accepted" = 1 THEN 1 ELSE 0 END AS is_tos_accepted,
+         CASE WHEN u."is_tos_accepted" = 1 THEN COALESCE((
+           SELECT CASE WHEN required_major."published_at" <> 0 AND NOT (
+             EXISTS (
+               SELECT 1 FROM "terms_versions" accepted_terms
+               WHERE accepted_terms."id" = u."accepted_terms_version_id"
+                 AND accepted_terms."published_at" IS NOT NULL
+                 AND (
+                   accepted_terms."id" = required_major."id"
+                   OR accepted_terms."published_at" > required_major."published_at"
+                 )
+             )
+             OR EXISTS (
+               SELECT 1 FROM "user_tos_consents" consent
+               INNER JOIN "terms_versions" consent_terms
+                 ON consent_terms."id" = consent."terms_version_id"
+               WHERE consent."user_id" = u."id"
+                 AND consent_terms."published_at" IS NOT NULL
+                 AND (
+                   consent_terms."id" = required_major."id"
+                   OR consent_terms."published_at" > required_major."published_at"
+                 )
+             )
+           ) THEN 1 ELSE 0 END
+           FROM (
+             SELECT "id", "published_at" FROM "terms_versions"
+             WHERE "severity" = 'major' AND "published_at" IS NOT NULL
+             ORDER BY "published_at" DESC, "updated_at" DESC
+             LIMIT ${MAX_SINGLE_ROW_LIMIT}
+           ) required_major
+         ), 0) ELSE 0 END AS terms_reaccept_required,
          u."discord_id" AS discord_id, u."name" AS discord_name,
-         u."active_x_user_id" AS active_x_user_id, u."image" AS user_image,
-         x."x_name" AS x_name, x."icon_url" AS x_icon_url${activeXColumns}
+         u."active_x_user_id" AS active_x_user_id,
+         CASE WHEN typeof(x."icon_url") = 'text' AND length(x."icon_url") > 0
+           THEN NULL ELSE u."image" END AS user_image,
+         x."x_name" AS x_name, x."icon_url" AS x_icon_url${activeXColumns}${costGuardColumns}
        FROM "user" u
        LEFT JOIN "x_users" x ON x."id" = u."active_x_user_id"
+       ${costGuardJoin}
        WHERE u."id" = ?
        LIMIT ${MAX_SINGLE_ROW_LIMIT}`,
     )
@@ -306,18 +398,30 @@ export async function loadTosState(
         terms_reaccept_required: number | null;
         x_approval_status?: string | null;
         approved_x_ids_json?: string | null;
+        cost_guard_settings_id?: string | null;
+        cost_guard_operation_mode?: string | null;
+        cost_guard_disabled_features_json?: string | null;
+        cost_guard_exception_until?: number | null;
+        cost_guard_exception_features_json?: string | null;
+        cost_guard_audit_normal_retention_days?: number | null;
+        cost_guard_audit_restorable_retention_days?: number | null;
+        cost_guard_audit_long_retention_days?: number | null;
+        cost_guard_audit_max_payload_bytes?: number | null;
+        cost_guard_audit_compact_after_days?: number | null;
       } & ActorSnapshotRow
     >();
 
   if (!row) return null;
   let approvedXIds: string[] = [];
   if (row.approved_x_ids_json) {
-    // Fail closed (caller maps a throw to 503 db_unavailable) before parsing
-    // anything larger than the bounded list can be.
-    if (row.approved_x_ids_json.length > MAX_APPROVED_X_IDS_JSON_BYTES) {
+    // The SQL marker means the receipt was already too large to be accepted.
+    // Keep the existing JS code-unit check for all other values; no legacy ID
+    // is rejected solely because its UTF-8 encoding is longer than 8192 bytes.
+    const receipt = decodeApprovedXIdsReceipt(row.approved_x_ids_json);
+    if (receipt === "!" || receipt.length > MAX_APPROVED_X_IDS_JSON_BYTES) {
       throw new Error("approved_x_ids_too_large");
     }
-    const parsed: unknown = JSON.parse(row.approved_x_ids_json);
+    const parsed: unknown = JSON.parse(receipt);
     approvedXIds = Array.isArray(parsed)
       ? parsed.filter((v): v is string => typeof v === "string")
       : [];
@@ -335,6 +439,23 @@ export async function loadTosState(
     // Same user row the audit actor snapshot needs: saves a second D1 read
     // (ZERO_1102 S3: at most 3 pre-reads).
     actor_snapshot_json: JSON.stringify(actorSnapshotFromRow(row)),
+    ...(includeCostGuardSettings
+      ? {
+          cost_guard_settings: row.cost_guard_settings_id == null
+            ? null
+            : {
+                operation_mode: row.cost_guard_operation_mode ?? null,
+                disabled_features_json: row.cost_guard_disabled_features_json ?? null,
+                cost_guard_exception_until: row.cost_guard_exception_until ?? null,
+                cost_guard_exception_features_json: row.cost_guard_exception_features_json ?? null,
+                audit_normal_retention_days: row.cost_guard_audit_normal_retention_days,
+                audit_restorable_retention_days: row.cost_guard_audit_restorable_retention_days,
+                audit_long_retention_days: row.cost_guard_audit_long_retention_days,
+                audit_max_payload_bytes: row.cost_guard_audit_max_payload_bytes,
+                audit_compact_after_days: row.cost_guard_audit_compact_after_days,
+              } as CostGuardRow,
+        }
+      : {}),
   };
 }
 
@@ -490,6 +611,8 @@ export function writeGuardMiddleware(options: WriteGuardMiddlewareOptions) {
 
     let actorSnapshotJson: string | undefined;
     let activeXRow: ActiveXRow | null = null;
+    let costGuardSnapshot: CostGuardSnapshot | undefined;
+    let costGuardFallbackNeeded = false;
     const outcome = await evaluateAdminWriteGuard({
       user,
       hasDb: db !== undefined,
@@ -500,16 +623,44 @@ export function writeGuardMiddleware(options: WriteGuardMiddlewareOptions) {
       loadTosState:
         user && db
           ? async () => {
-              const state = await loadTosState(db, user.id, options.activeX);
-              actorSnapshotJson = state?.actor_snapshot_json;
-              activeXRow = state?.active_x ?? null;
-              return state;
+              try {
+                // Successful writes get a fresh request-local admission snapshot:
+                // identity/ToS/actor and the default CostGuard/audit row share one D1 read.
+                const state = await loadTosState(db, user.id, options.activeX, true);
+                actorSnapshotJson = state?.actor_snapshot_json;
+                activeXRow = state?.active_x ?? null;
+                costGuardSnapshot = { row: state?.cost_guard_settings ?? null };
+                return state;
+              } catch {
+                // Preserve the original failure classes. Re-read ToS alone first;
+                // if that fails, evaluateAdminWriteGuard returns db_unavailable.
+                const state = await loadTosState(db, user.id, options.activeX);
+                actorSnapshotJson = state?.actor_snapshot_json;
+                activeXRow = state?.active_x ?? null;
+                // Defer the CostGuard fallback until identity has passed below;
+                // CURRENT does not evaluate CostGuard after a banned/ToS denial.
+                costGuardFallbackNeeded = true;
+                return state;
+              }
             }
           : undefined,
     });
     if (!outcome.ok) {
       return writeGuardDenyResponse(c, outcome.reason, outcome.status);
     }
+    if (costGuardFallbackNeeded && db) {
+      // The joined read failed, but the canonical ToS read succeeded. Now
+      // classify a CostGuard provider failure separately, after identity.
+      try {
+        costGuardSnapshot = {
+          row: await loadCostGuardSettingsRow(db as unknown as D1Database),
+        };
+      } catch {
+        costGuardSnapshot = { row: null, unavailable: true };
+      }
+    }
+    const admissionSnapshot = costGuardSnapshot ?? { row: null, unavailable: true };
+    c.set("costGuardSnapshot", admissionSnapshot);
     // Active X (fail closed, independent of whether costGuardMiddleware is
     // mounted): CURRENT order identity -> CostGuard -> active X is evaluated
     // here, so an activeX route can never skip the check.
@@ -519,13 +670,10 @@ export function writeGuardMiddleware(options: WriteGuardMiddlewareOptions) {
       if (!feature || !activeXState || !db) {
         return writeGuardDenyResponse(c, "cost_guard_blocked", 503);
       }
-      const cost = await evaluateCostGuardWithSettings(
-        db as unknown as D1Database,
-        feature,
-      );
+      const cost = evaluateCostGuardSnapshot(admissionSnapshot, feature);
       if (cost.denied) return writeGuardDenyResponse(c, cost.denied, 503);
       if (cost.auditSettings) c.set("auditSettings", cost.auditSettings);
-      // costGuardMiddleware on the same route skips its (second) read.
+      // costGuardMiddleware on the same route skips the already evaluated snapshot.
       c.set("costGuardEvaluated", true);
       const activeXDeny = evaluateActiveXAccess(options.activeX, activeXState);
       if (activeXDeny) return writeGuardDenyResponse(c, activeXDeny, 403);
