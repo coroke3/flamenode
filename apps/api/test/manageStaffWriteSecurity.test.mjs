@@ -742,10 +742,33 @@ test("SEC-800: SA-031 blank public role labels preserve CURRENT storage and audi
 });
 
 test("SEC-800: shared ownership-core provider reads cannot impersonate allowlisted domain conflicts", async () => {
-  const ownerRowsRead = (sql) => /FROM "event_staff"/i.test(sql) && /permission_preset/i.test(sql);
-  const uniquenessRead = (sql) => /FROM "event_staff"/i.test(sql) && !/permission_preset/i.test(sql);
-  const operableOwnerLinkRead = (sql) =>
-    /FROM "x_user_account_links"/i.test(sql) && /link_role/i.test(sql) && /approval_status/i.test(sql);
+  const eventStaffWhere = (statement) =>
+    statement.match(/\bWHERE\b([\s\S]*?)(?:\bORDER\s+BY\b|\bLIMIT\b|$)/i)?.[1] ?? "";
+  const ownerRowsRead = (statement) => {
+    const where = eventStaffWhere(statement);
+    return /"event_staff"\."event_id"\s*=\s*\?/i.test(where) &&
+      /"event_staff"\."permission_preset"\s*=\s*\?/i.test(where) &&
+      /\bEXISTS\s*\(/i.test(where) &&
+      /\bx_users\b/i.test(where);
+  };
+  const uniquenessRead = (statement) => {
+    const where = eventStaffWhere(statement).trim().replace(/^\(+|\)+$/g, "").trim();
+    return /^"event_staff"\."event_id"\s*=\s*\?$/i.test(where);
+  };
+  const transferTargetRead = (statement) => {
+    const where = eventStaffWhere(statement);
+    return /"event_staff"\."event_id"\s*=\s*\?/i.test(where) &&
+      /"event_staff"\."id"\s+IN\s*\(\s*\?\s*,\s*\?\s*\)/i.test(where);
+  };
+  const approvedLinkedXRead = (statement) =>
+    /FROM\s+"x_user_account_links"\s+INNER JOIN\s+"x_users"/i.test(statement) &&
+    /"x_user_account_links"\."auth_user_id"\s*=\s*\?/i.test(statement) &&
+    /"x_users"\."approval_status"\s*=\s*\?/i.test(statement) &&
+    !/"x_user_account_links"\."link_role"/i.test(statement);
+  const operableOwnerLinkRead = (statement) =>
+    /FROM\s+"x_user_account_links"/i.test(statement) &&
+    /"x_user_account_links"\."link_role"\s*=\s*\?/i.test(statement) &&
+    /"x_users"\."approval_status"\s*=\s*\?/i.test(statement);
   const cases = [
     {
       name: "non-admin owner eligibility read",
@@ -754,6 +777,16 @@ test("SEC-800: shared ownership-core provider reads cannot impersonate allowlist
       path: "/",
       body: { ...upsert, permission_preset: "owner" },
       match: ownerRowsRead,
+      error: new Error("代表権限を付与できるのはイベント代表者または管理者だけです。"),
+      diagnostic: "[MIG-0654] staff upsert unavailable",
+    },
+    {
+      name: "non-admin approved-X eligibility read",
+      user: MEMBER,
+      method: "POST",
+      path: "/",
+      body: { ...upsert, permission_preset: "owner" },
+      match: approvedLinkedXRead,
       error: new Error("代表権限を付与できるのはイベント代表者または管理者だけです。"),
       diagnostic: "[MIG-0654] staff upsert unavailable",
     },
@@ -803,7 +836,7 @@ test("SEC-800: shared ownership-core provider reads cannot impersonate allowlist
       method: "POST",
       path: "/owner-transfer",
       body: transfer,
-      match: uniquenessRead,
+      match: transferTargetRead,
       error: new Error(LAST_OWNER_ERROR),
       diagnostic: "[MIG-0654] owner transfer unavailable",
     },
