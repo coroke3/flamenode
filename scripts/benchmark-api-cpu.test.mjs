@@ -9,7 +9,7 @@ import { spawnSync } from "node:child_process";
 import { materializeD1CompatibleMigrations } from "./d1-migration-compat.mjs";
 import {
   operationModeMirrorFixtureCases, buildOperationModeMirrorFixture, operationModeBannerReceiptMismatch, createOperationModeKvProbe, operationModeKvEvidenceMismatch, operationModeScannerBlobSha, assertOperationModeScannerSource, EXPECTED_OPERATION_MODE_SCANNER_BLOB_SHA, collectOperationModeKvSamples, operationModeKvBaseline, summarizeOperationModeKvDiagnostic,
-  BUDGETS_MS, KINDS, MIN_SAMPLES, QUIET_BASELINE_MAX_MS, ROUTE_INVENTORY, SEED, WARM_KINDS, aggregate, applyBudgetVerdicts, benchmarkRequestHeaders, benchmarkRequestEnv, enforceCpuMeasurementEnvironment, buildPendingScenarios, buildScenarios, createInprocTarget, createReplayTarget, createReplayInputScope, runCold, runScenario, validateCpuProfilerCalibration, eventExportCacheRequestUrls, judge, parseArgs, percentile, playlistResponseMismatch, templateResponseMismatch, renderMarkdown, returnedRows, replayIdentity, replayEvidenceMismatch, requireBenchmarkControl, snapshotReplayResult, snapshotReplayScript, summarize, workerSource,
+  BUDGETS_MS, KINDS, MIN_SAMPLES, QUIET_BASELINE_MAX_MS, ROUTE_INVENTORY, SEED, WARM_KINDS, aggregate, applyBudgetVerdicts, benchmarkRequestHeaders, benchmarkRequestEnv, enforceCpuMeasurementEnvironment, buildPendingScenarios, buildScenarios, createInprocTarget, createReplayTarget, createReplayInputScope, runCold, runScenario, validateCpuProfilerCalibration, requireInspectorResult, summarizeCpuProfile, eventExportCacheRequestUrls, judge, parseArgs, percentile, playlistResponseMismatch, templateResponseMismatch, renderMarkdown, returnedRows, replayIdentity, replayEvidenceMismatch, requireBenchmarkControl, snapshotReplayResult, snapshotReplayScript, summarize, workerSource,
 } from "./benchmark-api-cpu.mjs";
 
 async function loadReplayWorker(generation, script, body) {
@@ -2632,4 +2632,76 @@ test("MIG-0639: ordered GET/playlist/HEAD replay preserves changed or missing ET
     if (originalIdentity === undefined) delete globalThis.__flamenodeBenchIdentity;
     else globalThis.__flamenodeBenchIdentity = originalIdentity;
   }
+});
+
+test("MIG-0639: CDP profiler commands and CPU profile receipts fail closed", () => {
+  assert.deepEqual(requireInspectorResult({ id: 1, result: {} }, "Profiler.start"), {});
+  const validProfile = {
+    nodes: [
+      { id: 1, callFrame: { functionName: "(idle)" } },
+      { id: 2, callFrame: { functionName: "handler" } },
+    ],
+    samples: [1, 2, 2],
+    timeDeltas: [5000, 2000, 3000],
+  };
+  const stopped = requireInspectorResult({ id: 2, result: { profile: validProfile } }, "Profiler.stop");
+  assert.deepEqual(summarizeCpuProfile(stopped.profile), { busyMs: 5, maxDeltaMs: 3 });
+  assert.deepEqual(summarizeCpuProfile({
+    nodes: [{ id: 1, callFrame: { functionName: "(idle)" } }],
+    samples: [1],
+    timeDeltas: [1000],
+  }), { busyMs: 0, maxDeltaMs: 0 }, "a complete idle-only profile remains a valid zero-work receipt");
+  assert.deepEqual(summarizeCpuProfile({
+    nodes: [{ id: 1, callFrame: { functionName: "handler" } }],
+    samples: [1],
+    timeDeltas: [0],
+  }), { busyMs: 0, maxDeltaMs: 0 }, "a finite zero delta is structurally valid");
+
+  for (const reply of [
+    null, [], {}, { id: 0, result: {} }, { id: 1, error: { code: -32000 } },
+    { id: 1 }, { id: 1, result: null }, { id: 1, result: [] }, { id: 1, result: "ok" },
+  ]) {
+    assert.throws(() => requireInspectorResult(reply, "Profiler.start"), /Profiler.start failed/);
+  }
+
+  const node = { id: 1, callFrame: { functionName: "handler" } };
+  const invalidProfiles = [
+    null,
+    {},
+    { nodes: [], samples: [], timeDeltas: [] },
+    { nodes: [], samples: [1], timeDeltas: [1000] },
+    { nodes: [node], samples: [], timeDeltas: [] },
+    { nodes: [node], samples: [1], timeDeltas: [] },
+    { nodes: [node], samples: [1], timeDeltas: [null] },
+    { nodes: [node], samples: [1], timeDeltas: ["1000"] },
+    { nodes: [node], samples: [1], timeDeltas: [NaN] },
+    { nodes: [node], samples: [1], timeDeltas: [Infinity] },
+    { nodes: [node], samples: [1], timeDeltas: [-1] },
+    { nodes: [node], samples: [2], timeDeltas: [1000] },
+    { nodes: [{ id: 0, callFrame: { functionName: "handler" } }], samples: [0], timeDeltas: [1000] },
+    { nodes: [{ id: Number.MAX_SAFE_INTEGER + 1, callFrame: { functionName: "handler" } }], samples: [1], timeDeltas: [1000] },
+    { nodes: [node, { id: 1, callFrame: { functionName: "duplicate" } }], samples: [1], timeDeltas: [1000] },
+    { nodes: [{ id: 1, callFrame: null }], samples: [1], timeDeltas: [1000] },
+    { nodes: [{ id: 1, callFrame: {} }], samples: [1], timeDeltas: [1000] },
+    { nodes: [{ id: 1, callFrame: { functionName: 7 } }], samples: [1], timeDeltas: [1000] },
+    {
+      nodes: [{ id: 1, callFrame: { functionName: "(idle)" } }],
+      samples: [1],
+      timeDeltas: [-1],
+    },
+  ];
+  for (const profile of invalidProfiles) {
+    assert.throws(() => summarizeCpuProfile(profile), /CPU profiler returned malformed profile/);
+  }
+  const overflowProfile = {
+    nodes: [node],
+    samples: Array(1100).fill(1),
+    timeDeltas: Array(1100).fill(Number.MAX_VALUE),
+  };
+  assert.throws(() => summarizeCpuProfile(overflowProfile), /CPU profiler returned malformed profile/);
+
+  const source = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "benchmark-api-cpu.mjs"), "utf8");
+  const start = source.indexOf('requireInspectorResult(await call("Profiler.start"), "Profiler.start");');
+  const request = source.indexOf('const res = await fetch(`${base}${spec.path}`, { method:', start);
+  assert.ok(start >= 0 && request > start, "the request cannot run unless Profiler.start returned a valid result");
 });

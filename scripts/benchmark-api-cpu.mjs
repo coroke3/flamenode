@@ -274,6 +274,62 @@ export function validateCpuProfilerCalibration(rows) {
   return { idleMs: idle, lightMs: light, heavyMs: heavy };
 }
 
+/**
+ * Require a successful Chrome DevTools Protocol response envelope. A command
+ * that returns an error or omits its result cannot be used as CPU evidence.
+ */
+export function requireInspectorResult(reply, method) {
+  if (!reply || typeof reply !== "object" || Array.isArray(reply)
+    || !Number.isSafeInteger(reply.id) || reply.id < 1) {
+    throw new Error(`${method} failed: malformed inspector response`);
+  }
+  if (reply.error !== undefined) throw new Error(`${method} failed: inspector error`);
+  if (!reply.result || typeof reply.result !== "object" || Array.isArray(reply.result)) {
+    throw new Error(`${method} failed: missing inspector result`);
+  }
+  return reply.result;
+}
+
+/**
+ * Convert one complete V8 CPUProfile into busy milliseconds and the largest
+ * non-idle sample quantum. Validate every node/sample/delta before returning,
+ * so malformed or unsampled profiles can never become a numeric zero.
+ */
+export function summarizeCpuProfile(profile) {
+  const invalid = () => { throw new Error("CPU profiler returned malformed profile"); };
+  if (!profile || typeof profile !== "object" || Array.isArray(profile)
+    || !Array.isArray(profile.nodes) || !Array.isArray(profile.samples)
+    || !Array.isArray(profile.timeDeltas) || profile.samples.length === 0
+    || profile.samples.length !== profile.timeDeltas.length) invalid();
+
+  const functionById = new Map();
+  for (const node of profile.nodes) {
+    if (!node || typeof node !== "object" || Array.isArray(node)
+      || !Number.isSafeInteger(node.id) || node.id < 1 || functionById.has(node.id)
+      || !node.callFrame || typeof node.callFrame !== "object" || Array.isArray(node.callFrame)
+      || typeof node.callFrame.functionName !== "string") invalid();
+    functionById.set(node.id, node.callFrame.functionName);
+  }
+
+  let busyMs = 0;
+  let maxDeltaMs = 0;
+  for (let i = 0; i < profile.samples.length; i += 1) {
+    const sampleId = profile.samples[i];
+    const deltaUs = profile.timeDeltas[i];
+    if (!Number.isSafeInteger(sampleId) || sampleId < 1 || !functionById.has(sampleId)
+      || typeof deltaUs !== "number" || !Number.isFinite(deltaUs) || deltaUs < 0) invalid();
+    const deltaMs = deltaUs / 1000;
+    if (!Number.isFinite(deltaMs)) invalid();
+    // Validate idle deltas too; only non-idle work contributes to busy time/resolution.
+    if (functionById.get(sampleId) !== "(idle)") {
+      busyMs += deltaMs;
+      if (!Number.isFinite(busyMs)) invalid();
+      if (deltaMs > maxDeltaMs) maxDeltaMs = deltaMs;
+    }
+  }
+  return { busyMs, maxDeltaMs };
+}
+
 /** Number of rows delivered to application code; NOT Cloudflare D1 billed rows_read. */
 export function returnedRows(mode, value) {
   if (mode === "first") return value == null ? 0 : 1;
@@ -2529,9 +2585,11 @@ async function createWranglerTarget(plan, opts) {
             if (w) { waiters.delete(d.id); w(d); }
           });
           ws = sock;
-          const en = await call("Profiler.enable");
-          if (en.error) throw new Error(JSON.stringify(en.error));
-          await call("Profiler.setSamplingInterval", { interval: SAMPLING_US });
+          requireInspectorResult(await call("Profiler.enable"), "Profiler.enable");
+          requireInspectorResult(
+            await call("Profiler.setSamplingInterval", { interval: SAMPLING_US }),
+            "Profiler.setSamplingInterval",
+          );
           return;
         }
       } catch (error) { lastError = error; /* inspector not ready yet */ }
@@ -2546,17 +2604,6 @@ async function createWranglerTarget(plan, opts) {
   // honest resolution of every number below (used by judge()).
   let quantumMs = SAMPLING_US / 1000;
   let countQuantum = false;
-  const profileBusyMs = (profile) => {
-    const byId = new Map(profile.nodes.map((n) => [n.id, n]));
-    let busy = 0;
-    profile.samples.forEach((sid, k) => {
-      if (byId.get(sid)?.callFrame.functionName === "(idle)") return;
-      const dt = profile.timeDeltas[k] / 1000;
-      busy += dt;
-      if (countQuantum && dt > quantumMs) quantumMs = dt;
-    });
-    return busy;
-  };
   let scriptSeq = 0;
   const run = async (spec, rec = null, firstBuild = null) => {
     if (spec.operationModeKv === true && (opts.operationModeKv !== true || rec !== null ||
@@ -2569,11 +2616,13 @@ async function createWranglerTarget(plan, opts) {
       if (!reg.ok) throw new Error(`script upload failed: ${reg.status}`);
       headers.set("x-bench-script", id);
     }
-    await call("Profiler.start");
+    requireInspectorResult(await call("Profiler.start"), "Profiler.start");
     const res = await fetch(`${base}${spec.path}`, { method: spec.method, headers, body: spec.body });
     const buf = await res.arrayBuffer();
-    const stop = await call("Profiler.stop");
-    if (stop.error) throw new Error(`Profiler.stop failed: ${json(stop.error)}`);
+    const stopResult = requireInspectorResult(await call("Profiler.stop"), "Profiler.stop");
+    const profileSummary = summarizeCpuProfile(stopResult.profile);
+    // Publish the sampling quantum only after the entire profile has validated.
+    if (countQuantum && profileSummary.maxDeltaMs > quantumMs) quantumMs = profileSummary.maxDeltaMs;
     // Receipt retrieval and large raw-value hashing are deliberately AFTER Profiler.stop.
     let nativeKv = null;
     if (spec.operationModeKv === true) {
@@ -2598,7 +2647,7 @@ async function createWranglerTarget(plan, opts) {
       cacheState: res.headers.get("x-flamenode-cache"),
       bodyHash: createHash("sha256").update(Buffer.from(buf)).digest("hex"),
       ...(hasResponseExpectation(spec) ? { responseBodyMismatch: benchmarkResponseMismatch(spec, buf, res.headers, d1, rows) || (rec != null && rec.responseBodyMismatch !== false) } : {}),
-      cpuMs: profileBusyMs(stop.result.profile),
+      cpuMs: profileSummary.busyMs,
       replayStatusMismatch: rec ? rec.status !== res.status : false,
       isFirstIsolateRequest: firstBuild !== null
         && res.headers.get("x-bench-build") === firstBuild
