@@ -158,6 +158,11 @@ async function persistMissCounter(
   lastMissWriteKey = missKey;
   const nextCount = parseCount(await kv.get(missKey)) + pending;
   await waitForKvWriteSlot(missKey);
+  // An elapsed minute has no role in the current admission window. Do not
+  // start a historical counter write just to replay an expired observation.
+  if (currentDegradedCircuitMinuteBucket(Date.now()) !== bucket) {
+    throw new Error("degraded circuit miss window elapsed");
+  }
   lastKvWriteAttemptAt.set(missKey, Date.now());
   await kv.put(missKey, String(nextCount), {
     expirationTtl: DEGRADED_CIRCUIT_MISS_WINDOW_SEC * 2,
@@ -288,6 +293,7 @@ async function flushMissCount(
   acknowledge: () => void,
 ): Promise<void> {
   const remoteOpen = (await kv.get(degradedCircuitOpenKey())) === "1";
+  if (currentDegradedCircuitMinuteBucket(Date.now()) !== bucket) return;
   // A concurrent local threshold crossing owns OPEN repair immediately, even
   // while this counter flush awaits KV. Never reset or replace that receipt.
   if (remoteOpen && !openRepair) {
@@ -300,16 +306,19 @@ async function flushMissCount(
 
   const nextCount = await persistMissCounter(kv, bucket, pending);
   acknowledge();
-  if (!shouldOpenDegradedCircuit(nextCount) || localCircuitState.open || openRepair) return;
-  beginOpenRepair(nowMs, nextCount);
+  if (currentDegradedCircuitMinuteBucket(Date.now()) !== bucket ||
+    !shouldOpenDegradedCircuit(nextCount) || localCircuitState.open || openRepair) return;
+  beginOpenRepair(Date.now(), nextCount);
 }
 
 async function flushPendingMissesIfReady(
   kv: KVNamespace,
   nowMs: number,
+  allowRolloverFollowup = true,
 ): Promise<boolean> {
   const state = missAccumulator;
-  if (!state || state.pending <= 0 || missFlushInFlight) return false;
+  if (!state || state.pending <= 0 || missFlushInFlight || hitCloseInFlight ||
+    state.bucket !== currentDegradedCircuitMinuteBucket(Date.now())) return false;
   const elapsed = nowMs - state.lastFlushAt;
   if (elapsed >= 0 && elapsed < DEGRADED_CIRCUIT_MISS_LOCAL_FLUSH_MS) {
     return false;
@@ -327,7 +336,8 @@ async function flushPendingMissesIfReady(
   } catch {
     // Keep the count for a later request, but never retain the KV binding or
     // the rejected Promise itself in isolate-global state.
-    if (!acknowledged && missAccumulator === state) {
+    if (!acknowledged && missAccumulator === state &&
+      state.bucket === currentDegradedCircuitMinuteBucket(Date.now())) {
       state.pending += pending;
       state.lastFlushAt = nowMs;
     }
@@ -335,6 +345,12 @@ async function flushPendingMissesIfReady(
     missFlushInFlight = false;
   }
   if (openRepair) await reconcileOpenRepair(kv, Date.now());
+  // At most one follow-up per request: a newer active bucket may have queued
+  // misses while the old flush was awaiting I/O. Never re-credit old counts.
+  if (allowRolloverFollowup && !openRepair && !localCircuitState.open &&
+    missAccumulator !== state && missAccumulator?.bucket === currentDegradedCircuitMinuteBucket(Date.now())) {
+    await flushPendingMissesIfReady(kv, Date.now(), false);
+  }
   return true;
 }
 
@@ -378,12 +394,16 @@ export async function recordDegradedCircuitR2Miss(
   if (!kv) return;
   try {
     const bucket = currentDegradedCircuitMinuteBucket(nowMs);
+    // A queued waitUntil callback can arrive after its observation window.
+    // Expire it rather than replacing a newer bucket or reviving old counts.
+    if (bucket !== currentDegradedCircuitMinuteBucket(Date.now())) return;
     if (openRepair) {
       const wasOpen = localCircuitState.open && nowMs < localCircuitState.openUntil;
       await reconcileOpenRepair(kv, nowMs);
       // This miss arrived while OPEN, even if accumulated hits close it during repair.
       if (openRepair || (wasOpen && !localCircuitState.open)) return;
     }
+    if (bucket !== currentDegradedCircuitMinuteBucket(Date.now())) return;
     if (localCircuitState.open && nowMs < localCircuitState.openUntil) {
       if (missAccumulator?.bucket === bucket && !hitCloseInFlight) {
         await flushPendingMissesIfReady(kv, nowMs);

@@ -346,6 +346,64 @@ function registerTests(test, equal, runtime) {
     equal(await probing, false);
     equal(f.snapshot().open, false);
   });
+  test("SEC-798: delayed old counter acknowledgement does not open next minute", async () => {
+    const f = make();
+    f.tick(59900);
+    const pause = f.pause("put", f.missKey);
+    const old = f.miss(f.now());
+    await pause.started;
+    f.tick(100); await f.miss(f.now());
+    equal(f.snapshot().pending, 1);
+    pause.resume(); await old;
+    equal(f.values.get(f.missKey), "20");
+    equal(f.values.get("public:degraded_circuit:miss:2"), "1");
+    equal(f.snapshot().pending, 0);
+    equal(f.snapshot().stage, null);
+    equal(f.values.has(f.openKey), false);
+    equal(f.snapshot().open, false);
+    equal(f.rateViolations.length, 0);
+  });
+  test("SEC-798: failed old counter expires without recrediting new bucket", async () => {
+    const f = make({fault:"counter"});
+    f.tick(59900);
+    const pause = f.pause("put", f.missKey);
+    const old = f.miss(f.now());
+    await pause.started;
+    f.tick(100); await f.miss(f.now());
+    pause.resume(); await old;
+    equal(f.values.get(f.missKey), "19");
+    equal(f.values.get("public:degraded_circuit:miss:2"), "1");
+    equal(f.snapshot().pending, 0);
+    equal(f.snapshot().open, false);
+    equal(f.rateViolations.length, 0);
+  });
+  test("SEC-798: expired counter read cannot initiate an old PUT", async () => {
+    const f = make();
+    f.tick(59900);
+    const pause = f.pause("get", f.missKey);
+    const old = f.miss(f.now());
+    await pause.started;
+    f.tick(100); await f.miss(f.now());
+    pause.resume(); await old;
+    equal(f.values.get(f.missKey), "19");
+    equal(f.writes.filter(x=>x[1]===f.missKey).length, 0);
+    equal(f.values.get("public:degraded_circuit:miss:2"), "1");
+    equal(f.snapshot().open, false);
+  });
+  test("SEC-798: delayed scheduled miss cannot replace newer bucket", async () => {
+    const f = make({initial:0});
+    const oldNow = f.now();
+    f.tick(60000); await f.miss(f.now());
+    f.tick(100); await f.miss(f.now());
+    equal(f.snapshot().pending, 1);
+    await f.miss(oldNow);
+    equal(f.snapshot().pending, 1);
+    equal(f.writes.filter(x=>x[1]===f.missKey).length, 0);
+    f.tick(900); await f.miss(f.now());
+    equal(f.values.get("public:degraded_circuit:miss:2"), "3");
+    equal(f.snapshot().pending, 0);
+    equal(f.rateViolations.length, 0);
+  });
 }
 
 registerTests(test, assert.equal, runtime);
