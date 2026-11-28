@@ -38,7 +38,7 @@ function stopTree(child) {
   });
 }
 
-test("U04a: local workerd/D1 preserves actor history and bounded reference-reader semantics", { timeout: 120_000 }, async () => {
+test("U04a-U04c: local workerd/D1 actor history, bounded reader, and lease retention semantics", { timeout: 120_000 }, async () => {
   const loggerSource = fs.readFileSync(path.join(REPO_ROOT, "packages/server-core/src/audit/logger.ts"), "utf8");
   assert.match(loggerSource, /discord_id: row\.discord_id \?\? null,[\s\S]*discord_name: row\.discord_name \?\? null,[\s\S]*x_user_id: row\.active_x_user_id \?\? null,[\s\S]*x_name: row\.x_name \?\? null,[\s\S]*icon_url: row\.x_icon_url \|\| row\.user_image \|\| null/);
 
@@ -64,6 +64,10 @@ test("U04a: local workerd/D1 preserves actor history and bounded reference-reade
     "const historySql = 'SELECT u.discord_id AS discord_id, u.name AS discord_name, u.active_x_user_id, u.image AS user_image, x.x_name, x.icon_url AS x_icon_url FROM u04a_user_history u LEFT JOIN u04a_x_users_history x ON x.id = u.active_x_user_id AND x.version = ? WHERE u.id = ? AND u.version = ?';",
     "const historyByRefSql = 'SELECT u.discord_id AS discord_id, u.name AS discord_name, u.active_x_user_id, u.image AS user_image, x.x_name, x.icon_url AS x_icon_url FROM u04a_actor_history_refs r JOIN u04a_user_history u ON u.version = r.user_version LEFT JOIN u04a_x_users_history x ON x.version = r.x_version AND x.id = u.active_x_user_id WHERE r.id = ?';",
     "const historyListSql = 'SELECT r.id AS actor_ref_id, u.name AS discord_name, u.active_x_user_id AS x_user_id, x.x_name AS x_name FROM u04a_actor_history_refs r JOIN u04a_user_history u ON u.version = r.user_version LEFT JOIN u04a_x_users_history x ON x.version = r.x_version AND x.id = u.active_x_user_id WHERE r.id = ?';",
+    "const leaseAcquireSql = 'INSERT INTO u04a_actor_history_leases (id, user_version, x_version, expires_at) SELECT ?, u.actor_snapshot_version, COALESCE(x.actor_snapshot_version, -1), NULL FROM u04a_user u LEFT JOIN u04a_x_users x ON x.id = u.active_x_user_id WHERE u.id = ?';",
+    "const leaseAcquireExpiringSql = 'INSERT INTO u04a_actor_history_leases (id, user_version, x_version, expires_at) SELECT ?, u.actor_snapshot_version, COALESCE(x.actor_snapshot_version, -1), ? FROM u04a_user u LEFT JOIN u04a_x_users x ON x.id = u.active_x_user_id WHERE u.id = ?';",
+    "const cleanupUserHistorySql = 'DELETE FROM u04a_user_history WHERE version = ? AND NOT EXISTS (SELECT 1 FROM u04a_user u WHERE u.actor_snapshot_version = u04a_user_history.version) AND NOT EXISTS (SELECT 1 FROM u04a_actor_history_refs r WHERE r.user_version = u04a_user_history.version) AND NOT EXISTS (SELECT 1 FROM u04a_actor_history_leases l WHERE l.user_version = u04a_user_history.version AND (l.expires_at IS NULL OR l.expires_at > ?))';",
+    "const cleanupXHistorySql = 'DELETE FROM u04a_x_users_history WHERE version = ? AND NOT EXISTS (SELECT 1 FROM u04a_x_users x WHERE x.actor_snapshot_version = u04a_x_users_history.version) AND NOT EXISTS (SELECT 1 FROM u04a_actor_history_refs r WHERE r.x_version = u04a_x_users_history.version) AND NOT EXISTS (SELECT 1 FROM u04a_actor_history_leases l WHERE l.x_version = u04a_x_users_history.version AND (l.expires_at IS NULL OR l.expires_at > ?))';",
     "const historyBytesSql = 'SELECT typeof(u.discord_id) AS discord_id_type, hex(CAST(u.discord_id AS BLOB)) AS discord_id_hex, typeof(u.name) AS discord_name_type, hex(CAST(u.name AS BLOB)) AS discord_name_hex, typeof(u.active_x_user_id) AS active_x_user_id_type, hex(CAST(u.active_x_user_id AS BLOB)) AS active_x_user_id_hex, typeof(u.image) AS user_image_type, hex(CAST(u.image AS BLOB)) AS user_image_hex, typeof(x.x_name) AS x_name_type, hex(CAST(x.x_name AS BLOB)) AS x_name_hex, typeof(x.icon_url) AS x_icon_url_type, hex(CAST(x.icon_url AS BLOB)) AS x_icon_url_hex FROM u04a_user_history u LEFT JOIN u04a_x_users_history x ON x.id = u.active_x_user_id AND x.version = ? WHERE u.id = ? AND u.version = ?';",
     "const captureSql = 'INSERT INTO audit_actor_snapshots_u04a (id, discord_id, discord_name, active_x_user_id, user_image, x_name, x_icon_url, user_version, x_version) SELECT ?, u.discord_id, u.name, u.active_x_user_id, u.image, x.x_name, x.icon_url, u.actor_snapshot_version, COALESCE(x.actor_snapshot_version, -1) FROM u04a_user u LEFT JOIN u04a_x_users x ON x.id = u.active_x_user_id WHERE u.id = ? AND u.actor_snapshot_version = ? AND COALESCE(x.actor_snapshot_version, -1) = ?';",
     "const sourceBytesSql = 'SELECT typeof(u.discord_id) AS discord_id_type, hex(CAST(u.discord_id AS BLOB)) AS discord_id_hex, typeof(u.name) AS discord_name_type, hex(CAST(u.name AS BLOB)) AS discord_name_hex, typeof(u.active_x_user_id) AS active_x_user_id_type, hex(CAST(u.active_x_user_id AS BLOB)) AS active_x_user_id_hex, typeof(u.image) AS user_image_type, hex(CAST(u.image AS BLOB)) AS user_image_hex, typeof(x.x_name) AS x_name_type, hex(CAST(x.x_name AS BLOB)) AS x_name_hex, typeof(x.icon_url) AS x_icon_url_type, hex(CAST(x.icon_url AS BLOB)) AS x_icon_url_hex FROM u04a_user u LEFT JOIN u04a_x_users x ON x.id = u.active_x_user_id WHERE u.id = ?';",
@@ -94,6 +98,7 @@ test("U04a: local workerd/D1 preserves actor history and bounded reference-reade
     "  await run(db, 'CREATE TABLE IF NOT EXISTS u04a_audit_inline (id TEXT PRIMARY KEY, actor_snapshot_json TEXT NOT NULL)');",
     "  await run(db, 'CREATE TABLE IF NOT EXISTS u04a_actor_history_refs (id TEXT PRIMARY KEY, user_version INTEGER NOT NULL, x_version INTEGER NOT NULL)');",
     "  await run(db, 'CREATE TABLE IF NOT EXISTS u04a_actor_history_refs_fk (id TEXT PRIMARY KEY, user_version INTEGER NOT NULL REFERENCES u04a_user_history(version), x_version INTEGER NOT NULL REFERENCES u04a_x_users_history(version))');",
+    "  await run(db, 'CREATE TABLE IF NOT EXISTS u04a_actor_history_leases (id TEXT PRIMARY KEY, user_version INTEGER NOT NULL, x_version INTEGER NOT NULL, expires_at INTEGER)');",
     "  await run(db, 'CREATE TABLE IF NOT EXISTS u04a_forced_failure (value INTEGER NOT NULL CHECK (value = 1))');",
     "  await run(db, 'INSERT OR IGNORE INTO u04a_user (id, discord_id, name, active_x_user_id, image) VALUES (?, ?, ?, ?, ?)', ['admin-1', 'd', 'Name', 'u04a-x', 'image']);",
     "  await run(db, 'INSERT OR IGNORE INTO u04a_x_users (id, x_name, icon_url) VALUES (?, ?, ?)', ['u04a-x', 'X name', 'https://i/x.png']);",
@@ -344,6 +349,69 @@ test("U04a: local workerd/D1 preserves actor history and bounded reference-reade
     "  });",
     "  const reader = { allSuccess: readerBatch.every(r => r.success === true), admissionJson: readerAdmissionJson, historyJson: readerHistoryJson, liveJson: JSON.stringify(actorSnapshotFromRow((await all(db, sourceSql, ['admin-1']))[0])), listRow: readerListRow, listResponseBytes: readerListResponseBytes, snapshotBytes: readerSnapshotBytes, chunkCount: readerChunks.length, maxChunkBytes: Math.max(...readerChunkBytes), chunkOffsetsValid: readerChunkOffsetsValid, reassembledJson: readerChunks.map(item => item.chunk).join('') };",
     "  await resetActor();",
+    "  // Lease acquisition captures the current actor versions and persists their reservation in one INSERT ... SELECT statement.",
+    "  await resetActor();",
+    "  const leaseCurrentVersions = await getVersions();",
+    "  const leaseCurrentCleanup = await db.batch([",
+    "    db.prepare(cleanupUserHistorySql).bind(leaseCurrentVersions.user_version, 100),",
+    "    db.prepare(cleanupXHistorySql).bind(leaseCurrentVersions.x_version, 100),",
+    "  ]);",
+    "  const leaseAcquireResults = await db.batch([db.prepare(leaseAcquireSql).bind('lease-success', 'admin-1')]);",
+    "  const leaseRow = (await all(db, 'SELECT user_version, x_version, expires_at FROM u04a_actor_history_leases WHERE id=?', ['lease-success']))[0];",
+    "  const leaseAdmissionRow = (await all(db, historySql, [leaseRow.x_version, 'admin-1', leaseRow.user_version]))[0];",
+    "  const leaseAdmissionJson = JSON.stringify(actorSnapshotFromRow(leaseAdmissionRow));",
+    "  await updateUser(['d-after-lease', 'User after lease', 'u04a-x', 'user-after-lease']);",
+    "  await updateX(['X after lease', 'https://i/after-lease.png']);",
+    "  const leaseCleanupWhileActive = await db.batch([",
+    "    db.prepare(cleanupUserHistorySql).bind(leaseRow.user_version, 100),",
+    "    db.prepare(cleanupXHistorySql).bind(leaseRow.x_version, 100),",
+    "  ]);",
+    "  const leaseHistoryWhileActive = (await all(db, historySql, [leaseRow.x_version, 'admin-1', leaseRow.user_version]))[0] ?? null;",
+    "  const leaseFailedFinalize = await batchFailed([",
+    "    db.prepare('UPDATE u04a_resource SET value=? WHERE id=?').bind('lease-failed', 'target'),",
+    "    db.prepare('INSERT INTO u04a_actor_history_refs (id, user_version, x_version) SELECT ?, user_version, x_version FROM u04a_actor_history_leases WHERE id=?').bind('lease-success', 'lease-success'),",
+    "    db.prepare('DELETE FROM u04a_actor_history_leases WHERE id=?').bind('lease-success'),",
+    "    db.prepare('INSERT INTO u04a_forced_failure(value) VALUES (?)').bind(2),",
+    "  ]);",
+    "  const leaseAfterFailedFinalize = { leaseCount: Number((await all(db, 'SELECT COUNT(*) AS n FROM u04a_actor_history_leases WHERE id=?', ['lease-success']))[0].n), refCount: Number((await all(db, 'SELECT COUNT(*) AS n FROM u04a_actor_history_refs WHERE audit_id=?', ['lease-success']))[0].n), resource: await getResource(), historyAvailable: !!(await all(db, historySql, [leaseRow.x_version, 'admin-1', leaseRow.user_version]))[0] };",
+    "  const leaseFinalizeResults = await db.batch([",
+    "    db.prepare('UPDATE u04a_resource SET value=? WHERE id=?').bind('lease-success', 'target'),",
+    "    db.prepare('INSERT INTO u04a_actor_history_refs (id, user_version, x_version) SELECT ?, user_version, x_version FROM u04a_actor_history_leases WHERE id=?').bind('lease-success', 'lease-success'),",
+    "    db.prepare('DELETE FROM u04a_actor_history_leases WHERE id=?').bind('lease-success'),",
+    "  ]);",
+    "  const leaseCleanupAfterFinalize = await db.batch([",
+    "    db.prepare(cleanupUserHistorySql).bind(leaseRow.user_version, 100),",
+    "    db.prepare(cleanupXHistorySql).bind(leaseRow.x_version, 100),",
+    "  ]);",
+    "  const leaseHistoryAfterFinalize = (await all(db, historySql, [leaseRow.x_version, 'admin-1', leaseRow.user_version]))[0] ?? null;",
+    "  const leaseLifecycle = { currentCleanupChanges: leaseCurrentCleanup.map(r => Number(r.meta?.changes ?? 0)), acquireSuccess: leaseAcquireResults.every(r => r.success === true), acquiredVersionsMatch: Number(leaseRow.user_version) === Number(leaseCurrentVersions.user_version) && Number(leaseRow.x_version) === Number(leaseCurrentVersions.x_version), expiresAt: leaseRow.expires_at, admissionJson: leaseAdmissionJson, activeCleanupChanges: leaseCleanupWhileActive.map(r => Number(r.meta?.changes ?? 0)), historyWhileActive: !!leaseHistoryWhileActive, failedFinalize: leaseFailedFinalize, afterFailedFinalize: leaseAfterFailedFinalize, finalizeSuccess: leaseFinalizeResults.every(r => r.success === true), postFinalizeCleanupChanges: leaseCleanupAfterFinalize.map(r => Number(r.meta?.changes ?? 0)), historyAfterFinalizeJson: leaseHistoryAfterFinalize ? JSON.stringify(actorSnapshotFromRow(leaseHistoryAfterFinalize)) : null, leaseCount: Number((await all(db, 'SELECT COUNT(*) AS n FROM u04a_actor_history_leases WHERE id=?', ['lease-success']))[0].n), refCount: Number((await all(db, 'SELECT COUNT(*) AS n FROM u04a_actor_history_refs WHERE audit_id=?', ['lease-success']))[0].n), resource: await getResource() };",
+    "  await resetActor();",
+    "  const orphanAcquire = await db.batch([db.prepare(leaseAcquireSql).bind('lease-orphan', 'admin-1')]);",
+    "  const orphanLease = (await all(db, 'SELECT user_version, x_version, expires_at FROM u04a_actor_history_leases WHERE id=?', ['lease-orphan']))[0];",
+    "  await updateUser(['d-orphan', 'User after orphan', 'u04a-x', 'user-orphan']);",
+    "  await updateX(['X after orphan', 'https://i/orphan.png']);",
+    "  const orphanCleanup = await db.batch([",
+    "    db.prepare(cleanupUserHistorySql).bind(orphanLease.user_version, 100),",
+    "    db.prepare(cleanupXHistorySql).bind(orphanLease.x_version, 100),",
+    "  ]);",
+    "  const leaseOrphan = { acquireSuccess: orphanAcquire.every(r => r.success === true), expiresAt: orphanLease.expires_at, cleanupChanges: orphanCleanup.map(r => Number(r.meta?.changes ?? 0)), leaseCount: Number((await all(db, 'SELECT COUNT(*) AS n FROM u04a_actor_history_leases WHERE id=?', ['lease-orphan']))[0].n), refCount: Number((await all(db, 'SELECT COUNT(*) AS n FROM u04a_actor_history_refs WHERE audit_id=?', ['lease-orphan']))[0].n), historyAvailable: !!(await all(db, historySql, [orphanLease.x_version, 'admin-1', orphanLease.user_version]))[0] };",
+    "  await resetActor();",
+    "  const expiryAcquire = await db.batch([db.prepare(leaseAcquireExpiringSql).bind('lease-expired', 100, 'admin-1')]);",
+    "  const expiredLease = (await all(db, 'SELECT user_version, x_version, expires_at FROM u04a_actor_history_leases WHERE id=?', ['lease-expired']))[0];",
+    "  await updateUser(['d-expired', 'User after expired lease', 'u04a-x', 'user-expired']);",
+    "  await updateX(['X after expired lease', 'https://i/expired.png']);",
+    "  const expiryCleanup = await db.batch([",
+    "    db.prepare('DELETE FROM u04a_actor_history_leases WHERE expires_at IS NOT NULL AND expires_at <= ?').bind(100),",
+    "    db.prepare(cleanupUserHistorySql).bind(expiredLease.user_version, 100),",
+    "    db.prepare(cleanupXHistorySql).bind(expiredLease.x_version, 100),",
+    "  ]);",
+    "  const expiryFinalizeFailed = await batchFailed([",
+    "    db.prepare('UPDATE u04a_resource SET value=? WHERE id=?').bind('expired-lease-finalize', 'target'),",
+    "    db.prepare('INSERT INTO u04a_actor_history_refs (id, user_version, x_version) SELECT ?, user_version, x_version FROM u04a_actor_history_leases WHERE id=?').bind('lease-expired', 'lease-expired'),",
+    "    db.prepare('INSERT INTO u04a_forced_failure(value) SELECT CASE WHEN changes() = 0 THEN 0 ELSE 1 END'),",
+    "  ]);",
+    "  const leaseExpiry = { acquireSuccess: expiryAcquire.every(r => r.success === true), expiresAt: expiredLease.expires_at, cleanupChanges: expiryCleanup.map(r => Number(r.meta?.changes ?? 0)), leaseCount: Number((await all(db, 'SELECT COUNT(*) AS n FROM u04a_actor_history_leases WHERE id=?', ['lease-expired']))[0].n), historyAvailable: !!(await all(db, historySql, [expiredLease.x_version, 'admin-1', expiredLease.user_version]))[0], finalizeFailed: expiryFinalizeFailed, refCount: Number((await all(db, 'SELECT COUNT(*) AS n FROM u04a_actor_history_refs WHERE audit_id=?', ['lease-expired']))[0].n), resource: await getResource() };",
+    "  await resetActor();",
     "  await resetActor();",
     "  await resetActor();",
     "  const beforeRollback = await getVersions();",
@@ -373,7 +441,7 @@ test("U04a: local workerd/D1 preserves actor history and bounded reference-reade
     "  const missingFailed = await batchFailed([db.prepare(\"UPDATE OR IGNORE u04a_x_users SET x_name='after-missing' WHERE id='u04a-x'\")]);",
     "  const missing = { failed: missingFailed, versions: await getVersions(), name: (await all(db, sourceSql, ['admin-1']))[0]?.x_name, rows: (await all(db, 'SELECT n FROM u04a_actor_sequence')).length };",
     "  const allocator = { fractionalRejected, oldVersions, atMaxSeq, maxToken, allocatorOut, overflowBatch, missing };",
-    "return { cases: casesOut, blobCanonicalJson: blobCase?.sourceJson ?? null, blobJson1FixtureMatches, json1, json1Error, staleChanges, staleCount, rollbackFailed, rollbackCount, abandonedCount, successRef, fenceOut, positive, interleaving, interleavingFence, interleavingFailure, interleavingFailureFence, immutableHistory, immutableHistoryFailureOut, immutableHistoryLifecycle, cleanupRace: { noFk: cleanupNoFk, fk: cleanupFk }, reader, lateRollback, allocator };",
+    "return { cases: casesOut, blobCanonicalJson: blobCase?.sourceJson ?? null, blobJson1FixtureMatches, json1, json1Error, staleChanges, staleCount, rollbackFailed, rollbackCount, abandonedCount, successRef, fenceOut, positive, interleaving, interleavingFence, interleavingFailure, interleavingFailureFence, immutableHistory, immutableHistoryFailureOut, immutableHistoryLifecycle, cleanupRace: { noFk: cleanupNoFk, fk: cleanupFk }, reader, leaseLifecycle, leaseOrphan, leaseExpiry, lateRollback, allocator };",
     "}",
     "export default {",
     "  async fetch(request, env) {",
@@ -511,6 +579,27 @@ test("U04a: local workerd/D1 preserves actor history and bounded reference-reade
     assert.ok(body.reader.maxChunkBytes <= 48 * 1024, "each 12,000-code-point detail chunk must fit the 48 KiB payload budget");
     assert.equal(body.reader.chunkOffsetsValid, true);
     assert.equal(body.reader.reassembledJson, body.reader.admissionJson, "chunked detail must reassemble exact decoder-produced JSON without truncation");
+    assert.deepEqual(body.leaseLifecycle.currentCleanupChanges, [0, 0], "cleanup must retain each currently active actor version");
+    assert.equal(body.leaseLifecycle.acquireSuccess, true);
+    assert.equal(body.leaseLifecycle.acquiredVersionsMatch, true, "lease INSERT ... SELECT must atomically capture the current version pair");
+    assert.equal(body.leaseLifecycle.expiresAt, null, "no-expiry reservation is the only no-new-denial lease in this fixture");
+    assert.deepEqual(body.leaseLifecycle.activeCleanupChanges, [0, 0], "active reservation must protect both historical rows");
+    assert.equal(body.leaseLifecycle.historyWhileActive, true);
+    assert.equal(body.leaseLifecycle.failedFinalize, true);
+    assert.deepEqual(body.leaseLifecycle.afterFailedFinalize, { leaseCount: 1, refCount: 0, resource: "before", historyAvailable: true }, "failed final batch must roll back resource, ref and lease deletion together");
+    assert.equal(body.leaseLifecycle.finalizeSuccess, true);
+    assert.deepEqual(body.leaseLifecycle.postFinalizeCleanupChanges, [0, 0], "durable audit ref must protect history after the lease is consumed");
+    assert.equal(body.leaseLifecycle.historyAfterFinalizeJson, body.leaseLifecycle.admissionJson);
+    assert.deepEqual({ leaseCount: body.leaseLifecycle.leaseCount, refCount: body.leaseLifecycle.refCount, resource: body.leaseLifecycle.resource }, { leaseCount: 0, refCount: 1, resource: "lease-success" });
+    assert.deepEqual(body.leaseOrphan, { acquireSuccess: true, expiresAt: null, cleanupChanges: [0, 0], leaseCount: 1, refCount: 0, historyAvailable: true }, "a crashed request without an enforced expiry safely retains history but leaves an orphan lease");
+    assert.equal(body.leaseExpiry.acquireSuccess, true);
+    assert.equal(body.leaseExpiry.expiresAt, 100);
+    assert.deepEqual(body.leaseExpiry.cleanupChanges, [1, 1, 1], "expiry cleanup deletes the expired lease and unreferenced old versions");
+    assert.equal(body.leaseExpiry.leaseCount, 0);
+    assert.equal(body.leaseExpiry.historyAvailable, false);
+    assert.equal(body.leaseExpiry.finalizeFailed, true, "an expired in-flight request is denied after cleanup unless the host enforces a hard lifetime bound");
+    assert.equal(body.leaseExpiry.refCount, 0);
+    assert.equal(body.leaseExpiry.resource, "before", "expired lease finalization must roll back the resource mutation");
     const late = body.lateRollback;
     assert.equal(late.failed, true);
     assert.equal(late.snapshotCount, 0);
