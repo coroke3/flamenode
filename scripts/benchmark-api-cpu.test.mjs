@@ -8,7 +8,7 @@ import { DatabaseSync } from "node:sqlite";
 import { spawnSync } from "node:child_process";
 import { materializeD1CompatibleMigrations } from "./d1-migration-compat.mjs";
 import {
-  operationModeMirrorFixtureCases, buildOperationModeMirrorFixture, operationModeBannerReceiptMismatch, createOperationModeKvProbe, operationModeKvEvidenceMismatch,
+  operationModeMirrorFixtureCases, buildOperationModeMirrorFixture, operationModeBannerReceiptMismatch, createOperationModeKvProbe, operationModeKvEvidenceMismatch, collectOperationModeKvSamples, operationModeKvBaseline, summarizeOperationModeKvDiagnostic,
   BUDGETS_MS, KINDS, MIN_SAMPLES, QUIET_BASELINE_MAX_MS, ROUTE_INVENTORY, SEED, WARM_KINDS, aggregate, applyBudgetVerdicts, benchmarkRequestHeaders, benchmarkRequestEnv, enforceCpuMeasurementEnvironment, buildPendingScenarios, buildScenarios, createInprocTarget, createReplayTarget, createReplayInputScope, runCold, runScenario, validateCpuProfilerCalibration, eventExportCacheRequestUrls, judge, parseArgs, percentile, playlistResponseMismatch, templateResponseMismatch, renderMarkdown, returnedRows, replayIdentity, replayEvidenceMismatch, requireBenchmarkControl, snapshotReplayResult, snapshotReplayScript, summarize, workerSource,
 } from "./benchmark-api-cpu.mjs";
 
@@ -124,6 +124,96 @@ test("MIG-0639 / #918 native KV diagnostic transport: seed, exact read receipt, 
   const enabled = workerSource("kv", null, { operationModeKv: true });
   assert.match(enabled, /resetOperationModeCachesForTests/);
   assert.match(enabled, /nativeKvProbe\(request, env, ordinal,/);
+});
+
+test("MIG-0639 native KV CLI requires an explicit workload and native sim; default stays unchanged", () => {
+  assert.equal(parseArgs([]).operationModeKv, false);
+  const flags = ["--d1", "sim", "--operation-mode-kv", "plain-reason:65537"];
+  const o = parseArgs(flags);
+  assert.equal(o.operationModeKv, true);
+  assert.equal(o.operationModeKvCase, "plain-reason:65537");
+  for (const invalid of [["--operation-mode-kv", "canonical"], [...flags, "--only", "MIG-0661"],
+    [...flags, "--mode", "inproc"], [...flags, "--include-pending"], [...flags, "--operation-mode-kv", "canonical"],
+    [...flags, "--samples", "0"], [...flags, "--cold-samples", "0"],
+    ["--d1", "sim", "--operation-mode-kv", "unknown"]]) {
+    assert.throws(() => parseArgs(invalid), /KV diagnostic|operation-mode-kv/);
+  }
+});
+
+test("MIG-0639 native KV runner separates reset miss, warm hit, elapsed expiry and true cold; fails closed", async () => {
+  const fixture = buildOperationModeMirrorFixture("malformed-tail:65537");
+  const body = JSON.stringify(fixture.expected), sha = "a".repeat(64);
+  const opts = { samples: 2, warmup: 1, coldSamples: 2, skipCold: false };
+  function fake({ early = false, bad = null } = {}) {
+    let t = 0, build = 0, ordinal = 0, phase = 0, seeds = 0;
+    const make = kind => {
+      ordinal++;
+      const n = ordinal;
+      ordinal++;
+      t++;
+      const gets = kind === "hit" ? 0 : 1;
+      return { cpuMs: 1, status: 200, bytes: Buffer.byteLength(body), workerBuild: "b" + build, requestOrdinal: n,
+        nativeKv: { ordinal: n, d1: 0, kvGets: gets, kvPuts: 0, kvDeletes: 0, kvOther: 0, kvGetFailures: 0,
+          readBytes: gets ? fixture.bytes : null, readSha256: gets ? sha : null, body,
+          cacheControl: "no-store", contentType: "application/json" } };
+    };
+    const target = {
+      seedOperationModeKv: async (_fixture, { reset }) => { ordinal++; seeds++; if (reset) phase = 0; return { bytes: fixture.bytes, sha256: sha, reset }; },
+      run: async () => {
+        const kind = ["miss", "hit", "expiry"][phase++];
+        const result = make(kind);
+        if (bad === kind) result.nativeKv.readSha256 = "b".repeat(64);
+        return result;
+      },
+      runFirstRequest: async () => {
+        build++; ordinal = 0;
+        const result = make("miss");
+        return { ...result, coldGeneration: result.workerBuild, coldProcessId: build,
+          isFirstIsolateRequest: bad !== "cold" };
+      },
+    };
+    return { target, clock: () => t, pause: async ms => { t += early ? 100 : ms; }, seeds: () => seeds };
+  }
+  const m = fake();
+  const out = await collectOperationModeKvSamples(m.target, fixture, opts, m);
+  assert.equal(out.stopReason, null);
+  assert.deepEqual(out.samples.map(r => r.kind), ["miss","hit","expiry","miss","hit","expiry","cold","cold"]);
+  assert.ok(out.samples.every(r => !r.unexpected));
+  assert.equal(m.seeds(), 5);
+  assert.ok(out.samples.filter(r => r.kind === "expiry").every(r => r.elapsedMs >= 30000));
+  assert.ok(out.samples.filter(r => r.kind === "cold").every(r => r.isFirstIsolateRequest && r.requestOrdinal === 1));
+  for (const input of [{ bad: "miss" }, { bad: "hit" }, { bad: "expiry" }, { early: true }]) {
+    const f = fake(input), r = await collectOperationModeKvSamples(f.target, fixture, opts, f);
+    assert.equal(r.stopReason, "STOP_RECEIPT");
+    assert.equal(r.warmupFailures.length, 1);
+    assert.equal(r.samples.length, 0);
+  }
+  const f = fake({ bad: "cold" });
+  assert.equal((await collectOperationModeKvSamples(f.target, fixture, opts, f)).stopReason, "STOP_COLD");
+});
+
+test("MIG-0639 native KV diagnostic requires both quiet baselines, complete phases and cold provenance, never global acceptance", () => {
+  const base = Array.from({ length: 150 }, (_, i) => ({ kind: ["normal","limit","invalid"][i % 3], cpuMs: 1, status: 200, unexpected: false }));
+  const quiet = operationModeKvBaseline(base, 50, .1);
+  assert.equal(quiet.quiet, true);
+  assert.equal(operationModeKvBaseline(base, 50, 3).quiet, false);
+  assert.equal(operationModeKvBaseline(base.slice(1), 50, .1).quiet, false);
+  const samples = Array.from({ length: 200 }, (_, i) => ({ kind: ["miss","hit","expiry","cold"][i % 4],
+    cpuMs: 2, bytes: 31, kvGets: i % 4 === 1 ? 0 : 1, unexpected: false, isFirstIsolateRequest: i % 4 === 3 }));
+  const collected = { samples, warmupFailures: [], stopReason: null };
+  const opts = { samples: 50, warmup: 10, coldSamples: 50, skipCold: false };
+  const result = (c = collected, pre = quiet, post = quiet, o = opts, res = .1, platform = "linux") =>
+    summarizeOperationModeKvDiagnostic(c, pre, post, o, res, platform);
+  assert.equal(result().verdict, "LOCAL_DIAGNOSTIC_WITHIN_S2");
+  assert.equal(result().migrationAcceptance, false);
+  assert.equal(result().productionAcceptance, false);
+  assert.equal(result(collected, quiet, { quiet: false }).verdict, "STOP_BASELINE");
+  assert.equal(result(collected, quiet, quiet, opts, 5).verdict, "LOCAL_DIAGNOSTIC_NOT_WITHIN_S2");
+  assert.equal(result(collected, quiet, quiet, { ...opts, warmup: 9 }).verdict, "STOP_SAMPLES");
+  assert.equal(result(collected, quiet, quiet, { ...opts, skipCold: true }).verdict, "STOP_COLD");
+  assert.equal(result({ ...collected, samples: samples.slice(0, -1) }).verdict, "STOP_COLD");
+  assert.equal(result({ ...collected, samples: samples.slice(1) }).verdict, "STOP_SAMPLES");
+  assert.equal(result(collected, quiet, quiet, opts, .1, "win32").verdict, "STOP_PLATFORM");
 });
 
 test("D1 returned-row proxy counts first/all/raw/batch and preserves per-query sample evidence", () => {

@@ -397,7 +397,7 @@ export function enforceCpuMeasurementEnvironment(results, {
 export function parseArgs(argv) {
   const out = {
     mode: "wrangler", samples: MIN_SAMPLES, coldSamples: MIN_SAMPLES, warmup: 10,
-    port: 8788, inspectorPort: 9239, d1: "replay", samplingUs: 100, only: null, out: null, dryRun: false, skipCold: false, includePending: false,
+    port: 8788, inspectorPort: 9239, d1: "replay", samplingUs: 100, only: null, out: null, dryRun: false, skipCold: false, includePending: false, operationModeKvCase: null, operationModeKv: false,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
@@ -420,12 +420,24 @@ export function parseArgs(argv) {
     else if (a === "--dry-run") out.dryRun = true;
     else if (a === "--skip-cold") out.skipCold = true;
     else if (a === "--include-pending") out.includePending = true;
+    else if (a === "--operation-mode-kv") {
+      if (out.operationModeKv) throw new Error("--operation-mode-kv requires exactly one workload per invocation");
+      out.operationModeKvCase = next();
+      out.operationModeKv = true;
+    }
     else throw new Error(`Unsupported argument: ${a}`);
   }
   if (!["replay", "sim"].includes(out.d1)) throw new Error("--d1 must be replay|sim");
   if (!["wrangler", "inproc"].includes(out.mode)) throw new Error(`--mode must be wrangler|inproc`);
   for (const k of ["samples", "coldSamples", "warmup", "port", "inspectorPort", "samplingUs"]) {
     if (!Number.isInteger(out[k]) || out[k] < 0) throw new Error(`--${k} must be a non-negative integer`);
+  }
+  if (out.operationModeKv) {
+    if (!operationModeMirrorFixtureCases().includes(out.operationModeKvCase)) throw new Error("unknown --operation-mode-kv workload");
+    if (out.mode !== "wrangler" || out.d1 !== "sim" || out.only !== null || out.includePending) {
+      throw new Error("--operation-mode-kv requires --mode wrangler --d1 sim and cannot combine with --only or --include-pending");
+    }
+    if (out.samples < 1 || (!out.skipCold && out.coldSamples < 1)) throw new Error("KV diagnostic requires nonzero samples");
   }
   return out;
 }
@@ -2555,7 +2567,7 @@ async function createWranglerTarget(plan, opts) {
     const rows = (res.headers.get("x-bench-query-rows") || "").split(",").filter(Boolean).map(Number);
     return {
       status: res.status, bytes: buf.byteLength,
-      ...(nativeKv ? { nativeKv } : {}),
+      ...(nativeKv ? { nativeKv, workerBuild: res.headers.get("x-bench-build") } : {}),
       d1,
       d1RowsReturned: res.headers.has("x-bench-returned-rows")
         ? Number(res.headers.get("x-bench-returned-rows")) : null,
@@ -2784,9 +2796,145 @@ export function createReplayTarget(inproc, wr) {
   };
 }
 
+export async function collectOperationModeKvSamples(target, fixture, opts, { clock = () => performance.now(), pause = ms => new Promise(resolve => setTimeout(resolve, ms)) } = {}) {
+  const spec = { method: "GET", path: "/api/operation-mode/banner", expect: [200], operationModeKv: true };
+  const samples = [], warmupFailures = [], generations = new Set();
+  const makeSample = (kind, result, seed, provenance, elapsedMs = null) => {
+    const e = result?.nativeKv;
+    const phase = kind === "cold" ? "miss" : kind;
+    const unexpected = !provenance || !Number.isFinite(result?.cpuMs) || result.cpuMs < 0
+      || operationModeBannerReceiptMismatch(fixture, { ...e, status: result?.status, bytes: result?.bytes }, phase)
+      || operationModeKvEvidenceMismatch(fixture, seed, e, result?.requestOrdinal, phase);
+    return { kind, cpuMs: result?.cpuMs ?? null, status: result?.status ?? null, bytes: result?.bytes ?? null,
+      d1: e?.d1 ?? null, kvGets: e?.kvGets ?? null, kvPuts: e?.kvPuts ?? null, kvDeletes: e?.kvDeletes ?? null,
+      kvOther: e?.kvOther ?? null, kvGetFailures: e?.kvGetFailures ?? null,
+      readBytes: e?.readBytes ?? null, readSha256: e?.readSha256 ?? null,
+      workerBuild: result?.workerBuild ?? null, requestOrdinal: result?.requestOrdinal ?? null,
+      coldProcessId: result?.coldProcessId ?? null, isFirstIsolateRequest: kind === "cold" && provenance,
+      elapsedMs, unexpected };
+  };
+  const buildValid = r => typeof r?.workerBuild === "string" && r.workerBuild.length > 0;
+  const follows = (prev, next) => buildValid(prev) && next?.workerBuild === prev.workerBuild
+    && next.requestOrdinal === prev.requestOrdinal + 2;
+  const finish = stopReason => ({ samples, warmupFailures, stopReason });
+  const accept = (sample, warmup) => {
+    if (!warmup) samples.push(sample);
+    else if (sample.unexpected) warmupFailures.push(sample);
+    return !sample.unexpected;
+  };
+  let lastWarmBuild = null;
+  for (let i = 0; i < opts.warmup + opts.samples; i++) {
+    const warmup = i < opts.warmup;
+    const seed = await target.seedOperationModeKv(fixture, { reset: true });
+    const start = clock();
+    const miss = await target.run(spec);
+    const missComplete = clock();
+    lastWarmBuild = miss.workerBuild;
+    if (!accept(makeSample("miss", miss, seed, buildValid(miss)), warmup)) return finish("STOP_RECEIPT");
+    const hit = await target.run(spec);
+    const hitElapsed = clock() - start;
+    if (!accept(makeSample("hit", hit, seed, follows(miss, hit) && Number.isFinite(hitElapsed) && hitElapsed >= 0 && hitElapsed < 30_000, hitElapsed), warmup)) return finish("STOP_RECEIPT");
+    // No reset, seed or reload between hit and expiry. Wait real elapsed time;
+    // an early timer, restart or hidden request cannot count as expiry.
+    await pause(31_000);
+    const elapsed = clock() - missComplete;
+    const expired = await target.run(spec);
+    if (!accept(makeSample("expiry", expired, seed, follows(hit, expired) && Number.isFinite(elapsed) && elapsed >= 30_000, elapsed), warmup)) return finish("STOP_RECEIPT");
+  }
+  if (!opts.skipCold) {
+    for (let i = 0; i < opts.coldSamples; i++) {
+      const seed = await target.seedOperationModeKv(fixture, { reset: false });
+      const result = await target.runFirstRequest(spec, null);
+      const fresh = buildValid(result) && result.workerBuild !== lastWarmBuild
+        && result.coldGeneration === result.workerBuild && !generations.has(result.workerBuild)
+        && result.isFirstIsolateRequest === true && result.requestOrdinal === 1
+        && Number.isSafeInteger(result.coldProcessId) && result.coldProcessId > 0;
+      if (fresh) generations.add(result.workerBuild);
+      if (!accept(makeSample("cold", result, seed, fresh), false)) return finish("STOP_COLD");
+    }
+  }
+  return finish(null);
+}
+
+export function operationModeKvBaseline(samples, expected, resolutionMs) {
+  const kinds = {};
+  for (const kind of ["normal", "limit", "invalid"]) {
+    const rows = samples.filter(r => r.kind === kind);
+    kinds[kind] = { ...summarize(rows.map(r => r.cpuMs)), count: rows.length,
+      unexpected: rows.filter(r => r.unexpected !== false || r.status !== 200).length };
+  }
+  const valid = Object.values(kinds).every(r => r.count === expected && r.n === expected && r.unexpected === 0);
+  const max = valid && expected > 0 ? Math.max(...Object.values(kinds).map(r => r.max)) : null;
+  const upper = max !== null && Number.isFinite(resolutionMs) && resolutionMs >= 0 ? max + resolutionMs : null;
+  return { kinds, max, upper, quiet: upper !== null && upper < QUIET_BASELINE_MAX_MS };
+}
+
+export function summarizeOperationModeKvDiagnostic(collected, pre, post, opts, resolutionMs, platform) {
+  const phases = ["miss", "hit", "expiry", "cold"];
+  const kinds = Object.fromEntries(phases.map(kind => {
+    const rows = collected.samples.filter(s => s.kind === kind);
+    return [kind, { ...summarize(rows.map(s => s.cpuMs)), count: rows.length,
+      unexpected: rows.filter(s => s.unexpected !== false).length,
+      verifiedStarts: rows.filter(s => s.isFirstIsolateRequest === true).length,
+      maxResponseBytes: rows.length ? Math.max(...rows.map(s => s.bytes ?? 0)) : null,
+      maxKvGets: rows.length ? Math.max(...rows.map(s => s.kvGets ?? 0)) : null }];
+  }));
+  const warm = phases.slice(0, 3).map(p => kinds[p]);
+  const warmMax = warm.every(k => k.max !== null) ? Math.max(...warm.map(k => k.max)) : null;
+  const upper = warmMax !== null && Number.isFinite(resolutionMs) && resolutionMs >= 0 ? warmMax + resolutionMs : null;
+  let verdict = collected.stopReason;
+  if (!verdict && (!pre?.quiet || !post?.quiet)) verdict = "STOP_BASELINE";
+  if (!verdict && platform !== "linux") verdict = "STOP_PLATFORM";
+  if (!verdict && (opts.samples < MIN_SAMPLES || opts.warmup < 10 || !warm.every(k => k.count === opts.samples && k.n === opts.samples && k.unexpected === 0))) verdict = "STOP_SAMPLES";
+  if (!verdict && (opts.skipCold || opts.coldSamples < MIN_SAMPLES || kinds.cold.count !== opts.coldSamples || kinds.cold.n !== opts.coldSamples || kinds.cold.verifiedStarts !== opts.coldSamples || kinds.cold.unexpected !== 0)) verdict = "STOP_COLD";
+  if (!verdict && collected.warmupFailures.length) verdict = "STOP_RECEIPT";
+  if (!verdict) verdict = upper !== null && upper < 7 ? "LOCAL_DIAGNOSTIC_WITHIN_S2" : "LOCAL_DIAGNOSTIC_NOT_WITHIN_S2";
+  return { kinds, warmMax, upper, verdict, migrationAcceptance: false, productionAcceptance: false };
+}
+
+async function runOperationModeKvCli(plan, opts) {
+  const fixture = buildOperationModeMirrorFixture(opts.operationModeKvCase);
+  const label = "LOCAL NATIVE KV DIAGNOSTIC ONLY — NOT MIG-0639 / PRODUCTION ACCEPTANCE";
+  const workload = { id: fixture.id, bytes: fixture.bytes, sha256: createHash("sha256").update(fixture.raw, "utf8").digest("hex") };
+  if (opts.dryRun) {
+    console.log(JSON.stringify({ label, dryRun: true, workload, samplesPerPhase: opts.samples, warmups: opts.warmup,
+      coldSamples: opts.skipCold ? 0 : opts.coldSamples, expiryWaitMs: 31000 }, null, 2));
+    return;
+  }
+  const target = await createWranglerTarget(plan, opts);
+  const baseline = buildScenarios(plan).find(s => s.id === "BASELINE");
+  const state = { tagSeq: 0 };
+  let pre = null, post = null;
+  let collected = { samples: [], warmupFailures: [], stopReason: null };
+  let preRows = [], postRows = [];
+  try {
+    preRows = await runScenario(target, baseline, opts, state);
+    pre = operationModeKvBaseline(preRows, opts.samples, target.resolutionMs);
+    if (!pre.quiet) collected.stopReason = "STOP_BASELINE";
+    else {
+      collected = await collectOperationModeKvSamples(target, fixture, opts);
+      postRows = await runScenario(target, baseline, opts, state);
+      // Final observed profiler resolution applies to BOTH baselines.
+      pre = operationModeKvBaseline(preRows, opts.samples, target.resolutionMs);
+      post = operationModeKvBaseline(postRows, opts.samples, target.resolutionMs);
+    }
+  } finally { await target.close(); }
+  const summary = summarizeOperationModeKvDiagnostic(collected, pre, post, opts, target.resolutionMs, process.platform);
+  const report = { meta: { label, workload, commit: spawnSync("git", ["rev-parse", "HEAD"], { cwd: REPO_ROOT, encoding: "utf8" }).stdout.trim(),
+    platform: process.platform, node: process.version, wrangler: target.toolVersions?.() ?? null, cpuSource: target.cpuSource,
+    resolutionMs: target.resolutionMs, calibration: target.calibration, samplesPerPhase: opts.samples,
+    warmupDiscarded: opts.warmup, coldSamplesRequested: opts.skipCold ? 0 : opts.coldSamples,
+    expiryWaitMs: 31000, localNativeKv: true, migrationAcceptance: false, productionAcceptance: false },
+    baseline: { pre, post }, summary, ...collected };
+  console.log(JSON.stringify(report, null, 2));
+  if (opts.out) fs.writeFileSync(opts.out, JSON.stringify(report, null, 2));
+  if (summary.verdict !== "LOCAL_DIAGNOSTIC_WITHIN_S2") process.exitCode = 2;
+}
+
 export async function main(argv) {
   const opts = parseArgs(argv);
   const plan = { adminToken: `bench-${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}` };
+  if (opts.operationModeKv) return runOperationModeKvCli(plan, opts);
   const scenarios = buildScenarios(plan, { includePending: opts.includePending,
     includeEventPlaylist: opts.only?.includes("RH-031-PLAYLIST") === true,
   }).filter((s) => !opts.only || opts.only.includes(s.id) || s.id === "BASELINE");
