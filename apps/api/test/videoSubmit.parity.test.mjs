@@ -1460,6 +1460,8 @@ test("U03a SA-088: multi-event stage/general policy receipt is one read and matc
       await import("../../../src/lib/video/submissionValidation.ts");
     const { fetchActiveCustomQuestionsForEvents } =
       await import("../../../src/lib/video/customQuestionAnswers.ts");
+    const { mutateWithAudit } = await import("@flamenode/server-core/audit/mutate");
+    const { sql } = await import("drizzle-orm");
     const eventIds = ["ev_open", "ev_closed"];
     const w = seedWorld();
     try {
@@ -1491,10 +1493,16 @@ test("U03a SA-088: multi-event stage/general policy receipt is one read and matc
         is_active: 0, sort_order: 2,
       });
 
+      insert(w.sqlite, "videos", {
+        id: "v_policy_multi", creator_x_user_id: "x_owner",
+        submitted_by_user_id: "u_owner", creator_display_name: "Owner",
+        title: "Before", visibility_status: "pending",
+        created_at: 100, updated_at: 100,
+      });
       const db = drizzle(w.d1);
       const readsBefore = w.d1.stats.reads;
       const receipt = await readSlotSubmissionVideoEventReceipt(
-        db, { event_id: "ev_open", video_id: null }, null, eventIds,
+        db, { event_id: "ev_open", video_id: "v_policy_multi" }, null, eventIds,
       );
       assert.equal(w.d1.stats.reads - readsBefore, 1);
       assert.deepEqual(receipt.events.map((event) => event.id), eventIds);
@@ -1536,7 +1544,7 @@ test("U03a SA-088: multi-event stage/general policy receipt is one read and matc
       const validated = validateSlotSubmissionPolicies(
         receipt,
         formData,
-        { display_name: "Owner", title: "Title" },
+        { display_name: "Owner", title: "Title", music: "Music" },
         "First",
         null,
       );
@@ -1549,7 +1557,21 @@ test("U03a SA-088: multi-event stage/general policy receipt is one read and matc
 
       const assertions = buildSlotSubmissionQuestionPolicyAssertions(receipt);
       assert.equal(assertions.length, 2);
-      assert.equal(w.d1.stats.batches, 0);
+      const video = { ...w.sqlite.prepare("SELECT * FROM videos WHERE id='v_policy_multi'").get() };
+      const auditIds = await mutateWithAudit(db, {
+        preMutationAssertions: assertions.map((condition) => db.run(condition)),
+        mutationStatements: [db.run(sql`UPDATE videos SET title='After' WHERE id='v_policy_multi'`)],
+        expectedMutationChanges: [1],
+        audits: [{
+          table_name: "videos", target_id: "v_policy_multi", operation: "UPDATE",
+          before: video, after: { ...video, title: "After" }, actor_user_id: "u_owner",
+          context: "video-save:submit-slot", retention_class: "normal", strict: true,
+        }],
+        callerQueryCount: 1,
+      });
+      assert.equal(auditIds.length, 1);
+      assert.equal(w.sqlite.prepare("SELECT title FROM videos WHERE id='v_policy_multi'").get().title, "After");
+      assert.equal(w.d1.stats.batches, 1);
     } finally {
       w.sqlite.close();
     }
