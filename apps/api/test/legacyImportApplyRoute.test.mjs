@@ -32,7 +32,10 @@ import {
   eventReleaseObjectKey,
 } from "@flamenode/server-core/publicData/eventDetailCore";
 import { legacyImportD1ApplyStep } from "../src/routes/admin/legacyImportD1ApplyAdapter.ts";
-import { projectLegacyVideoCreate } from "@flamenode/server-core/legacyImport/d1Apply";
+import {
+  projectLegacyVideoCreate,
+  readLegacyVideoReplacementSnapshot,
+} from "@flamenode/server-core/legacyImport/d1Apply";
 import { createAdminD1, seedBase, seedEvent } from "./helpers/sqliteD1.mjs";
 
 const SITE = "https://app.flamenode.example";
@@ -1339,8 +1342,12 @@ test("MIG-0645 U02al Hono: new video rows, provenance, queue and receipt are ato
   const { bucket } = previewBucket({ failCompleteOnce: true });
   const wakes = [];
   let race = false;
+  let serverDb;
   const { request, sqlite, stats } = setup({
-    bucket, applyStep: legacyImportD1ApplyStep,
+    bucket, applyStep: (input) => {
+      serverDb = input.db;
+      return legacyImportD1ApplyStep(input);
+    },
     bindings: {
       QUEUE_DISPATCH_ENABLED: "1", QUEUE_YOUTUBE_SYNC_ENABLED: "1",
       STATIC_REBUILD_WAKE_QUEUE: { send: async (message) => { wakes.push(message); } },
@@ -1433,6 +1440,66 @@ test("MIG-0645 U02al Hono: new video rows, provenance, queue and receipt are ato
     assert.equal((await replay.json()).result.created.videos, 1);
     assert.equal(stats.batches, batchesBefore + 1);
     assert.equal(wakes.length, wakesBefore + 2);
+
+    // U02am: exact CURRENT proof from the actual persisted rows, not just
+    // the input projection. Read-only until replacement/CAS is implemented.
+    assert.ok(serverDb);
+    const snapshotReads = stats.reads;
+    const snapshotBatches = stats.batches;
+    const snapshot = await readLegacyVideoReplacementSnapshot(serverDb, video.id);
+    assert.equal(stats.reads - snapshotReads, 1);
+    assert.equal(stats.batches, snapshotBatches);
+    assert.deepEqual(snapshot.proof, proof);
+    assert.equal(snapshot.raw.video.length, 1);
+    assert.equal(snapshot.raw.proof.length, 1);
+    assert.equal(snapshot.beforeAnswers.length, 1);
+    assert.equal(snapshot.beforeMetadata.length, 1);
+    await assert.rejects(readLegacyVideoReplacementSnapshot(serverDb, "missing-video"));
+
+    // Change one field in each of the seven independently hashed projections.
+    // Restore each value before checking the next projection.
+    const drifts = [
+      ["videos", "title", "Changed", "New video", "id"],
+      ["video_events", "event_id", "ev-other", "ev-1", "video_id"],
+      ["video_members", "name", "Changed member", "Creator", "video_id"],
+      ["video_chapters", "chapter_label", "Changed chapter", "Intro", "video_id"],
+      ["video_softwares", "raw_label", "Changed software", "Test Software", "video_id"],
+      ["video_youtube_metadata", "sync_status", "synced", "pending", "video_id"],
+      ["video_custom_answers", "answer_text", "Changed answer", "Answer", "video_id"],
+    ];
+    for (const [table, field, changed, original, key] of drifts) {
+      const update = sqlite.prepare("UPDATE " + table + " SET " + field + " = ? WHERE " + key + " = ?");
+      update.run(changed, video.id);
+      await assert.rejects(readLegacyVideoReplacementSnapshot(serverDb, video.id));
+      update.run(original, video.id);
+    }
+    // Unmanaged counters may drift, but the raw full-row snapshot must
+    // retain them for the later transaction-time CAS.
+    sqlite.prepare("UPDATE videos SET app_like_count = 7 WHERE id = ?").run(video.id);
+    const unmanaged = await readLegacyVideoReplacementSnapshot(serverDb, video.id);
+    assert.deepEqual(unmanaged.proof, proof);
+    assert.equal(unmanaged.video.app_like_count, 7);
+    assert.notEqual(unmanaged.raw.video[0], snapshot.raw.video[0]);
+    sqlite.prepare("UPDATE videos SET app_like_count = 0 WHERE id = ?").run(video.id);
+    sqlite.prepare("UPDATE videos SET submitted_by_user_id = ? WHERE id = ?").run(ADMIN.id, video.id);
+    await assert.rejects(readLegacyVideoReplacementSnapshot(serverDb, video.id));
+    sqlite.prepare("UPDATE videos SET submitted_by_user_id = ? WHERE id = ?").run("system_legacy_import", video.id);
+    sqlite.prepare("UPDATE videos SET title = ? WHERE id = ?").run("x".repeat(128 * 1024), video.id);
+    await assert.rejects(readLegacyVideoReplacementSnapshot(serverDb, video.id));
+    sqlite.prepare("UPDATE videos SET title = ? WHERE id = ?").run("New video", video.id);
+
+    // Same-timestamp latest provenance must be unique. Clone the actual
+    // test-table audit entry (all its required columns), changing only id.
+    const auditColumns = sqlite.prepare("PRAGMA table_info(audit_logs)").all().map((column) => column.name);
+    const quote = (name) => '"' + name.replaceAll('"', '""') + '"';
+    sqlite.prepare("INSERT INTO audit_logs (" + auditColumns.map(quote).join(", ") + ") SELECT " +
+      auditColumns.map((column) => column === "id" ? "?" : quote(column)).join(", ") +
+      " FROM audit_logs WHERE id = ?").run("competing-video-proof", snapshot.audit.id);
+    await assert.rejects(readLegacyVideoReplacementSnapshot(serverDb, video.id));
+    sqlite.prepare("DELETE FROM audit_logs WHERE id = ?").run("competing-video-proof");
+    assert.deepEqual((await readLegacyVideoReplacementSnapshot(serverDb, video.id)).proof, proof);
+    assert.equal(stats.batches, snapshotBatches, "proof checks never execute a D1 write batch");
+    assert.equal(wakes.length, wakesBefore + 2, "proof checks never send queue wakes");
 
     const replacement = await createApplyCredential(bucket, ADMIN.id, plan, "replace_imported");
     await reachQuestionStage(request, replacement.form);

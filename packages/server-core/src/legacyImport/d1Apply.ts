@@ -1,5 +1,8 @@
 import { getTableColumns, sql } from "drizzle-orm";
-import { events, eventStaff, eventCustomQuestions } from "@flamenode/db/schema";
+import {
+  events, eventStaff, eventCustomQuestions, videos, videoEvents, videoMembers,
+  videoChapters, videoSoftwares, videoYoutubeMetadata, videoCustomAnswers,
+} from "@flamenode/db/schema";
 import {
   isValidPreloadedActorSnapshotJson,
   isValidPreloadedAuditSettings,
@@ -480,6 +483,146 @@ export async function projectLegacyVideoCreate(input: {
       chapters_digest, softwares_digest, metadata_digest, custom_answers_digest,
     },
     youtubeWakeRequired: !!video.youtube_video_id,
+  };
+}
+
+/**
+ * U02am: read-only provenance check for an existing imported video.
+ * Retain raw SQL JSON as the future same-batch full-row CAS input, but hash
+ * CURRENT's managed projection and ordered related-row JSON objects. All
+ * identifiers below are static schema metadata. No caller-controlled SQL.
+ */
+export async function readLegacyVideoReplacementSnapshot(db: ServerCoreDb, videoId: string) {
+  const targetId = entitySnapshotTargetId("video", videoId);
+  const sets = [
+    { kind: "video", table: "videos", columns: getTableColumns(videos), lookup: "id", sort1: "id", sort2: null, cap: 1 },
+    { kind: "events", table: "video_events", columns: getTableColumns(videoEvents), lookup: "video_id", sort1: "event_id", sort2: null, cap: MAX_LEGACY_VIDEO_EVENTS_PER_VIDEO },
+    { kind: "members", table: "video_members", columns: getTableColumns(videoMembers), lookup: "video_id", sort1: "id", sort2: null, cap: MAX_LEGACY_VIDEO_MEMBERS_PER_VIDEO },
+    { kind: "chapters", table: "video_chapters", columns: getTableColumns(videoChapters), lookup: "video_id", sort1: "id", sort2: null, cap: MAX_LEGACY_VIDEO_CHAPTERS_PER_VIDEO },
+    { kind: "softwares", table: "video_softwares", columns: getTableColumns(videoSoftwares), lookup: "video_id", sort1: "software_id", sort2: null, cap: MAX_LEGACY_VIDEO_SOFTWARES_PER_VIDEO },
+    { kind: "metadata", table: "video_youtube_metadata", columns: getTableColumns(videoYoutubeMetadata), lookup: "video_id", sort1: "video_id", sort2: null, cap: 1 },
+    { kind: "answers", table: "video_custom_answers", columns: getTableColumns(videoCustomAnswers), lookup: "video_id", sort1: "event_id", sort2: "question_id", cap: MAX_LEGACY_CUSTOM_ANSWERS_PER_VIDEO },
+  ] as const;
+  // ORDER BY uses SQLite BINARY ordering, the same as CURRENT's support read.
+  // Every table has its own cap+1 sentinel. The global byte cap also covers
+  // the proof and unmanaged video columns used by the later CAS.
+  const sources = sets.map((set) => sql`
+    SELECT * FROM (
+      SELECT ${set.kind} AS kind,
+        ${canonicalRowJson(set.columns, set.table)} AS payload,
+        ${sql.raw(set.sort1)} AS sort1,
+        ${set.sort2 ? sql.raw(set.sort2) : sql`''`} AS sort2
+      FROM ${sql.raw(set.table)}
+      WHERE ${sql.raw(set.lookup)} = ${videoId}
+      ORDER BY sort1, sort2
+      LIMIT ${set.cap + 1}
+    )
+  `);
+  const proofSource = sql`
+    SELECT * FROM (
+      SELECT 'proof' AS kind,
+        json_object('id', id, 'target_id', target_id, 'context', context,
+          'after_json', after_json, 'created_at', created_at) AS payload,
+        id AS sort1, '' AS sort2
+      FROM audit_logs
+      WHERE table_name = ${ENTITY_SNAPSHOT_AUDIT_TABLE}
+        AND target_id = ${targetId}
+        AND context = ${ENTITY_SNAPSHOT_AUDIT_CONTEXT}
+        AND created_at = (
+          SELECT MAX(created_at) FROM audit_logs
+          WHERE table_name = ${ENTITY_SNAPSHOT_AUDIT_TABLE}
+            AND target_id = ${targetId}
+            AND context = ${ENTITY_SNAPSHOT_AUDIT_CONTEXT}
+        )
+      ORDER BY id
+      LIMIT 2
+    )
+  `;
+  const readRows = await db.all(sql`
+    WITH snapshot AS (
+      ${sql.join([...sources, proofSource], sql` UNION ALL `)}
+    )
+    SELECT kind,
+      CASE WHEN SUM(length(CAST(payload AS BLOB))) OVER () <= ${MAX_LEGACY_IMPORT_STEP_BYTES}
+        THEN payload ELSE NULL END AS payload
+    FROM snapshot
+    ORDER BY kind, sort1, sort2
+  `) as unknown as ReadRow[];
+
+  const error = "旧形式インポートの作品置換snapshotを確認できません。";
+  const proofRows = readRows.filter((row) => row.kind === "proof");
+  const knownKinds = new Set<string>(["proof", ...sets.map((set) => set.kind)]);
+  if (readRows.some((row) => !knownKinds.has(row.kind) || typeof row.payload !== "string") ||
+      proofRows.length !== 1 ||
+      sets.some((set) => readRows.filter((row) => row.kind === set.kind).length > set.cap)) {
+    return fixedFailure(error);
+  }
+  // Reject inconsistent or oversized provider payloads as well as SQL overflow.
+  if (new TextEncoder().encode(JSON.stringify(readRows)).byteLength > MAX_LEGACY_IMPORT_STEP_BYTES) {
+    return fixedFailure(error);
+  }
+  const payloads = (kind: string) => readRows.filter((row) => row.kind === kind)
+    .map((row) => row.payload as string);
+  const records = (kind: string) => payloads(kind).map((payload) => parseJsonRecord(payload, error));
+  const videoRows = records("video");
+  if (videoRows.length !== 1 || videoRows[0].id !== videoId ||
+      videoRows[0].submitted_by_user_id !== SYSTEM_USER_ID ||
+      !Number.isSafeInteger(videoRows[0].created_at) ||
+      (videoRows[0].visibility_status !== "private" && videoRows[0].visibility_status !== "public")) {
+    return fixedFailure(error);
+  }
+  const video = videoRows[0];
+  const beforeEvents = records("events");
+  const beforeMembers = records("members");
+  const beforeChapters = records("chapters");
+  const beforeSoftwares = records("softwares");
+  const beforeMetadata = records("metadata");
+  const beforeAnswers = records("answers");
+  const unique = (rows: Record<string, unknown>[], keys: string[]) =>
+    rows.every((row) => row.video_id === videoId && keys.every((key) => typeof row[key] === "string")) &&
+    new Set(rows.map((row) => JSON.stringify(keys.map((key) => row[key])))).size === rows.length;
+  if (!unique(beforeEvents, ["event_id"]) || !unique(beforeMembers, ["id"]) ||
+      !unique(beforeChapters, ["id"]) || !unique(beforeSoftwares, ["software_id"]) ||
+      !unique(beforeMetadata, ["video_id"]) || !unique(beforeAnswers, ["event_id", "question_id"])) {
+    return fixedFailure(error);
+  }
+  // This field order is exactly CURRENT managedVideoSnapshot.
+  const managedKeys = [
+    "id", "primary_event_id", "creator_x_user_id", "submitted_by_user_id",
+    "collaboration_type", "part", "source_type", "creator_display_name",
+    "creator_display_name_yomi", "creator_icon_url", "creator_youtube_channel_url",
+    "creator_profile_text", "creator_other_social_links", "title", "music", "credit",
+    "music_reference_url", "closing_comment", "youtube_video_id", "intro_comment",
+    "highlights", "production_story", "visibility_status", "scheduling_type",
+    "scheduled_time", "created_at",
+  ];
+  if (managedKeys.some((key) => !Object.prototype.hasOwnProperty.call(video, key))) {
+    return fixedFailure(error);
+  }
+  const managed = Object.fromEntries(managedKeys.map((key) => [key, video[key]]));
+  const audit = parseJsonRecord(proofRows[0].payload, error);
+  if (typeof audit.id !== "string" || audit.target_id !== targetId ||
+      audit.context !== ENTITY_SNAPSHOT_AUDIT_CONTEXT ||
+      typeof audit.after_json !== "string" || !Number.isSafeInteger(audit.created_at)) {
+    return fixedFailure(error);
+  }
+  const proof = parseJsonRecord(audit.after_json, error);
+  const [managed_digest, events_digest, members_digest, chapters_digest,
+    softwares_digest, metadata_digest, custom_answers_digest] = await Promise.all([
+    managed, beforeEvents, beforeMembers, beforeChapters, beforeSoftwares, beforeMetadata, beforeAnswers,
+  ].map(snapshotDigest));
+  const expected = {
+    entity_kind: "video", managed_digest, events_digest, members_digest, chapters_digest,
+    softwares_digest, metadata_digest, custom_answers_digest,
+  };
+  if (Object.entries(expected).some(([key, value]) => proof[key] !== value)) {
+    return fixedFailure("旧形式インポートの作品の最新状態が監査snapshotと一致しません。");
+  }
+  return {
+    video, beforeEvents, beforeMembers, beforeChapters, beforeSoftwares, beforeMetadata, beforeAnswers,
+    audit, proof: expected,
+    // Preserve unmodified payloads for a later transaction-time CAS.
+    raw: Object.fromEntries([...sets.map((set) => set.kind), "proof"].map((kind) => [kind, payloads(kind)])),
   };
 }
 
