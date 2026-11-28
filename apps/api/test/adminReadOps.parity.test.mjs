@@ -947,6 +947,43 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.deepEqual(idle.body, { status: "warn", ran: false, results: [], error: null });
     assert.equal(idle.stats.statements, 1, "no run -> no query");
 
+    // Next receives repeated searchParams as arrays, not scalar opt-ins.
+    for (const [query, expectedStatus, expectedRun] of [
+      ["", "all", false],
+      ["run=1&run=1", "all", false],
+      ["run=1&run=0", "all", false],
+      ["run=0&run=1", "all", false],
+      ["run=1&run=", "all", false],
+      ["run=&run=1", "all", false],
+      ["run=1&%72un=1", "all", false],
+      ["run=01", "all", false],
+      ["run=true", "all", false],
+      ["run=", "all", false],
+      ["status=warn&status=warn", "all", false],
+      ["status=warn&status=ok", "all", false],
+      ["status=ok&status=warn&run=1", "all", true],
+      ["status=info&run=1&run=0", "info", false],
+      ["status=warn&run=1", "warn", true],
+      ["status=info&run=1", "info", true],
+      ["status=ok&run=1", "ok", true],
+      ["status=bad&run=1", "all", true],
+      ["status=&run=1", "all", true],
+      ["run=%31&status=%77arn", "warn", true],
+    ]) {
+      const receipt = await call("/api/admin-read/ops/security" + (query ? "?" + query : ""), ADMIN);
+      assert.equal(receipt.status, 200, query);
+      assert.deepEqual(receipt.body, {
+        status: expectedStatus,
+        ran: expectedRun,
+        results: expectedRun ? ref : [],
+        error: null,
+      }, query);
+      assert.equal(receipt.headers.get("cache-control"), "private, no-store", query);
+      assert.equal(receipt.stats.statements, expectedRun ? 3 : 1, query);
+      assert.equal(receipt.stats.writes, 0, query);
+      assert.doesNotMatch(receipt.text, /super-secret-token-value/, query);
+    }
+
     // a failing group degrades to CURRENT's per-check failure result (warn, count 1) for its checks only
     const d1 = createD1(sqlite);
     const prepare = d1.prepare;
@@ -1098,7 +1135,202 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.deepEqual((await fetchPage(stateJson, undefined)).sharedInputs.map((s) => s.objectState), ["unavailable", "unavailable", "unavailable", "unavailable"]);
   });
 
-  test("T02 health (operational view) equals CURRENT runOperationalHealthChecks; deep run is 501", async () => {
+  test("SEC-799: many backfill reasons aggregate to bounded kind/status counts", async () => {
+    const env = { KV: { async get() { return null; } }, BUCKET: { async head() { return null; } } };
+    const before = await call("/api/admin-read/ops/static-builds", ADMIN, { env });
+    assert.equal(before.status, 200);
+    // The previous GROUP BY reason,status returned 150+ distinct rows.
+    for (let i = 0; i < 150; i += 1) {
+      ins("static_rebuild_queue", {
+        id: `sec799-group-${i}`, target_type: "video",
+        target_id: `sec799-group-target-${i}`,
+        status: i < 110 ? "pending" : "failed", priority: "normal",
+        reason: `backfill_video_v2_${i}`, attempt_count: 1,
+        created_at: T0 - 50, updated_at: T0 - 50,
+      });
+    }
+    // LIKE '_' is a wildcard; this is *not* a JS-recognized prefix.
+    ins("static_rebuild_queue", {
+      id: "sec799-group-invalid", target_type: "video",
+      target_id: "sec799-group-invalid-target", status: "pending",
+      priority: "normal", reason: "backfillXvideo_v2_0",
+      attempt_count: 1, created_at: T0 - 50, updated_at: T0 - 50,
+    });
+    try {
+      const aggregateSql = [];
+      const d1 = createD1(sqlite);
+      const prepare = d1.prepare.bind(d1);
+      d1.prepare = (sql) => {
+        if (sql.includes("'bf_count' AS kind")) aggregateSql.push(sql);
+        return prepare(sql);
+      };
+      const result = await call("/api/admin-read/ops/static-builds", ADMIN, { env, d1 });
+      assert.equal(result.status, 200);
+      assert.equal(result.body.backfillQueue.video_v2.pending, before.body.backfillQueue.video_v2.pending + 110);
+      assert.equal(result.body.backfillQueue.video_v2.failed, before.body.backfillQueue.video_v2.failed + 40);
+      assert.equal(result.body.backfillQueue.user_profile.pending, before.body.backfillQueue.user_profile.pending);
+      assert.ok(aggregateSql.length === 1 && aggregateSql[0].includes("GROUP BY a, b") &&
+        aggregateSql[0].includes("LIMIT ?"), "aggregate kind/status groups must have a fixed D1 row bound");
+      assert.equal(result.stats.statements, 3, "session and two D1 reads");
+      assert.equal(result.stats.writes, 0);
+      assert.ok(new TextEncoder().encode(result.text).length <= 64 * 1024);
+      assert.equal(result.headers.get("cache-control"), "private, no-store");
+    } finally {
+      sqlite.exec("DELETE FROM static_rebuild_queue WHERE id LIKE 'sec799-group-%'");
+    }
+  });
+
+  test("SEC-799: invalid LIKE-only failure reasons cannot starve a real backfill error", async () => {
+    const env = { KV: { async get() { return null; } }, BUCKET: { async head() { return null; } } };
+    const validReason = "backfill_video_v2_sec799";
+    const validError = "recognized-video-v2-failure";
+    ins("static_rebuild_queue", {
+      id: "sec799-shadow-valid", target_type: "video", target_id: "sec799-shadow-valid-target",
+      status: "failed", priority: "normal", attempt_count: 1, reason: validReason,
+      created_at: T0, updated_at: 4_000_000_000, error: validError,
+    });
+    // SQL LIKE 'backfill_%' treats '_' as any one character. The 25 newer
+    // invalid failures previously occupied all 20 bounded summary rows,
+    // so the valid failure above was never shown by the Ops dashboard.
+    for (let i = 0; i < 25; i += 1) {
+      ins("static_rebuild_queue", {
+        id: `sec799-shadow-invalid-${i}`, target_type: "video",
+        target_id: `sec799-shadow-invalid-target-${i}`,
+        status: "failed", priority: "normal", attempt_count: 1,
+        reason: `backfillXvideo_v2_${i}`,
+        created_at: T0, updated_at: 4_100_000_000 + i, error: "not-a-backfill-failure",
+      });
+    }
+    try {
+      const prepared = [];
+      const d1 = createD1(sqlite);
+      const originalPrepare = d1.prepare.bind(d1);
+      d1.prepare = (sql) => {
+        if (sql.includes("'bf_fail' AS kind")) prepared.push(sql);
+        return originalPrepare(sql);
+      };
+      const result = await call("/api/admin-read/ops/static-builds", ADMIN, { env, d1 });
+      assert.equal(result.status, 200, result.text.slice(0, 200));
+      assert.equal(result.body.backfillQueue.video_v2.lastError, validError);
+      assert.ok(prepared.length === 1 && prepared[0].includes("reason GLOB 'backfill_video_v2_*'"),
+        "the failure query must use the same exact reason contract as the bounded count query");
+      assert.ok(!prepared[0].includes("reason LIKE 'backfill_%'"),
+        "LIKE wildcards must not admit non-backfill reasons into the 20-row failure budget");
+      assert.equal(result.stats.statements, 3, "session plus two D1 reads");
+      assert.equal(result.stats.writes, 0);
+      assert.equal(result.headers.get("cache-control"), "private, no-store");
+      assert.ok(new TextEncoder().encode(result.text).length <= 64 * 1024);
+    } finally {
+      sqlite.exec("DELETE FROM static_rebuild_queue WHERE id LIKE 'sec799-shadow-%'");
+    }
+  });
+
+  test("SEC-799: backfill failure summary and persisted cursor cannot bypass the 64 KiB response budget", async () => {
+    const hugeError = "あ".repeat(24_000); // 72,000 UTF-8 bytes, regardless of row-list truncation
+    // The D1 boundary itself must not transfer an unlimited diagnostic
+    // before the later HTTP/JSON size check runs.
+    const kv = (cursor) => ({
+      async get() {
+        return JSON.stringify({
+          schema_version: 1,
+          updated_at: 7,
+          runs: { video_v2: { status: "running", phase: "items", cursor } },
+        });
+      },
+    });
+    const env = (cursor) => ({
+      KV: kv(cursor),
+      BUCKET: { async head() { return null; } },
+    });
+    const bodyBytes = (response) => new TextEncoder().encode(response.text).length;
+    ins("static_rebuild_queue", {
+      id: "sec799-backfill", target_type: "video", target_id: "sec799-target",
+      status: "failed", priority: "normal", reason: "backfill_video_v2_799",
+      attempt_count: 1, created_at: T0, updated_at: 4_100_000_000, error: hugeError,
+    });
+    try {
+      const seenSql = [];
+      const boundedDb = createD1(sqlite);
+      const originalPrepare = boundedDb.prepare.bind(boundedDb);
+      boundedDb.prepare = (sql) => {
+        if (sql.includes("FROM static_rebuild_queue")) seenSql.push(sql);
+        return originalPrepare(sql);
+      };
+      const failed = await call("/api/admin-read/ops/static-builds", ADMIN, {
+        d1: boundedDb, env: env("cursor-ok"),
+      });
+      assert.ok(
+        seenSql.some((sql) => /substr\(error, 1, \?\) AS error FROM static_rebuild_queue ORDER BY/.test(sql)),
+        "queue rows must be truncated by the SQL reader before entering JS",
+      );
+      assert.ok(
+        seenSql.some((sql) => /SELECT reason, substr\(error, 1, \?\) AS error FROM static_rebuild_queue/.test(sql)),
+        "backfill summary errors must be truncated by the SQL reader before entering JS",
+      );
+      assert.equal(failed.status, 200, failed.text.slice(0, 200));
+      assert.ok(bodyBytes(failed) <= 64 * 1024, "the FULL DTO must fit S2, not only rows");
+      assert.equal(failed.body.truncated, true, "diagnostic omission must be signalled");
+      assert.equal(failed.body.backfillState.runs.video_v2.cursor, "cursor-ok");
+      assert.match(failed.body.backfillQueue.video_v2.lastError, /省略/);
+      assert.doesNotMatch(failed.text, /あ{100}/, "raw oversized provider diagnostic must not leak");
+      assert.equal(failed.stats.statements, 3, "session + 2 D1 reads");
+      assert.equal(failed.stats.writes, 0);
+      assert.equal(failed.headers.get("cache-control"), "private, no-store");
+    } finally {
+      sqlite.prepare("DELETE FROM static_rebuild_queue WHERE id = ?").run("sec799-backfill");
+    }
+
+    // The mutation endpoint only accepts 128 UTF-16 code units of cursor.
+    const safeCursor = "あ".repeat(128);
+    const normal = await call("/api/admin-read/ops/static-builds", ADMIN, { env: env(safeCursor) });
+    assert.equal(normal.status, 200, "a 128-code-unit mutation-valid cursor must survive unchanged");
+    assert.equal(normal.body.backfillState.runs.video_v2.cursor, safeCursor);
+    assert.ok(bodyBytes(normal) <= 64 * 1024);
+    assert.equal(normal.stats.statements, 3);
+    assert.equal(normal.stats.writes, 0);
+
+    // The canonical mutation reader allows up to 64 KiB of raw persisted KV
+    // state. Three escaped error strings can exceed 4096 raw characters even
+    // with short, valid cursors: do not reject those legitimate checkpoints.
+    const escaped = '"'.repeat(1000);
+    const validLargeState = JSON.stringify({
+      schema_version: 1, updated_at: 7,
+      runs: Object.fromEntries(["video_v2", "user_profile", "event_crew"].map(
+        (kind) => [kind, { status: "running", phase: "items", cursor: "c-ok", last_error: escaped }],
+      )),
+    });
+    assert.ok(validLargeState.length > 4096, "fixture must exceed the former arbitrary cap");
+    assert.ok(new TextEncoder().encode(validLargeState).length <= 64 * 1024);
+    const largeValid = await call("/api/admin-read/ops/static-builds", ADMIN, {
+      env: { KV: { async get() { return validLargeState; } }, BUCKET: { async head() { return null; } } },
+    });
+    assert.equal(largeValid.status, 200, "valid KV under 64 KiB must not be lost");
+    assert.equal(largeValid.body.backfillState.runs.video_v2.cursor, "c-ok");
+    assert.equal(largeValid.body.backfillState.runs.user_profile.last_error, escaped);
+    assert.ok(bodyBytes(largeValid) <= 64 * 1024);
+    assert.equal(largeValid.stats.statements, 3);
+    assert.equal(largeValid.stats.writes, 0);
+
+    const rejected128 = await call("/api/admin-read/ops/static-builds", ADMIN, {
+      env: env("あ".repeat(129)),
+    });
+    assert.equal(rejected128.status, 503, "a stored cursor rejected by POST must not be returned as resumable");
+    assert.deepEqual(rejected128.body, { error: "unavailable" });
+    assert.equal(rejected128.stats.statements, 3);
+    assert.equal(rejected128.stats.writes, 0);
+
+    const unsafeCursor = "あ".repeat(30_000);
+    const rejected = await call("/api/admin-read/ops/static-builds", ADMIN, { env: env(unsafeCursor) });
+    assert.equal(rejected.status, 503, "never shorten a resume cursor into a different actionable token");
+    assert.deepEqual(rejected.body, { error: "unavailable" });
+    assert.ok(bodyBytes(rejected) <= 64 * 1024);
+    assert.equal(rejected.headers.get("cache-control"), "private, no-store");
+    assert.equal(rejected.stats.statements, 3);
+    assert.equal(rejected.stats.writes, 0);
+    assert.doesNotMatch(rejected.text, /あ{100}/);
+  });
+
+  test("T02 health (operational view) equals CURRENT and deep diagnostics are allowlisted per check", async () => {
     const { runOperationalHealthChecks } = await import("../../../src/lib/admin/healthChecks.ts");
     ins("x_identity_requests", { id: "xs1", request_type: "merge", status: "pending", requested_by_auth_user_id: "u_alice", source_x_user_id: "alice_x", target_x_user_id: "alice_y", requested_at: nowS - 9 * 86400, updated_at: nowS });
     ins("x_identity_requests", { id: "xs2", request_type: "merge", status: "pending", requested_by_auth_user_id: "u_alice", source_x_user_id: "frank_x", target_x_user_id: "frank_y", requested_at: nowS - 8 * 86400, updated_at: nowS });
@@ -1114,11 +1346,105 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.ok(byId.x_id_merge_pending_stale.count >= 2 && byId.open_moderation_cases_overdue.count >= 1);
     assert.equal((await get("/ops/health?status=info")).body.status, "info");
 
+    const { HEALTH_CHECK_IDS, runHealthChecks, runAuthLikeCountDriftCandidate } = await import("@flamenode/server-core/admin/healthChecks");
     const deep = await call("/api/admin-read/ops/health?deep=1", ADMIN);
-    assert.equal(deep.status, 501);
+    assert.equal(deep.status, 200);
+    assert.deepEqual(deep.body, { status: "all", results: [], error: null, checkIds: [...HEALTH_CHECK_IDS] });
     assert.equal(deep.headers.get("cache-control"), "private, no-store");
-    assert.equal(deep.stats.statements, 1, "no health query for a deep run");
-    assert.equal((await call("/api/admin-read/ops/health?run=1", ADMIN)).status, 501);
+    assert.equal(deep.stats.statements, 1, "catalog only performs the session lookup");
+    assert.deepEqual((await call("/api/admin-read/ops/health?run=1", ADMIN)).body, deep.body);
+    assert.equal(new Set(HEALTH_CHECK_IDS).size, 22);
+    // Next treats repeated query keys as arrays; a repeated value is not a
+    // scalar opt-in or filter. The other valid alias remains independent.
+    for (const [query, expectedStatus, expectedDeep] of [
+      ["deep=1&deep=1", "all", false],
+      ["deep=1&deep=0", "all", false],
+      ["deep=0&deep=1", "all", false],
+      ["run=1&run=1", "all", false],
+      ["run=1&run=0", "all", false],
+      ["run=0&run=1", "all", false],
+      ["deep=1&deep=1&run=1&run=1", "all", false],
+      ["deep=1&deep=0&run=1", "all", true],
+      ["run=1&run=0&deep=1", "all", true],
+      ["deep=01&run=0", "all", false],
+      ["status=warn&status=warn", "all", false],
+      ["status=warn&status=ok", "all", false],
+      ["status=ok&status=warn&deep=1", "all", true],
+      ["status=info&deep=1&deep=0", "info", false],
+      ["status=warn&run=1", "warn", true],
+      ["status=ok&deep=1", "ok", true],
+    ]) {
+      const receipt = await call("/api/admin-read/ops/health?" + query, ADMIN);
+      assert.equal(receipt.status, 200, query);
+      assert.deepEqual(receipt.body, { ...(expectedDeep ? deep.body : r.body), status: expectedStatus }, query);
+      assert.equal(receipt.headers.get("cache-control"), "private, no-store", query);
+      assert.equal(receipt.stats.statements, expectedDeep ? 1 : 2, query);
+      assert.equal(receipt.stats.writes, 0, query);
+    }
+    // More than the 10 returned samples: window COUNT must still reflect all
+    // eligible rows, not just the LIMIT 10 subset or the 5 UI samples.
+    for (let i = 0; i < 12; i++) {
+      ins("audit_logs", {
+        id: "retention-window-" + i, table_name: "retention_test",
+        target_id: "test", operation: "UPDATE", actor_user_id: "u_carol",
+        created_at: T0 - 10000 - i,
+      });
+    }
+    const daysRow = sqlite.prepare("SELECT audit_normal_retention_days AS days FROM system_settings LIMIT 1").get();
+    const retentionDays = Math.max(7, Number(daysRow?.days ?? 30) || 30);
+    const retentionCutoff = Math.floor(Date.now() / 1000) - retentionDays * 86400;
+    const expectedRetention = sqlite.prepare(
+      "SELECT COUNT(*) AS n FROM audit_logs WHERE (retention_class IS NULL OR retention_class = 'normal') AND created_at < ?"
+    ).get(retentionCutoff).n;
+    assert.ok(expectedRetention >= 12, "fixture exercises COUNT beyond LIMIT 10");
+    const fullResults = await runHealthChecks(refDb);
+    const authLikeCandidate = await runAuthLikeCountDriftCandidate(refDb);
+    for (const id of HEALTH_CHECK_IDS) {
+      const result = await call("/api/admin-read/ops/health/checks/" + encodeURIComponent(id), ADMIN);
+      assert.equal(result.status, 200, id + " " + result.text.slice(0, 200));
+      // The Hono like-count route intentionally carries the Lead-scoped Auth-authority candidate;
+      // the shared Next helper remains the explicit legacy reference until independent review.
+      const expectedResults = id === "like_count_drift"
+        ? [authLikeCandidate]
+        : fullResults.filter((row) => row.id === id);
+      assert.deepEqual(canon(result.body), canon({ status: "all", results: expectedResults, error: null }), id);
+      if (id === "audit_logs_retention_candidates") {
+        assert.equal(result.body.results[0]?.count, expectedRetention,
+          "COUNT(*) OVER () covers all eligible rows even with sample LIMIT 5");
+        assert.equal(result.body.results[0]?.samples.length, 5,
+          "the query must return exactly the five displayed retention samples");
+      }
+      assert.equal(result.headers.get("cache-control"), "private, no-store", id);
+      assert.equal(result.stats.writes, 0, id);
+      // Every check, including audit retention, has a session + at most 2 D1
+      // reads. The retention count and sample share a window-count query.
+      assert.ok(result.stats.statements <= 3,
+        id + ": session + at most 2 per-check D1 reads (S2 maximum 3)");
+      if (id === "audit_logs_retention_candidates") {
+        assert.equal(result.stats.statements, 3,
+          "retention: session + settings + combined count/sample");
+      }
+    }
+    const unknown = await call("/api/admin-read/ops/health/checks/unknown_check", ADMIN);
+    assert.equal(unknown.status, 404);
+    assert.equal(unknown.stats.statements, 1);
+    const denied = await call("/api/admin-read/ops/health/checks/like_count_drift", "tok-alice");
+    assert.equal(denied.status, 403);
+    assert.equal(denied.stats.statements, 1);
+
+    // A per-check D1 failure is a fixed 503; never disclose SQL, credentials, or raw provider errors.
+    const deepFailD1 = createD1(sqlite);
+    const originalDeepPrepare = deepFailD1.prepare;
+    deepFailD1.prepare = (statement) => {
+      if (/video_events/.test(statement)) throw new Error("secret-d1-internal-not-for-client");
+      return originalDeepPrepare(statement);
+    };
+    const deepFailure = await call("/api/admin-read/ops/health/checks/primary_event_sync", ADMIN, { d1: deepFailD1 });
+    assert.equal(deepFailure.status, 503);
+    assert.deepEqual(deepFailure.body, { error: "unavailable" });
+    assert.equal(deepFailure.headers.get("cache-control"), "private, no-store");
+    assert.equal(deepFailure.stats.writes, 0);
+    assert.doesNotMatch(deepFailure.text, /secret-d1-internal-not-for-client|SELECT|video_events/);
 
     const d1 = createD1(sqlite);
     const prepare = d1.prepare;
@@ -1132,15 +1458,1147 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.doesNotMatch(failed.text, /secret-internal/);
   });
 
-  test("T02 integrity: idle state like CURRENT (no query); run=1 is the recorded STOP (501)", async () => {
+  test("MIG-0626 U06: preserve the legacy X receipt separately and verify the Auth-authority Hono candidate", async () => {
+    const { runHealthCheckById } = await import("@flamenode/server-core/admin/healthChecks");
+    const endpoint = "/api/admin-read/ops/health/checks/like_count_drift";
+    const prefix = "mig0626-like-auth-";
+    const authIds = Array.from({ length: 120 }, (_, i) => prefix + "auth-" + i);
+    const xId = (i) => prefix + "x-" + i;
+    const label = "like_count 実数差分 (閾値 max(±5, ±5%))";
+    const authNote = "保存されているいいね数と Auth User 単位の video_interactions_auth 実数が大きくズレている作品があります。";
+    const cases = [
+      ["00-zero", 0, 5, 5, 0],
+      ["abs-below", 4, 0, 0, 0],
+      ["04-abs-equal", 5, 0, 0, 0],
+      ["03-abs-above", 6, 0, 0, 0],
+      ["ratio-below", 105, 110, 110, 0],
+      ["ratio-equal", 104, 110, 110, 0],
+      ["02-ratio-above", 103, 110, 110, 0],
+      ["01-ratio-tie", 95, 100, 100, 0],
+      ["auth-healthy-legacy-empty", 6, 0, 6, 0],
+      ["legacy-masks-auth-drift", 5, 5, 0, 0],
+      ["bookmarks-not-likes", 5, 0, 0, 8],
+    ];
+    const video = (id, stored) => ins("videos", {
+      id, title: id, creator_display_name: "fixture", submitted_by_user_id: "u_carol",
+      visibility_status: "private", app_like_count: stored, created_at: T0,
+    });
+    const legacyInteraction = (id, i, type) => ins("video_interactions", {
+      x_user_id: xId(i), video_id: id, interaction_type: type, created_at: T0,
+    });
+    const authInteraction = (id, i, type) => ins("video_interactions_auth", {
+      auth_user_id: authIds[i], video_id: id, interaction_type: type, created_at: T0,
+    });
+    const measure = async (token = ADMIN) => {
+      const d1 = createD1(sqlite);
+      const prepare = d1.prepare;
+      const projections = [];
+      const candidateSql = [];
+      d1.prepare = (statement) => {
+        if (!/WITH\s+observed\s+AS\s+MATERIALIZED/i.test(statement)) return prepare(statement);
+        candidateSql.push(statement);
+        const wrap = (stmt) => {
+          let recorded = false;
+          const record = (rows) => {
+            if (recorded) return;
+            recorded = true;
+            const data = Array.isArray(rows) ? rows : [];
+            projections.push({
+              rows: data.length,
+              bytes: Buffer.byteLength(JSON.stringify(data)),
+              sampleIds: data.map((row) => Array.isArray(row) ? row[2] : row.id),
+            });
+          };
+          return {
+            ...stmt,
+            bind: (...args) => wrap(stmt.bind(...args)),
+            async raw(options) {
+              const rows = await stmt.raw(options);
+              record(options?.columnNames ? rows.slice(1) : rows);
+              return rows;
+            },
+            async all() {
+              const result = await stmt.all();
+              record(result.results ?? result);
+              return result;
+            },
+          };
+        };
+        return wrap(prepare(statement));
+      };
+      return {
+        ...(await call(endpoint, token, { d1 })),
+        projections,
+        sql: candidateSql[0],
+      };
+    };
+    const expected = (status, count, samples) => ({
+      status: "all",
+      results: [{
+        id: "like_count_drift", label, status, count, samples,
+        ...(count > 0 ? { note: authNote } : {}),
+      }],
+      error: null,
+    });
+    const assertReadOnly = (receipt, statements, projectedRows) => {
+      assert.equal(receipt.status, 200);
+      assert.equal(receipt.headers.get("cache-control"), "private, no-store");
+      assert.equal(receipt.stats.statements, statements);
+      assert.equal(receipt.stats.writes, 0);
+      assert.ok(Buffer.byteLength(receipt.text) <= 64 * 1024);
+      assert.equal(receipt.projections.length, 1);
+      assert.equal(receipt.projections[0].rows, projectedRows);
+      assert.ok(receipt.projections[0].bytes < 8 * 1024);
+      assert.match(receipt.sql, /video_interactions_auth/);
+      assert.doesNotMatch(receipt.sql, /FROM\s+"?video_interactions"?(?:\s|$)/i);
+      assert.match(receipt.sql, /ORDER BY classified\.id/i);
+      assert.match(receipt.sql, /LIMIT 5/i);
+    };
+
+    sqlite.exec("SAVEPOINT mig0626_like_auth_candidate");
+    try {
+      sqlite.exec("UPDATE videos SET app_like_count = 0");
+      sqlite.exec("DELETE FROM video_interactions_auth");
+      sqlite.exec("DELETE FROM video_interactions");
+      for (let i = 0; i < 110; i++) {
+        ins("x_users", { id: xId(i), x_name: xId(i), approval_status: "approved" });
+      }
+      for (let i = 0; i < authIds.length; i++) {
+        ins("user", {
+          id: authIds[i], name: authIds[i], email: authIds[i] + "@example.test",
+          role: "user", created_at: T0,
+        });
+      }
+
+      const empty = await measure();
+      assertReadOnly(empty, 2, 1);
+      assert.deepEqual(empty.body, expected("ok", 0, []));
+
+      for (const [suffix, stored, legacyLikes, authLikes, authBookmarks] of cases) {
+        const id = prefix + suffix;
+        video(id, stored);
+        for (let i = 0; i < legacyLikes; i++) legacyInteraction(id, i, "like");
+        for (let i = 0; i < authLikes; i++) authInteraction(id, i, "like");
+        for (let i = 0; i < authBookmarks; i++) {
+          legacyInteraction(id, i, "bookmark");
+          authInteraction(id, i, "bookmark");
+        }
+      }
+
+      // The shared CURRENT helper remains a pinned X-authority reference:
+      // it excludes stored=0, trusts legacy X rows, and ignores Auth rows.
+      const legacy = await runHealthCheckById(refDb, "like_count_drift");
+      assert.equal(legacy?.count, 7);
+      assert.equal(legacy?.samples.length, 5);
+      const legacyVideoRows = sqlite.prepare(
+        "SELECT id, app_like_count AS stored FROM videos WHERE app_like_count >= 1",
+      ).all();
+      const legacyInteractionRows = sqlite.prepare(
+        "SELECT video_id, COUNT(*) AS cnt FROM video_interactions WHERE interaction_type = 'like' GROUP BY video_id",
+      ).all();
+      const legacyMap = new Map(legacyInteractionRows.map((row) => [row.video_id, Number(row.cnt)]));
+      const legacyDriftIds = new Set();
+      for (const row of legacyVideoRows) {
+        const actual = legacyMap.get(row.id) ?? 0;
+        const ratioThreshold = Math.ceil(actual / 20);
+        const threshold = Math.max(5, ratioThreshold);
+        if (Math.abs(Number(row.stored) - actual) >= threshold) legacyDriftIds.add(row.id);
+      }
+      assert.ok(!legacyVideoRows.some((row) => row.id === prefix + "00-zero"), "legacy excludes stored zero");
+      assert.ok(legacyDriftIds.has(prefix + "auth-healthy-legacy-empty"), "legacy reports a healthy Auth count as drift");
+      assert.ok(!legacyDriftIds.has(prefix + "legacy-masks-auth-drift"), "legacy rows can mask an Auth-authority drift");
+      assert.ok(legacyDriftIds.has(prefix + "bookmarks-not-likes"), "legacy bookmark rows do not count as likes");
+
+      const first = await measure();
+      assertReadOnly(first, 2, 5);
+      assert.deepEqual(first.body, expected("warn", 8, [
+        "video:" + prefix + "00-zero stored:0 actual:5 diff:5 threshold:5 [abs(5)]",
+        "video:" + prefix + "01-ratio-tie stored:95 actual:100 diff:5 threshold:5 [ratio(5)]",
+        "video:" + prefix + "02-ratio-above stored:103 actual:110 diff:7 threshold:6 [ratio(6)]",
+        "video:" + prefix + "03-abs-above stored:6 actual:0 diff:6 threshold:5 [abs(5)]",
+        "video:" + prefix + "04-abs-equal stored:5 actual:0 diff:5 threshold:5 [abs(5)]",
+      ]));
+
+      // More than 100 healthy rows plus seven drifts: count all, transfer five.
+      for (let i = 0; i < 120; i++) {
+        const id = prefix + "zz-healthy-" + String(i).padStart(3, "0");
+        video(id, 1);
+        legacyInteraction(id, 0, "like");
+        authInteraction(id, 0, "like");
+      }
+      for (let i = 0; i < 7; i++) video(prefix + "zz-aggregate-" + i, 6);
+      const oldTransferRows = sqlite.prepare(
+        "SELECT id, app_like_count AS stored FROM videos WHERE app_like_count >= 1",
+      ).all();
+      const oldTransferInteractions = sqlite.prepare(
+        "SELECT video_id, COUNT(*) AS cnt FROM video_interactions WHERE interaction_type = 'like' GROUP BY video_id",
+      ).all();
+      assert.ok(oldTransferRows.length > 100);
+      assert.ok(oldTransferInteractions.length > 100);
+      assert.ok(Buffer.byteLength(JSON.stringify(oldTransferRows)) > 0);
+      assert.ok(Buffer.byteLength(JSON.stringify(oldTransferInteractions)) > 0);
+
+      const many = await measure();
+      assertReadOnly(many, 2, 5);
+      assert.deepEqual(many.body, expected("warn", 15, [
+        "video:" + prefix + "00-zero stored:0 actual:5 diff:5 threshold:5 [abs(5)]",
+        "video:" + prefix + "01-ratio-tie stored:95 actual:100 diff:5 threshold:5 [ratio(5)]",
+        "video:" + prefix + "02-ratio-above stored:103 actual:110 diff:7 threshold:6 [ratio(6)]",
+        "video:" + prefix + "03-abs-above stored:6 actual:0 diff:6 threshold:5 [abs(5)]",
+        "video:" + prefix + "04-abs-equal stored:5 actual:0 diff:5 threshold:5 [abs(5)]",
+      ]));
+
+      // Sort by the stored ID, not the nullable projected ID alias. A
+      // later invalid identifier counts as drift but must not displace the
+      // first five samples. An invalid identifier inside those five still
+      // fails closed (covered by the following identifier-bound cases).
+      for (const storage of ["text", "blob"]) {
+        const lateId = prefix + "zzzz-late-" + "x".repeat(256);
+        video(lateId, 6);
+        try {
+          if (storage === "blob") {
+            sqlite.prepare("UPDATE videos SET id = ? WHERE id = ?").run(Buffer.from("late-blob"), lateId);
+          }
+          const late = await measure();
+          assertReadOnly(late, 2, 5);
+          assert.deepEqual(late.body, expected("warn", 16, many.body.results[0].samples));
+          assert.deepEqual(late.projections[0].sampleIds, many.projections[0].sampleIds);
+          assert.doesNotMatch(late.text, /late-blob|xxxxxxxxxxxxxxxxxxxx/);
+        } finally {
+          sqlite.prepare("DELETE FROM videos WHERE title = ?").run(lateId);
+        }
+      }
+
+      const invalidId = prefix + "zz-invalid-counter";
+      video(invalidId, "Infinity");
+      const invalid = await measure();
+      assert.equal(invalid.status, 503);
+      assert.deepEqual(invalid.body, { error: "unavailable" });
+      assert.equal(invalid.headers.get("cache-control"), "private, no-store");
+      assert.equal(invalid.stats.statements, 2);
+      assert.equal(invalid.stats.writes, 0);
+      assert.doesNotMatch(invalid.text, /Infinity|invalid-counter/);
+      sqlite.prepare("DELETE FROM videos WHERE id = ?").run(invalidId);
+
+      const oversizedId = "!" + "x".repeat(256);
+      video(oversizedId, 6);
+      const oversized = await measure();
+      assert.equal(oversized.status, 503);
+      assert.deepEqual(oversized.body, { error: "unavailable" });
+      assert.equal(oversized.headers.get("cache-control"), "private, no-store");
+      assert.equal(oversized.stats.statements, 2);
+      assert.equal(oversized.stats.writes, 0);
+      assert.doesNotMatch(oversized.text, /xxxxxxxxxxxxxxxxxxxx/);
+      sqlite.prepare("DELETE FROM videos WHERE id = ?").run(oversizedId);
+
+      // Isolate each sampled identifier: no healthy or later-sort BLOB may
+      // accidentally evade the actual first-five sample projection.
+      sqlite.exec("SAVEPOINT mig0626_like_id_bytes");
+      try {
+        sqlite.exec("UPDATE videos SET app_like_count = 0; DELETE FROM video_interactions_auth");
+        const fixtureId = prefix + "zz-id-byte-fixture";
+        const idCases = [];
+        for (const unit of ["x", "é", "あ", "🚀"]) {
+          for (const size of [255, 256, 257]) {
+            const width = Buffer.byteLength(unit);
+            const value = "!" + unit.repeat(Math.floor((size - 1) / width)) + "x".repeat((size - 1) % width);
+            assert.equal(Buffer.byteLength(value), size);
+            idCases.push({ raw: Buffer.from(value), decoded: value, storage: "text", size });
+          }
+        }
+        // Stored malformed UTF-8 is within 256 bytes but its local adapter
+        // replacement decoding can exceed that limit. Keep valid decoded
+        // boundary strings intact; never return an over-bound sample.
+        for (const [count, tail] of [[84, 2], [85, 0], [85, 1], [86, 0]]) {
+          const raw = Buffer.concat([Buffer.from("!"), Buffer.alloc(count, 0xff), Buffer.alloc(tail, 120)]);
+          const decoded = "!" + "\uFFFD".repeat(count) + "x".repeat(tail);
+          idCases.push({ raw, decoded, storage: "text", size: raw.length });
+        }
+        for (const size of [0, 7, 256, 257]) {
+          idCases.push({ raw: Buffer.alloc(size, 120), decoded: null, storage: "blob", size });
+        }
+        for (const { raw, decoded, storage, size } of idCases) {
+          video(fixtureId, 6);
+          const valueSql = storage === "text" ? "CAST(? AS TEXT)" : "?";
+          sqlite.prepare("UPDATE videos SET id = " + valueSql + " WHERE id = ?").run(raw, fixtureId);
+          const stored = sqlite.prepare("SELECT typeof(id) AS storage, length(CAST(id AS BLOB)) AS bytes FROM videos WHERE title = ?").get(fixtureId);
+          assert.equal(stored.storage, storage);
+          assert.equal(stored.bytes, size);
+          const receipt = await measure();
+          const accepted = storage === "text" && size <= 256 && Buffer.byteLength(decoded) <= 256;
+          assert.equal(receipt.projections.length, 1);
+          assert.equal(receipt.projections[0].rows, 1);
+          assert.deepEqual(receipt.projections[0].sampleIds, [
+            storage === "text" && size <= 256 ? decoded : null,
+          ], "actual SQL projection");
+          if (accepted) {
+            assertReadOnly(receipt, 2, 1);
+            assert.deepEqual(receipt.body, expected("warn", 1, [
+              "video:" + decoded + " stored:6 actual:0 diff:6 threshold:5 [abs(5)]",
+            ]));
+          } else {
+            assert.equal(receipt.status, 503);
+            assert.deepEqual(receipt.body, { error: "unavailable" });
+            assert.equal(receipt.headers.get("cache-control"), "private, no-store");
+            assert.equal(receipt.stats.statements, 2);
+            assert.equal(receipt.stats.writes, 0);
+          }
+          sqlite.prepare("DELETE FROM videos WHERE title = ?").run(fixtureId);
+        }
+      } finally {
+        sqlite.exec("ROLLBACK TO mig0626_like_id_bytes; RELEASE mig0626_like_id_bytes");
+      }
+
+      const denied = await measure("tok-alice");
+      assert.equal(denied.status, 403);
+      assert.equal(denied.stats.statements, 1);
+      assert.equal(denied.stats.writes, 0);
+      assert.deepEqual(denied.projections, []);
+    } finally {
+      sqlite.exec("ROLLBACK TO mig0626_like_auth_candidate; RELEASE mig0626_like_auth_candidate");
+    }
+  });
+
+  test("MIG-0626 U06: Auth like-count summary and sample receipt rejects incomplete or inconsistent provider rows", async () => {
+    const { runAuthLikeCountDriftCandidate } = await import("@flamenode/server-core/admin/healthChecks");
+    const keys = ["invalid_count", "drift_count", "id", "id_bytes", "stored", "actual", "diff",
+      "threshold", "ratio_threshold", "ratio_triggered"];
+    const sample = (id = "v1", count = 1, actual = 0, stored = 6) => {
+      const ratio = Math.floor(actual / 20) + (actual % 20 === 0 ? 0 : 1);
+      return ["0", String(count), id, Buffer.byteLength(id), String(stored), String(actual),
+        String(Math.abs(stored - actual)), String(Math.max(5, ratio)), String(ratio), ratio >= 5 ? 1 : 0];
+    };
+    const empty = ["0", "0", null, null, null, null, null, null, null, null];
+    const set = (row, index, value) => row.map((item, i) => i === index ? value : item);
+    const cases = [
+      ["empty", [empty], true],
+      ["single", [sample()], true],
+      ["two", [sample("a", 2), sample("b", 2)], true],
+      ["five of seven", Array.from({ length: 5 }, (_, i) => sample("v" + i, 7)), true],
+      ["ratio 101", [sample("a", 1, 101, 0)], true],
+      ["maximum safe actual", [sample("a", 1, Number.MAX_SAFE_INTEGER, 0)], true],
+      ["missing rows", [sample("a", 2)], false],
+      ["missing all samples", [["0", "1", ...empty.slice(2)]], false],
+      ["inconsistent repeated count", [sample("a", 2), sample("b", 3)], false],
+      ["later invalid summary", [sample("a", 2), set(sample("b", 2), 0, "1")], false],
+      ["false empty with actual", [set(empty, 5, "1")], false],
+      ["missing empty field", [empty.slice(0, 9)], false],
+      ["extra empty rows", [empty, empty], false],
+      ["extra sample", [sample(), sample("b")], false],
+      ["wrong low ratio", [set(set(set(sample("a", 1, 101, 0), 7, "5"), 8, "0"), 9, 0)], false],
+      ["wrong high ratio", [set(set(set(sample("a", 1, 101, 0), 7, "7"), 8, "7"), 9, 1)], false],
+      ["oversized id", [sample("a".repeat(257))], false],
+      ["wrong diff", [set(sample(), 6, "7")], false],
+      ["unsafe count", [set(sample(), 1, "9007199254740992")], false],
+      ["zero plus sample", [sample("a", 0)], false],
+      ["maximum safe numeric actual", [sample("a", 1, Number.MAX_SAFE_INTEGER, 0).map((v, i) => i === 2 ? v : Number(v))], true],
+      ["leading zero", [set(sample(), 4, "06")], false],
+      ["noncanonical sign", [set(sample(), 4, "+6")], false],
+      ["trailing newline", [set(sample(), 4, "6\n")], false],
+      ...[0, 1, 3, 4, 5, 6, 7, 8, 9].flatMap(index => [
+        ["17-digit diagnostic field " + index, [set(sample(), index, "1".repeat(17))], false],
+        ["oversized diagnostic field " + index, [set(sample(), index, "9".repeat(65536))], false],
+      ]),
+    ];
+    for (const [label, arrays, accepted] of cases) {
+      for (const objectRows of [false, true]) {
+        const rows = objectRows ? arrays.map(row => Object.fromEntries(row.map((value, i) => [keys[i], value]))) : arrays;
+        let calls = 0;
+        const db = { all: async () => { calls++; return rows; } };
+        if (accepted) {
+          const result = await runAuthLikeCountDriftCandidate(db);
+          assert.equal(result.count, Number(arrays[0][1]), label);
+          assert.equal(result.samples.length, Math.min(result.count, 5), label);
+          assert.equal(result.status, result.count === 0 ? "ok" : "warn", label);
+        } else {
+          await assert.rejects(() => runAuthLikeCountDriftCandidate(db), /diagnostic/, label);
+        }
+        assert.equal(calls, 1, label);
+      }
+    }
+  });
+
+  test("MIG-0626 U06: retention diagnosis bounds the entire UTF-8 JSON response without changing samples or count", async () => {
+    const path = "/api/admin-read/ops/health/checks/audit_logs_retention_candidates";
+    const prefix = "retention-byte-bound-";
+    const ids = Array.from({ length: 5 }, (_, i) => prefix + i);
+    const encoder = new TextEncoder();
+    const size = (receipt) => encoder.encode(receipt.text).length;
+    const limit = 64 * 1024;
+    const update = sqlite.prepare("UPDATE audit_logs SET table_name = ? WHERE id = ?");
+    try {
+      for (let i = 0; i < ids.length; i++) {
+        ins("audit_logs", {
+          id: ids[i], table_name: "seed", target_id: "test", operation: "UPDATE",
+          actor_user_id: "u_carol", created_at: i + 1, retention_class: "normal",
+        });
+      }
+      const baseline = await call(path, ADMIN);
+      assert.equal(baseline.status, 200);
+      assert.deepEqual(baseline.body.results[0].samples, ids.map((id) => id + " seed"));
+      const exact = "a".repeat(limit - size(baseline) + "seed".length);
+      for (const [label, values, accepted] of [
+        ["exact limit", [exact], true],
+        ["one byte over", [exact + "a"], false],
+        ["oversized input", ["private-sample-" + "a".repeat(70_000)], false],
+        ["multibyte", ["private-sample-" + "あ".repeat(22_000)], false],
+        ["escaped controls", ["private-sample-" + "\u0001".repeat(11_000)], false],
+        ["aggregate five samples", ids.map(() => "private-sample-" + "あ".repeat(4_500)), false],
+        ["valid multibyte", ["あ".repeat(10_000)], true],
+      ]) {
+        const names = ids.map((_, i) => values[i] ?? "seed");
+        for (let i = 0; i < ids.length; i++) update.run(names[i], ids[i]);
+        const receipt = await call(path, ADMIN);
+        assert.equal(receipt.status, accepted ? 200 : 503, label);
+        assert.ok(size(receipt) <= limit, label);
+        assert.equal(receipt.headers.get("cache-control"), "private, no-store", label);
+        assert.equal(receipt.stats.statements, 3, label + ": session + settings + count/sample");
+        assert.equal(receipt.stats.writes, 0, label);
+        if (accepted) {
+          assert.equal(receipt.body.results[0].count, baseline.body.results[0].count, label);
+          assert.deepEqual(receipt.body.results[0].samples, ids.map((id, i) => id + " " + names[i]), label);
+          if (label === "exact limit") assert.equal(size(receipt), limit);
+        } else {
+          assert.deepEqual(receipt.body, { error: "unavailable" }, label);
+          assert.doesNotMatch(receipt.text, /private-sample-|retention-byte-bound-/);
+        }
+      }
+    } finally {
+      for (const id of ids) sqlite.prepare("DELETE FROM audit_logs WHERE id = ?").run(id);
+    }
+  });
+
+  test("T02 integrity: idle catalog and run=1 are read-only; per-check results match full CURRENT helper", async () => {
+    const { runIntegrityChecks, INTEGRITY_CHECK_IDS } = await import(
+      "@flamenode/server-core/admin/integrityChecks"
+    );
     const idle = await get("/ops/integrity");
-    assert.deepEqual(idle.body, { ran: false, results: [] });
-    assert.equal(idle.stats.statements, 1, "no page query without run=1");
-    const run = await call("/api/admin-read/ops/integrity?run=1", ADMIN);
-    assert.equal(run.status, 501);
-    assert.equal(run.headers.get("cache-control"), "private, no-store");
-    assert.equal(run.stats.statements, 1);
+    assert.deepEqual(idle.body, { ran: false, results: [], checkIds: [...INTEGRITY_CHECK_IDS] });
+    assert.equal(idle.stats.statements, 1, "catalog must only read the session");
+    assert.equal(new Set(INTEGRITY_CHECK_IDS).size, INTEGRITY_CHECK_IDS.length, "unique allowlisted check IDs");
+    const requested = await call("/api/admin-read/ops/integrity?run=1", ADMIN);
+    assert.deepEqual(requested.body, idle.body);
+    assert.equal(requested.headers.get("cache-control"), "private, no-store");
+    assert.equal(requested.stats.statements, 1);
     assert.equal((await call("/api/admin-read/ops/integrity", "tok-alice")).status, 403);
+
+    // The same read-only CURRENT business logic is still used by Next via its compatibility bridge.
+    // Run it once as the reference and make every Hono per-ID request execute only its selected check.
+    const expected = await runIntegrityChecks(refDb);
+    for (const id of INTEGRITY_CHECK_IDS) {
+      const result = await call("/api/admin-read/ops/integrity/" + encodeURIComponent(id), ADMIN);
+      assert.equal(result.status, 200, id);
+      assert.equal(result.headers.get("cache-control"), "private, no-store", id);
+      const expectedResults = expected.filter((check) => check.id === id).map((check) => (
+        id === "staff_manager_has_dangerous_permissions"
+          ? { ...check, issues: [...check.issues].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0) }
+          : check
+      ));
+      assert.deepEqual(canon(result.body), canon({
+        ran: true,
+        results: expectedResults,
+      }), id);
+      assert.ok(result.stats.statements <= 2, id + ": session + at most one check query");
+    }
+    const missing = await call("/api/admin-read/ops/integrity/unknown_check", ADMIN);
+    assert.equal(missing.status, 404);
+    assert.equal(missing.stats.statements, 1, "unknown check must not query the DB");
+    const denied = await call("/api/admin-read/ops/integrity/videos_primary_event_missing_event", "tok-alice");
+    assert.equal(denied.status, 403);
+    assert.equal(denied.stats.statements, 1, "denial occurs before the check");
+  });
+
+  test("MIG-0626 U05/U06: every allowlisted diagnostic rejects D1 failures and unauthorized callers without leaking details", async () => {
+    const { HEALTH_CHECK_IDS } = await import("@flamenode/server-core/admin/healthChecks");
+    const { INTEGRITY_CHECK_IDS } = await import("@flamenode/server-core/admin/integrityChecks");
+    const secret = "synthetic-private-provider-error tok-carol";
+    const catalogs = [
+      ["/api/admin-read/ops/health/checks/", HEALTH_CHECK_IDS],
+      ["/api/admin-read/ops/integrity/", INTEGRITY_CHECK_IDS],
+    ];
+    // Three CURRENT health checks are static receipts; they must never
+    // attempt a diagnostic D1 read. Fourteen use Promise.all for count/sample,
+    // so a failed first query does not cancel an already-started sibling.
+    const staticHealth = new Set([
+      "video_statistics_columns", "chapter_non_chapter_marker", "public_api_event_flag",
+    ]);
+    const staticIntegrity = new Set(["staff_owner_missing_permissions"]);
+    const parallelHealth = new Set([
+      "primary_event_sync", "orphan_event_ref", "orphan_video_ref",
+      "available_slot_with_video", "submitted_slot_without_video",
+      "public_video_without_youtube_id", "voided_video_visible",
+      "missing_video_youtube_metadata", "videos_outro_comment_legacy",
+      "orphan_video_member", "notification_processing_stuck",
+      "notification_failed_volume", "open_moderation_cases_overdue",
+      "x_id_merge_pending_stale",
+    ]);
+    // Count actual prepare attempts separately from successful harness reads.
+    // The first prepared statement is the real session lookup. Fail the
+    // requested diagnostic on execution (including Drizzle's raw() path).
+    function faultAt(failAt, duringPrepare = false) {
+      const d1 = createD1(sqlite);
+      const prepare = d1.prepare;
+      let attempts = 0;
+      let failures = 0;
+      d1.prepare = (sql) => {
+        attempts++;
+        if (attempts !== failAt) return prepare(sql);
+        const fail = () => {
+          failures++;
+          throw new Error(secret + " " + sql);
+        };
+        if (duringPrepare) return fail();
+        const wrap = (stmt) => ({
+          ...stmt,
+          bind: (...args) => wrap(stmt.bind(...args)),
+          async raw() { return fail(); },
+          async all() { return fail(); },
+          async first() { return fail(); },
+        });
+        return wrap(prepare(sql));
+      };
+      return { d1, attempts: () => attempts, failures: () => failures };
+    }
+    const noStore = (receipt) => {
+      assert.equal(receipt.headers.get("cache-control"), "private, no-store");
+      assert.equal(receipt.stats.writes, 0);
+      assert.doesNotMatch(receipt.text, /synthetic-private-provider-error|tok-carol|SELECT\b/);
+    };
+    const unavailable = (receipt, fault, expectedAttempts, context) => {
+      assert.equal(receipt.status, 503, context);
+      assert.deepEqual(receipt.body, { error: "unavailable" }, context);
+      assert.equal(fault.attempts(), expectedAttempts, context);
+      assert.equal(fault.failures(), 1, context);
+      assert.equal(receipt.stats.statements, expectedAttempts - 1, context);
+      noStore(receipt);
+    };
+    assert.equal(HEALTH_CHECK_IDS.length, 22);
+    assert.equal(INTEGRITY_CHECK_IDS.length, 36);
+    const deniedTokens = ["tok-alice", "tok-mod", "tok-banned", "tok-expired", "tok-nope", null];
+    for (const [prefix, ids] of catalogs) {
+      for (const [index, id] of ids.entries()) {
+        const path = prefix + encodeURIComponent(id);
+        const fault = faultAt(2, index % 2 === 0);
+        const actual = await call(path, ADMIN, { d1: fault.d1 });
+        const health = ids === HEALTH_CHECK_IDS;
+        const staticNoRead = health ? staticHealth.has(id) : staticIntegrity.has(id);
+        if (staticNoRead) {
+          assert.equal(actual.status, 200, id);
+          if (health) {
+            assert.equal(actual.body.error, null, id);
+            assert.equal(actual.body.results.length, 1, id);
+            assert.deepEqual(
+              { id: actual.body.results[0].id, status: actual.body.results[0].status,
+                count: actual.body.results[0].count, samples: actual.body.results[0].samples },
+              { id, status: "ok", count: 0, samples: [] }, id,
+            );
+          } else {
+            assert.deepEqual(actual.body.results, [], id);
+          }
+          assert.equal(fault.attempts(), 1, id);
+          assert.equal(fault.failures(), 0, id);
+          assert.equal(actual.stats.statements, 1, id);
+          noStore(actual);
+        } else {
+          unavailable(actual, fault, health && parallelHealth.has(id) ? 3 : 2, id);
+          if (health && parallelHealth.has(id)) {
+            // The other half may fail too: no successful partial diagnosis.
+            const second = faultAt(3, index % 2 !== 0);
+            unavailable(await call(path, ADMIN, { d1: second.d1 }), second, 3, id + ": sibling failure");
+          }
+        }
+        const token = deniedTokens[index % deniedTokens.length];
+        const deniedFault = faultAt(2);
+        const denied = await call(path, token, { d1: deniedFault.d1 });
+        assert.equal(denied.status, index % deniedTokens.length < 3 ? 403 : 401, id);
+        assert.equal(deniedFault.failures(), 0, id);
+        assert.equal(deniedFault.attempts(), token === null ? 0 : 1, id);
+        assert.equal(denied.stats.statements, token === null ? 0 : 1, id);
+        noStore(denied);
+      }
+      for (const id of ["constructor", "__proto__", "toString", "hasOwnProperty", "not_a_check", "like_count_drift/extra"]) {
+        const fault = faultAt(2);
+        const receipt = await call(prefix + encodeURIComponent(id), ADMIN, { d1: fault.d1 });
+        assert.equal(receipt.status, 404, id);
+        assert.deepEqual(receipt.body, { error: "not_found" }, id);
+        assert.equal(fault.attempts(), 1, id);
+        assert.equal(fault.failures(), 0, id);
+        assert.equal(receipt.stats.statements, 1, id);
+        noStore(receipt);
+      }
+    }
+    // Retention performs a settings read before the combined count/sample
+    // statement; the later failure must not return partial or healthy data.
+    const retention = faultAt(3);
+    unavailable(await call("/api/admin-read/ops/health/checks/audit_logs_retention_candidates", ADMIN, {
+      d1: retention.d1,
+    }), retention, 3, "retention second diagnostic read");
+  });
+
+  test("MIG-0626 U06: operational health and security bound the entire multi-check diagnostic response", async () => {
+    // Execute the actual read statements and inject synthetic oversized values
+    // at the D1 result boundary. No persistent fixture or SQL is changed.
+    function withSamples(overrides) {
+      const d1 = createD1(sqlite);
+      const prepare = d1.prepare;
+      d1.prepare = (sql) => {
+        const selected = Object.entries(overrides).filter(([id]) => sql.includes("'" + id + "'"));
+        const wrap = (statement) => {
+          if (!selected.length) return statement;
+          return {
+            ...statement,
+            bind: (...values) => wrap(statement.bind(...values)),
+            async all() {
+              const receipt = await statement.all();
+              return {
+                ...receipt,
+                results: [
+                  ...receipt.results.filter((row) => !selected.some(([id]) => id === row.check_id)),
+                  ...selected.map(([id, value]) => ({
+                    check_id: id, total_count: 1, a: value, b: "seed-ref", c: null,
+                  })),
+                ],
+              };
+            },
+          };
+        };
+        return wrap(prepare(sql));
+      };
+      return d1;
+    }
+    const encoder = new TextEncoder();
+    const limit = 64 * 1024;
+    const size = (receipt) => encoder.encode(receipt.text).length;
+    const configs = [
+      {
+        path: "/api/admin-read/ops/health", idle: "?deep=1", statements: 2,
+        first: "notification_failed_volume", second: "open_moderation_cases_overdue",
+        firstSample: (value) => value + " (seed-ref)",
+        secondSample: (value) => value + " video:seed-ref",
+      },
+      {
+        path: "/api/admin-read/ops/security", query: "?run=1", idle: "?run=1&run=1", statements: 3,
+        first: "rejected_xid_active", second: "banned_user_videos",
+        firstSample: (value) => "user:" + value + " x:seed-ref",
+        secondSample: (value) => "video:" + value + " submitter:seed-ref",
+      },
+    ];
+    for (const config of configs) {
+      const request = (first, second) => call(config.path + (config.query ?? ""), ADMIN, {
+        d1: withSamples({ [config.first]: first, [config.second]: second }),
+      });
+      const baseline = await request("seed", "seed");
+      assert.equal(baseline.status, 200, config.path);
+      assert.deepEqual(baseline.body.results.find((r) => r.id === config.first).samples, [config.firstSample("seed")]);
+      assert.deepEqual(baseline.body.results.find((r) => r.id === config.second).samples, [config.secondSample("seed")]);
+      const exact = "a".repeat(limit - size(baseline) + "seed".length);
+      for (const [label, first, second, accepted] of [
+        ["exact limit", exact, "seed", true],
+        ["one byte over", exact + "a", "seed", false],
+        ["oversized ASCII", "private-diagnostic-" + "a".repeat(70_000), "seed", false],
+        ["multibyte", "private-diagnostic-" + "あ".repeat(22_000), "seed", false],
+        ["escaped controls", "private-diagnostic-" + "\u0001".repeat(11_000), "seed", false],
+        ["aggregate across checks", "private-diagnostic-" + "あ".repeat(11_000), "あ".repeat(11_000), false],
+        ["valid multibyte", "あ".repeat(10_000), "seed", true],
+        ["surrogate pair across chunk boundary", "a".repeat(4095 - (config.path.endsWith("/security") ? "user:".length : 0)) + "🚀" + "a".repeat(8192), "seed", true],
+        ["lone surrogate escapes", "\uD800".repeat(5000) + "\uDC00", "seed", true],
+        ["escaped exact byte boundary", "\u0001".repeat(Math.floor(exact.length / 6)) + "a".repeat(exact.length % 6), "seed", true],
+        ["escaped one byte over", "\u0001".repeat(Math.floor(exact.length / 6)) + "a".repeat(exact.length % 6 + 1), "seed", false],
+      ]) {
+        const receipt = await request(first, second);
+        const context = config.path + " " + label;
+        assert.equal(receipt.status, accepted ? 200 : 503, context);
+        assert.ok(size(receipt) <= limit, context);
+        assert.equal(receipt.headers.get("cache-control"), "private, no-store", context);
+        assert.equal(receipt.stats.statements, config.statements, context);
+        assert.equal(receipt.stats.writes, 0, context);
+        if (accepted) {
+          const expected = {
+            ...baseline.body,
+            results: baseline.body.results.map((r) => r.id === config.first
+              ? { ...r, samples: [config.firstSample(first)] }
+              : r.id === config.second ? { ...r, samples: [config.secondSample(second)] } : r),
+          };
+          assert.deepEqual(receipt.body, expected, context);
+          if (label === "exact limit" || label === "escaped exact byte boundary") assert.equal(size(receipt), limit, context);
+        } else {
+          assert.deepEqual(receipt.body, { error: "unavailable" }, context);
+          assert.doesNotMatch(receipt.text, /private-diagnostic-|seed-ref/);
+        }
+      }
+      const idle = await call(config.path + config.idle, ADMIN, {
+        d1: withSamples({ [config.first]: "a".repeat(70_000) }),
+      });
+      assert.equal(idle.status, 200, config.path + " idle");
+      assert.deepEqual(idle.body.results, []);
+      assert.equal(idle.stats.statements, 1);
+      assert.equal(idle.stats.writes, 0);
+      assert.equal(idle.headers.get("cache-control"), "private, no-store");
+    }
+  });
+
+  test("MIG-0626 U05: selected staff preset diagnostics use bounded preset-specific reads", async () => {
+    const { buildPermissionIntegrityChecks } = await import("@flamenode/server-core/admin/permissionIntegrityChecks");
+    let jsonAccesses = 0;
+    let queries = 0;
+    let orderedQueries = 0;
+    const customRows = [
+      { id: "owner", event_id: "ev1", x_user_id: "owner-x", permission_preset: "owner",
+        get custom_permission_keys_json() { throw new Error("owner JSON must not be accessed"); } },
+      { id: "manager", event_id: "ev1", x_user_id: "manager-x", permission_preset: "manager",
+        get custom_permission_keys_json() { throw new Error("manager JSON must not be accessed"); } },
+      ...Array.from({ length: 498 }, (_, i) => ({
+        id: "custom-" + i, event_id: "ev1", x_user_id: "custom-x-" + i, permission_preset: "custom",
+        get custom_permission_keys_json() { jsonAccesses++; return "{not json"; },
+      })),
+    ];
+    const db = {
+      select(columns) {
+        queries++;
+        const boundedPresetQuery = Object.hasOwn(columns, "total_count");
+        if (boundedPresetQuery) {
+          assert.deepEqual(Object.keys(columns), ["id", "event_id", "x_user_id", "total_count"]);
+          return { from: () => ({ where: () => ({
+            orderBy: () => {
+              orderedQueries++;
+              return { limit: async (limit) => {
+                assert.equal(limit, 50);
+                return [{ id: "manager", event_id: "ev1", x_user_id: "manager-x", total_count: 1 }];
+              } };
+            },
+          }) }) };
+        }
+        assert.deepEqual(Object.keys(columns), ["id", "event_id", "x_user_id", "permission_preset", "custom_permission_keys_json"]);
+        return { from: () => ({ where: () => ({
+          limit: async (limit) => {
+            assert.equal(limit, 500, "custom parser input cap remains a documented S2 blocker");
+            return customRows;
+          },
+        }) }) };
+      },
+    };
+    const owner = await buildPermissionIntegrityChecks(db, "staff_owner_missing_permissions");
+    assert.deepEqual(owner, []);
+    assert.equal(queries, 0);
+    const manager = await buildPermissionIntegrityChecks(db, "staff_manager_has_dangerous_permissions");
+    assert.equal(manager.length, 1);
+    assert.equal(manager[0].count, 1);
+    assert.deepEqual(manager[0].issues, [{
+      id: "manager", title: "@manager-x", description: "危険権限: video.permissions", adminHref: "/manage/events/ev1/staff",
+    }]);
+    assert.equal(jsonAccesses, 0);
+    assert.equal(orderedQueries, 1);
+    const custom = await buildPermissionIntegrityChecks(db, "staff_custom_json_invalid");
+    assert.equal(custom.length, 1);
+    assert.equal(custom[0].count, 498);
+    assert.equal(custom[0].issues.length, 50);
+    assert.equal(custom[0].moreCount, 448);
+    assert.equal(jsonAccesses, 498, "custom rows still use the canonical JS parser");
+    assert.equal(queries, 2);
+  });
+
+  test("MIG-0626 U05: preset SQL counts all matches and formats only 50 ordered samples", async () => {
+    const { buildPermissionIntegrityChecks } = await import("@flamenode/server-core/admin/permissionIntegrityChecks");
+    for (const preset of ["custom", "manager"]) {
+      for (const total of [0, 1, 49, 50, 51, 500]) {
+        let displayReads = 0;
+        let jsonReads = 0;
+        const visible = Math.min(total, 50);
+        const returnedRows = preset === "custom" ? total : visible;
+        const rows = Array.from({ length: returnedRows }, (_, i) => ({
+          permission_preset: preset,
+          total_count: total,
+          get id() { displayReads++; return "id-" + i; },
+          get event_id() { displayReads++; return "ev 1"; },
+          get x_user_id() { displayReads++; return "x-" + i; },
+          get custom_permission_keys_json() { jsonReads++; return "{not json"; },
+        }));
+        const db = {
+          select(columns) {
+            const boundedPresetQuery = Object.hasOwn(columns, "total_count");
+            return { from: () => ({ where: () => ({
+              orderBy: () => ({ limit: async (limit) => {
+                assert.equal(limit, 50, preset + " " + total);
+                return rows;
+              } }),
+              limit: async (limit) => {
+                assert.equal(limit, 500, preset + " " + total);
+                return rows;
+              },
+            }) }) };
+          },
+        };
+        const checkId = preset === "custom" ? "staff_custom_json_invalid" : "staff_manager_has_dangerous_permissions";
+        const result = await buildPermissionIntegrityChecks(db, checkId);
+        assert.equal(displayReads, visible * 3, preset + " " + total);
+        assert.equal(jsonReads, preset === "custom" ? total : 0);
+        if (total === 0) {
+          assert.deepEqual(result, []);
+          continue;
+        }
+        assert.equal(result.length, 1);
+        assert.equal(result[0].id, checkId);
+        assert.equal(result[0].count, total);
+        assert.equal(result[0].moreCount, total - visible);
+        assert.deepEqual(result[0].issues, Array.from({ length: visible }, (_, i) => ({
+          id: "id-" + i,
+          title: "@x-" + i,
+          description: preset === "custom" ? "JSON 不正 event:ev 1" : "危険権限: video.permissions",
+          adminHref: "/manage/events/ev%201/staff",
+        })));
+      }
+    }
+  });
+
+  test("MIG-0626 U05: selected custom diagnostics preserve the mixed CURRENT 500-row population", async () => {
+    const { buildPermissionIntegrityChecks } = await import("@flamenode/server-core/admin/permissionIntegrityChecks");
+    for (const [ownerCount, managerCount, customCount, expectedCustom] of [
+      [499, 0, 5, 1],
+      [500, 0, 5, 0],
+      [0, 500, 5, 0],
+      [0, 0, 5, 5],
+    ]) {
+      let jsonReads = 0;
+      const nonCustom = (preset, prefix, count) => Array.from({ length: count }, (_, i) => ({
+        id: prefix + i,
+        event_id: "ev1",
+        x_user_id: prefix + "x-" + i,
+        permission_preset: preset,
+        get custom_permission_keys_json() {
+          throw new Error(preset + " JSON must not be accessed by the custom check");
+        },
+      }));
+      const custom = Array.from({ length: customCount }, (_, i) => ({
+        id: "custom-" + i,
+        event_id: "ev1",
+        x_user_id: "custom-x-" + i,
+        permission_preset: "custom",
+        get custom_permission_keys_json() {
+          jsonReads++;
+          return "{not json";
+        },
+      }));
+      const rows = [
+        ...nonCustom("owner", "owner-", ownerCount),
+        ...nonCustom("manager", "manager-", managerCount),
+        ...custom,
+      ];
+      let queries = 0;
+      const db = {
+        select(columns) {
+          queries++;
+          assert.deepEqual(Object.keys(columns), [
+            "id", "event_id", "x_user_id", "permission_preset", "custom_permission_keys_json",
+          ]);
+          return { from: () => ({ where: () => ({ limit: async (limit) => {
+            assert.equal(limit, 500);
+            return rows.slice(0, limit);
+          } }) }) };
+        },
+      };
+      const result = await buildPermissionIntegrityChecks(db, "staff_custom_json_invalid");
+      assert.equal(queries, 1);
+      assert.equal(jsonReads, expectedCustom);
+      if (expectedCustom === 0) {
+        assert.deepEqual(result, []);
+        continue;
+      }
+      assert.equal(result.length, 1);
+      assert.equal(result[0].id, "staff_custom_json_invalid");
+      assert.equal(result[0].count, expectedCustom);
+      assert.equal(result[0].issues.length, expectedCustom);
+      assert.equal(result[0].moreCount, 0);
+    }
+  });
+
+  test("MIG-0626 U05: manager preset SQL returns a complete count and only 50 stable samples", async () => {
+    const prefix = "mig0626-manager-bounded-";
+    const ids = Array.from({ length: 120 }, (_, i) => prefix + String(i).padStart(3, "0"));
+    const endpoint = "/api/admin-read/ops/integrity/staff_manager_has_dangerous_permissions";
+    try {
+      for (const [i, id] of ids.entries()) {
+        ins("event_staff", {
+          id, event_id: "ev1", x_user_id: prefix + "x-" + i, display_name: "synthetic manager",
+          permission_preset: "manager", custom_permission_keys_json: null, created_at: T0, updated_at: T0,
+        });
+      }
+      const expectedCount = Number(sqlite.prepare(
+        "SELECT COUNT(*) AS count FROM event_staff WHERE permission_preset = 'manager'",
+      ).all()[0].count);
+      const expectedRows = sqlite.prepare(
+        "SELECT id, event_id, x_user_id FROM event_staff WHERE permission_preset = 'manager' ORDER BY id LIMIT 50",
+      ).all();
+      const receipt = await call(endpoint, ADMIN);
+      assert.equal(receipt.status, 200);
+      assert.equal(receipt.headers.get("cache-control"), "private, no-store");
+      assert.equal(receipt.stats.statements, 2, "session + one bounded D1 query");
+      assert.equal(receipt.stats.writes, 0);
+      const result = receipt.body.results[0];
+      assert.equal(result.count, expectedCount);
+      assert.equal(result.issues.length, 50);
+      assert.equal(result.moreCount, expectedCount - 50);
+      assert.deepEqual(result.issues, expectedRows.map((row) => ({
+        id: row.id,
+        title: "@" + (row.x_user_id || "—"),
+        description: "危険権限: video.permissions",
+        adminHref: "/manage/events/" + encodeURIComponent(row.event_id) + "/staff",
+      })));
+    } finally {
+      for (const id of ids) sqlite.prepare("DELETE FROM event_staff WHERE id = ?").run(id);
+    }
+  });
+
+  test("MIG-0626 U05: characterize staff permission diagnostic parsing and the remaining 500-row transfer gap", async () => {
+    // Explicit characterization of CURRENT; 500 is NOT an accepted S2
+    // limit or a complete database-wide integrity count.
+    const prefix = "mig0626-staff-characterization-";
+    const endpoint = "/api/admin-read/ops/integrity/";
+    const add = (suffix, json, preset = "custom") => ins("event_staff", {
+      id: prefix + suffix, event_id: "ev1", x_user_id: prefix + "x-" + suffix,
+      display_name: "synthetic staff", permission_preset: preset,
+      custom_permission_keys_json: json, created_at: T0, updated_at: T0,
+    });
+    const measure = async (check, token = ADMIN) => {
+      const d1 = createD1(sqlite);
+      const prepare = d1.prepare;
+      const projections = [];
+      d1.prepare = (sql) => {
+        const wrap = (stmt) => {
+          if (!/\bfrom\s+"?event_staff"?(?:\s|$)/i.test(sql)) return stmt;
+          return {
+            ...stmt,
+            bind: (...args) => wrap(stmt.bind(...args)),
+            async raw(options) {
+              const rows = await stmt.raw(options);
+              const data = options?.columnNames ? rows.slice(1) : rows;
+              projections.push({ rows: data.length, bytes: Buffer.byteLength(JSON.stringify(data)) });
+              return rows;
+            },
+            async all() {
+              const result = await stmt.all();
+              projections.push({ rows: result.results.length, bytes: Buffer.byteLength(JSON.stringify(result.results)) });
+              return result;
+            },
+          };
+        };
+        return wrap(prepare(sql));
+      };
+      return { ...(await call(endpoint + check, token, { d1 })), projections };
+    };
+    const readOnly = (receipt, status = 200, statements = 2) => {
+      assert.equal(receipt.status, status);
+      assert.equal(receipt.headers.get("cache-control"), "private, no-store");
+      assert.equal(receipt.stats.statements, statements);
+      assert.equal(receipt.stats.writes, 0);
+      assert.ok(Buffer.byteLength(receipt.text) <= 64 * 1024);
+    };
+    const invalid = "staff_custom_json_invalid";
+    const issue = (suffix) => ({
+      id: prefix + suffix,
+      title: "@" + prefix + "x-" + suffix,
+      description: "JSON 不正 event:ev1",
+      adminHref: "/manage/events/ev1/staff",
+    });
+    const result = (count, issues) => ({
+      id: invalid, title: "custom JSON がパース不能", area: "event_staff",
+      severity: "warning", description: "custom_permission_keys_json が壊れています。",
+      count, issues, moreCount: count - issues.length,
+      recommendation: "JSON を修正してください。",
+    });
+    const deepNestedNonString = "[".repeat(1000) + "0" + "]".repeat(1000);
+    const cases = [
+      ["null", null, false],
+      ["empty", "", false],
+      ["empty-array", "[]", false],
+      ["trimmed-empty", "\u00a0[]\u00a0", false],
+      ["bom-empty", "\uFEFF[]\uFEFF", false],
+      ["deep-nested-only", deepNestedNonString, true],
+      ["deep-nested-valid-alias", `["videos.title",${deepNestedNonString}]`, false],
+      ["spaced-array", " [ ] ", true],
+      ["whitespace-only", " \t\n ", true],
+      ["malformed", "{not json", true],
+      ["non-array", '{"key":"event.basic"}', true],
+      ["non-strings", "[null,7,true,{}]", true],
+      ["unknown-only", '["bogus.key"]', true],
+      // SEC-930: both CURRENT and TARGET use the shared canonicalizer.
+      // Inherited-only keys now resolve to no grants; mixed valid keys retain
+      // the existing diagnostic behavior (at least one recognized key).
+      ...Object.getOwnPropertyNames(Object.prototype).flatMap((name, i) => [
+        ["inherited-only-" + i, JSON.stringify([name]), true],
+        ["inherited-alias-" + i, JSON.stringify([name, "videos.title"]), false],
+        ["inherited-admin-" + i, JSON.stringify([name, "xid.link_requests"]), false],
+      ]),
+      ["inherited-only-all", JSON.stringify(Object.getOwnPropertyNames(Object.prototype)), true],
+      ["inherited-all-with-valid", JSON.stringify([...Object.getOwnPropertyNames(Object.prototype), "event.basic"]), false],
+      ["known", '["event.basic"]', false],
+      ["legacy-alias", '["videos.title"]', false],
+      ["admin-only-key", '["xid.link_requests"]', false],
+      ["mixed", '["bogus.key",7,"event.basic"]', false],
+      ["duplicate", '["event.basic","event.basic"]', false],
+      ["escaped-key", '["\\u0065vent.basic"]', false],
+      ["wrong-case", '["EVENT.BASIC"]', true],
+      ["trailing-space-key", '["event.basic "]', true],
+      ["nul-key", '["event.basic\\u0000"]', true],
+      ["json-trailing-comma", '["event.basic",]', true],
+    ];
+    // Do not disturb the shared seed for the other parity checks.
+    sqlite.exec("SAVEPOINT mig0626_staff_characterization");
+    try {
+      sqlite.exec("UPDATE event_staff SET permission_preset = 'public_staff'");
+      const empty = await measure(invalid);
+      readOnly(empty);
+      assert.deepEqual(empty.body, { ran: true, results: [] });
+      assert.deepEqual(empty.projections.map((p) => p.rows), [0]);
+
+      for (const [suffix, json] of cases) add(suffix, json);
+      add("owner", "{not json", "owner");
+      add("manager", "{not json", "manager");
+      add("excluded", "{not json", "public_staff");
+      const corpus = await measure(invalid);
+      readOnly(corpus);
+      const expectedIssues = cases.filter(([, , bad]) => bad).map(([suffix]) => issue(suffix));
+      assert.deepEqual(corpus.projections.map((p) => p.rows), [cases.length + 2]);
+      assert.equal(corpus.body.results.length, 1);
+      const sortIssues = (items) => [...items].sort((a, b) => a.id.localeCompare(b.id));
+      const received = corpus.body.results[0];
+      assert.deepEqual({ ...received, issues: sortIssues(received.issues) },
+        result(expectedIssues.length, sortIssues(expectedIssues)));
+      assert.doesNotMatch(corpus.text, /bogus\.key|not json/);
+      const owner = await measure("staff_owner_missing_permissions");
+      // The canonical owner preset resolves all its own keys. The selected
+      // check must not touch event_staff when there are no missing keys.
+      readOnly(owner, 200, 1);
+      assert.deepEqual(owner.projections, []);
+      assert.deepEqual(owner.body, { ran: true, results: [] });
+      const manager = await measure("staff_manager_has_dangerous_permissions");
+      readOnly(manager);
+      assert.deepEqual(manager.projections.map((p) => p.rows), [1]);
+      assert.equal(manager.body.results[0].count, 1);
+      assert.deepEqual(manager.body.results[0].issues, [{
+        ...issue("manager"), description: "危険権限: video.permissions",
+      }]);
+
+      sqlite.exec("UPDATE event_staff SET permission_preset = 'public_staff'");
+      // A small/empty HTTP receipt does not prove bounded D1 input or parse CPU.
+      const huge = JSON.stringify(["event.basic", "z".repeat(70_000)]);
+      add("large-valid", huge);
+      const large = await measure(invalid);
+      readOnly(large);
+      assert.deepEqual(large.body, { ran: true, results: [] });
+      assert.deepEqual(large.projections.map((p) => p.rows), [1]);
+      assert.ok(large.projections[0].bytes > 64 * 1024);
+
+      sqlite.exec("UPDATE event_staff SET permission_preset = 'public_staff'");
+      // All 620 rows are invalid, so this demonstrates an incomplete count
+      // independently of the existing SELECT's unspecified row order.
+      const allIds = Array.from({ length: 620 }, (_, i) => "bulk-" + i);
+      for (const suffix of allIds) add(suffix, "{not json");
+      const fullInvalid = sqlite.prepare(
+        "SELECT COUNT(*) AS n FROM event_staff WHERE permission_preset = 'custom'"
+      ).get().n;
+      assert.equal(fullInvalid, 620);
+      const bulk = await measure(invalid);
+      readOnly(bulk);
+      assert.deepEqual(bulk.projections.map((p) => p.rows), [500]);
+      assert.equal(bulk.body.results.length, 1);
+      const observed = bulk.body.results[0];
+      assert.equal(observed.count, 500, "CURRENT incomplete count; update when full scan/snapshot contract is approved");
+      assert.equal(observed.moreCount, 450);
+      assert.equal(observed.issues.length, 50);
+      assert.equal(new Set(observed.issues.map((r) => r.id)).size, 50);
+      const allowed = new Set(allIds.map((suffix) => JSON.stringify(issue(suffix))));
+      assert.ok(observed.issues.every((row) => allowed.has(JSON.stringify(row))));
+      assert.ok(observed.count < fullInvalid, "characterization of known gap, NOT acceptance");
+      const denied = await measure(invalid, "tok-alice");
+      readOnly(denied, 403, 1);
+      assert.deepEqual(denied.projections, []);
+    } finally {
+      sqlite.exec("ROLLBACK TO mig0626_staff_characterization; RELEASE mig0626_staff_characterization");
+    }
+  });
+
+  test("MIG-0626 U05: integrity diagnosis bounds the full UTF-8 response and preserves in-budget issues", async () => {
+    const { runIntegrityCheckById } = await import("@flamenode/server-core/admin/integrityChecks");
+    const checkId = "audit_videos_orphan";
+    const path = "/api/admin-read/ops/integrity/" + checkId;
+    const ids = Array.from({ length: 5 }, (_, i) => "integrity-byte-bound-" + i);
+    const seedTarget = "integrity-missing-target";
+    const limit = 64 * 1024;
+    const encoder = new TextEncoder();
+    const size = (receipt) => encoder.encode(receipt.text).length;
+    const update = sqlite.prepare("UPDATE audit_logs SET target_id = ? WHERE id = ?");
+    try {
+      for (const id of ids) {
+        ins("audit_logs", {
+          id, table_name: "videos", target_id: seedTarget,
+          operation: "UPDATE", actor_user_id: "u_carol", created_at: T0,
+        });
+      }
+      const baseline = await call(path, ADMIN);
+      assert.equal(baseline.status, 200);
+      assert.ok(ids.every((id) => baseline.body.results[0].issues.some((issue) => issue.id === id)),
+        "all five fixture issues must be present before testing byte limits");
+      const exact = "a".repeat(limit - size(baseline) + seedTarget.length);
+      const exactWith = (unit) => {
+        const bytes = Buffer.byteLength(JSON.stringify(unit)) - 2;
+        return unit.repeat(Math.floor(exact.length / bytes)) + "a".repeat(exact.length % bytes);
+      };
+      const boundaries = ["é", "あ", "🚀", "\u0001", '"', "\\"].flatMap((unit, index) => {
+        const value = exactWith(unit);
+        return [
+          ["exact escaped boundary " + index, [value], true],
+          ["one byte over escaped boundary " + index, [value + "a"], false],
+        ];
+      });
+      for (const [label, values, accepted] of [
+        ["exact limit", [exact], true],
+        ["one byte over", [exact + "a"], false],
+        ...boundaries,
+        ["oversized ASCII", ["private-integrity-" + "a".repeat(70_000)], false],
+        ["multibyte", ["private-integrity-" + "あ".repeat(22_000)], false],
+        ["escaped controls", ["private-integrity-" + "\u0001".repeat(11_000)], false],
+        ["aggregate five issues", ids.map(() => "private-integrity-" + "あ".repeat(4_500)), false],
+        ["valid multibyte", ["あ".repeat(10_000)], true],
+      ]) {
+        for (let i = 0; i < ids.length; i++) update.run(values[i] ?? seedTarget, ids[i]);
+        // Test-only spy: detect the old preflight's oversized whole-body
+        // serialization even when the eventual HTTP response was a small 503.
+        const stringify = JSON.stringify;
+        let oversizedWholeBodies = 0;
+        let receipt;
+        JSON.stringify = function (value, ...args) {
+          const wire = stringify(value, ...args);
+          if (value?.ran === true && Array.isArray(value.results) &&
+              typeof wire === "string" && Buffer.byteLength(wire) > limit) oversizedWholeBodies++;
+          return wire;
+        };
+        try {
+          receipt = await call(path, ADMIN);
+        } finally {
+          JSON.stringify = stringify;
+        }
+        assert.equal(oversizedWholeBodies, 0, label + ": no oversized whole-DTO stringify");
+        assert.equal(receipt.status, accepted ? 200 : 503, label);
+        assert.ok(size(receipt) <= limit, label);
+        assert.equal(receipt.headers.get("cache-control"), "private, no-store", label);
+        assert.equal(receipt.stats.statements, 2, label + ": session + one selected check");
+        assert.equal(receipt.stats.writes, 0, label);
+        if (accepted) {
+          const expected = await runIntegrityCheckById(refDb, checkId);
+          assert.deepEqual(receipt.body, canon({ ran: true, results: [expected] }), label);
+          assert.equal(receipt.body.results[0].count, baseline.body.results[0].count, label);
+          assert.equal(receipt.body.results[0].moreCount, baseline.body.results[0].moreCount, label);
+          if (label === "exact limit" || label.startsWith("exact escaped boundary")) {
+            assert.equal(size(receipt), limit, label);
+          }
+        } else {
+          assert.deepEqual(receipt.body, { error: "unavailable" }, label);
+          assert.doesNotMatch(receipt.text, /private-integrity-|integrity-byte-bound-/);
+        }
+      }
+    } finally {
+      for (const id of ids) sqlite.prepare("DELETE FROM audit_logs WHERE id = ?").run(id);
+    }
   });
 
   test("T02 cost guard equals CURRENT (mode resolution, exception window, last 20 system_settings updates); no row -> defaults", async () => {
@@ -1158,6 +2616,92 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(r.body.history.length, 20);
     sqlite.exec("UPDATE system_settings SET operation_mode = 'not-a-mode' WHERE id = 'default'");
     assert.deepEqual((await get("/ops/cost-guard")).body, await refCostGuard(), "unknown mode falls back to normal");
+  });
+
+  test("MIG-0626: cost guard bounds settings and history together without false normal state", async () => {
+    const endpoint = "/api/admin-read/ops/cost-guard";
+    const limit = 64 * 1024;
+    const size = (value) => Buffer.byteLength(JSON.stringify(value));
+    const read = () => call(endpoint, ADMIN);
+    const update = sqlite.prepare(
+      "UPDATE system_settings SET cost_guard_reason = ?, cost_guard_exception_features_json = ?, disabled_features_json = ? WHERE id = 'default'"
+    );
+    const check = (receipt, status, statements) => {
+      assert.equal(receipt.status, status);
+      assert.equal(receipt.headers.get("cache-control"), "private, no-store");
+      assert.equal(receipt.stats.statements, statements);
+      assert.equal(receipt.stats.writes, 0);
+      assert.ok(Buffer.byteLength(receipt.text) <= limit);
+      if (status === 503) {
+        assert.deepEqual(receipt.body, { error: "unavailable" });
+        assert.doesNotMatch(receipt.text, /private-cost-guard/);
+      }
+    };
+    sqlite.exec("SAVEPOINT mig0626_cost_guard_envelope");
+    try {
+      sqlite.exec("DELETE FROM audit_logs WHERE table_name = 'system_settings' AND operation = 'UPDATE'");
+      sqlite.exec("UPDATE system_settings SET operation_mode = 'maintenance' WHERE id = 'default'");
+      update.run("seed", "[]", "[]");
+      const base = await read();
+      check(base, 200, 3);
+      assert.equal(base.body.mode, "maintenance");
+      assert.equal(base.body.isMaintenance, true);
+      assert.deepEqual(base.body.history, []);
+      const exact = "a".repeat(limit - size(base.body) + "seed".length);
+      for (const [reason, exception, disabled, accepted] of [
+        [exact, "[]", "[]", true],
+        [exact + "a", "[]", "[]", false],
+        ["private-cost-guard-" + "a".repeat(70_000), "[]", "[]", false],
+        ["private-cost-guard-" + "あ".repeat(22_000), "[]", "[]", false],
+        ["private-cost-guard-" + "\u0001".repeat(11_000), "[]", "[]", false],
+        ["seed", JSON.stringify(["あ".repeat(11_000)]), JSON.stringify(["あ".repeat(11_000)]), false],
+        ["あ".repeat(10_000), "[]", "[]", true],
+      ]) {
+        update.run(reason, exception, disabled);
+        const r = await read();
+        check(r, accepted ? 200 : 503, accepted ? 3 : 2);
+        if (accepted) {
+          assert.deepEqual(r.body, { ...base.body, reason, exceptionFeaturesJson: exception, disabledFeaturesJson: disabled });
+          if (reason === exact) assert.equal(Buffer.byteLength(r.text), limit);
+        }
+      }
+      update.run("seed", "[]", "[]");
+      for (let i = 0; i < 3; i++) {
+        ins("audit_logs", {
+          id: "mig0626-cost-envelope-" + i, table_name: "system_settings", target_id: "default",
+          operation: "UPDATE", actor_user_id: "u_carol", created_at: 4_000_000_000 + i,
+          before_json: JSON.stringify({ text: "あ".repeat(4000) }), after_json: "{}",
+        });
+      }
+      const full = await read();
+      check(full, 200, 3);
+      assert.equal(full.body.history.length, 3);
+      assert.equal(full.body.truncated, false);
+      const two = { ...full.body, history: full.body.history.slice(0, 2) };
+      const twoReason = "a".repeat(limit - size(two) + "seed".length);
+      update.run(twoReason, "[]", "[]");
+      const clipped = await read();
+      check(clipped, 200, 3);
+      assert.deepEqual(clipped.body, { ...two, reason: twoReason, truncated: true });
+      assert.equal(Buffer.byteLength(clipped.text), limit - 1);
+      update.run(twoReason + "a", "[]", "[]");
+      const one = await read();
+      check(one, 200, 3);
+      assert.deepEqual(one.body, { ...two, reason: twoReason + "a", history: two.history.slice(0, 1), truncated: true });
+      update.run("seed", "[]", "[]");
+      ins("audit_logs", {
+        id: "mig0626-cost-envelope-oversize", table_name: "system_settings", target_id: "default",
+        operation: "UPDATE", actor_user_id: "u_carol", created_at: 4_000_000_010,
+        before_json: "private-cost-guard-" + "z".repeat(70_000), after_json: "{}",
+      });
+      const oversizeRow = await read();
+      check(oversizeRow, 200, 3);
+      assert.deepEqual(oversizeRow.body, { ...base.body, truncated: true });
+      assert.doesNotMatch(oversizeRow.text, /private-cost-guard/);
+      check(await call(endpoint, "tok-alice"), 403, 1);
+    } finally {
+      sqlite.exec("ROLLBACK TO mig0626_cost_guard_envelope; RELEASE mig0626_cost_guard_envelope");
+    }
   });
 
   test("T05 cost guard: a failing read renders CURRENT's defaults (200), without internals", async () => {

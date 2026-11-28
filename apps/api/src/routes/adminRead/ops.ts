@@ -13,6 +13,9 @@ import type {
   AdminYoutubeSyncResponse,
 } from "@flamenode/contracts";
 import { derivePlaylistSyncHealth } from "./playlistHealth.ts";
+import { INTEGRITY_CHECK_IDS, runIntegrityCheckById } from "@flamenode/server-core/admin/integrityChecks";
+import { HEALTH_CHECK_IDS, runAuthLikeCountDriftCandidate, runHealthCheckById } from "@flamenode/server-core/admin/healthChecks";
+import { dbMiddleware } from "../../middleware/db.ts";
 import { loadWorkerMonitoring } from "./workerMonitoring.ts";
 import {
   STATIC_BACKFILL_KINDS,
@@ -39,10 +42,81 @@ const MAX_YOUTUBE_SYNC_ROWS = 100;
 const YOUTUBE_SYNC_STALE_SECONDS = 14 * 24 * 60 * 60;
 /** ZERO_1102 S2: keep each list response under 64 KiB (payloads / errors are the large columns). */
 const MAX_OPS_LIST_BYTES = 48 * 1024;
+/** S2 bounds the entire serialized HTTP body, not just queue rows. */
+const MAX_OPS_HTTP_BYTES = 64 * 1024;
+/** Limit UTF-16 input lengths before JSON.stringify of untrusted D1/KV payloads (ZERO_1102 §4). */
+// Match the canonical backfill mutation reader's 64 KiB pre-parse KV limit.
+const MAX_OPS_KV_STATE_BYTES = 64 * 1024;
+// Mutation cursor validation is 128 UTF-16 code units, also for persisted KV.
+const MAX_OPS_BACKFILL_CURSOR_CODE_UNITS = 128;
+const MAX_OPS_ROW_TEXT_CODE_UNITS = 8192;
+const MAX_BACKFILL_SUMMARY_ERROR_CODE_UNITS = 1024;
+const OMITTED_BACKFILL_ERROR = "長いエラー詳細は応答サイズ上限のため省略しました。";
 const utf8Encoder = new TextEncoder();
 /** Serialized size in UTF-8 bytes (not UTF-16 units). Lists apply it to every row, the first included. */
 function utf8Size(value: unknown): number {
   return utf8Encoder.encode(JSON.stringify(value)).length;
+}
+
+/** Exact UTF-8 JSON envelope budget for fixed-shape diagnostic DTOs.
+ * The shell contains the original metadata/structure, with the measured
+ * string values replaced by empty strings. Do not stringify large bodies
+ * merely to reject them, and never truncate a persisted identifier.
+ */
+function boundedDiagnosticStringsFit(shell: unknown, strings: readonly string[]): boolean {
+  let textUnits = 0;
+  for (const value of strings) {
+    textUnits += value.length;
+    if (textUnits > MAX_OPS_HTTP_BYTES) return false;
+  }
+  let remaining = MAX_OPS_HTTP_BYTES - utf8Size(shell);
+  if (remaining < textUnits) return false;
+  // Each UTF-16 unit occupies at most six escaped JSON bytes.
+  if (textUnits * 6 <= remaining) return true;
+  for (const value of strings) {
+    for (let offset = 0; offset < value.length;) {
+      let end = Math.min(offset + 4096, value.length);
+      // Keep surrogate pairs together; JSON.stringify escapes lone surrogates.
+      if (end < value.length) {
+        const high = value.charCodeAt(end - 1), low = value.charCodeAt(end);
+        if (high >= 0xd800 && high <= 0xdbff && low >= 0xdc00 && low <= 0xdfff) end--;
+      }
+      // Empty-string quotes are already in the shell. Each temporary
+      // serialized slice is at most 24 KiB plus its two quotes.
+      remaining -= utf8Size(value.slice(offset, end)) - 2;
+      if (remaining < 0) return false;
+      offset = end;
+    }
+  }
+  return true;
+}
+
+function diagnosticResponseFits(body: { results: readonly { samples: readonly string[] }[] }): boolean {
+  return boundedDiagnosticStringsFit({
+    ...body,
+    results: body.results.map((result) => ({ ...result, samples: result.samples.map(() => "") })),
+  }, body.results.flatMap((result) => result.samples));
+}
+
+/** Integrity result and issue records contain scalar DTO fields only.
+ * Replace every string (including optional links/SQL previews) in the
+ * shell; undefined properties retain JSON.stringify's omission semantics.
+ */
+function integrityResponseFits(body: AdminIntegrityResponse): boolean {
+  const strings: string[] = [];
+  const blank = (record: object) => Object.fromEntries(Object.entries(record).map(([key, value]) => {
+    if (typeof value !== "string") return [key, value];
+    strings.push(value);
+    return [key, ""];
+  }));
+  const shell = {
+    ...body,
+    results: body.results.map(({ issues, ...result }) => ({
+      ...blank(result),
+      issues: issues.map(blank),
+    })),
+  };
+  return boundedDiagnosticStringsFit(shell, strings);
 }
 
 const TERMINAL_FAILURE_STATUSES = ["failed", "dead_letter"];
@@ -229,15 +303,18 @@ adminOpsRoutes.get("/notifications", async (c) => {
 // Default view = the 5 operational checks, as ONE UNION ALL statement (session + 1; CURRENT 9 queries). A failure
 // is CURRENT's page error (Promise.all rejects): error "query_failed", no results.
 //
-// STOP (recorded, not implemented): ?deep=1 / ?run=1 runs the 22-check runHealthChecks(), which scans whole tables
-// (like_count drift loads every video with stored likes into JS, orphan joins, slot pairs). That cannot meet S2
-// (<= 3 statements, bounded LIMIT, 7 ms) and is a background-job (B) / build-time report, not an API read.
-// The API answers 501 for deep runs; the SPA must not link to it until that job exists.
+// Deep requests only return the allowlisted check catalog, without running unbounded checks.
+// Each selected diagnostic is requested separately by /ops/health/checks/:checkId.
 adminOpsRoutes.get("/health", async (c) => {
-  const statusQ = c.req.query("status");
+  // CURRENT Next searchParams supplies arrays for repeated keys. Only a
+  // single scalar value selects a filter or explicitly opts in to a deep run.
+  const statuses = c.req.queries("status");
+  const statusQ = statuses?.length === 1 ? statuses[0] : undefined;
   const status = statusQ === "warn" || statusQ === "info" || statusQ === "ok" ? statusQ : "all";
-  if (c.req.query("deep") === "1" || c.req.query("run") === "1") {
-    return c.json({ error: "deep_unsupported" }, 501);
+  const deep = c.req.queries("deep");
+  const run = c.req.queries("run");
+  if ((deep?.length === 1 && deep[0] === "1") || (run?.length === 1 && run[0] === "1")) {
+    return c.json({ status, results: [], error: null, checkIds: [...HEALTH_CHECK_IDS] } satisfies AdminHealthResponse);
   }
   const now = Math.floor(Date.now() / 1000);
   let results: AdminHealthResponse["results"] = [];
@@ -314,20 +391,51 @@ adminOpsRoutes.get("/health", async (c) => {
     results = [];
   }
   const body: AdminHealthResponse = { status, results, error };
+  if (!diagnosticResponseFits(body)) {
+    return c.json({ error: "unavailable" }, 503);
+  }
+  return c.json(body);
+});
+
+// MIG-0626 U06: One existing CURRENT health check per admin-only request; unknown IDs fail closed.
+adminOpsRoutes.get("/health/checks/:checkId", dbMiddleware, async (c) => {
+  const id = c.req.param("checkId");
+  if (!id || !HEALTH_CHECK_IDS.some((checkId) => checkId === id)) {
+    return c.json({ error: "not_found" }, 404);
+  }
+  // Lead-scoped U06 candidate: only the Hono route uses Auth interaction authority.
+  // The shared Next compatibility bridge remains on the legacy CURRENT receipt pending independent review.
+  const result = id === "like_count_drift"
+    ? await runAuthLikeCountDriftCandidate(c.get("db"))
+    : await runHealthCheckById(c.get("db"), id);
+  const body: AdminHealthResponse = { status: "all", results: result ? [result] : [], error: null };
+  if (!diagnosticResponseFits(body)) {
+    return c.json({ error: "unavailable" }, 503);
+  }
   return c.json(body);
 });
 
 // ---- /ops/integrity (health/integrity/page.tsx; src/lib/admin/integrityChecks.ts) ----
-// CURRENT renders only the "run" prompt without ?run=1 (no query), and with ?run=1 runs 28 table-scanning checks
-// (runIntegrityChecks, ~910 lines of check definitions) in one page load.
-//
-// STOP (recorded, not implemented): 28 scans cannot fit one S2 request (<= 3 D1 statements). The run=1 view is answered
-// 501. Follow-up design (not built here): GET /ops/integrity/:checkId, one window-count statement per check
-// (session + 1, LIMIT 10 sample), called one by one by the SPA; this needs the 28 makeCheck definitions ported from
-// drizzle sql`` fragments to plain SQL with a per-check parity test.
+// MIG-0626 U05: CURRENT exposes the full read-only result set. To fit the S2 request
+// budget, return an allowlisted check ID catalog and execute only the requested check.
+// The enclosing adminReadRoutes guard enforces session -> non-banned -> admin.
 adminOpsRoutes.get("/integrity", (c) => {
-  if (c.req.query("run") === "1") return c.json({ error: "integrity_run_unsupported" }, 501);
-  const body: AdminIntegrityResponse = { ran: false, results: [] };
+  const body: AdminIntegrityResponse = { ran: false, results: [], checkIds: [...INTEGRITY_CHECK_IDS] };
+  return c.json(body);
+});
+
+adminOpsRoutes.get("/integrity/:checkId", dbMiddleware, async (c) => {
+  const id = c.req.param("checkId");
+  if (!id || !INTEGRITY_CHECK_IDS.some((checkId) => checkId === id)) {
+    return c.json({ error: "not_found" }, 404);
+  }
+  const result = await runIntegrityCheckById(c.get("db"), id);
+  const body: AdminIntegrityResponse = { ran: true, results: result ? [result] : [] };
+  // Bound the exact escaped UTF-8 envelope before serializing it as a whole.
+  // Do not truncate identifiers, action links or integrity counts.
+  if (!integrityResponseFits(body)) {
+    return c.json({ error: "unavailable" }, 503);
+  }
   return c.json(body);
 });
 
@@ -341,6 +449,8 @@ adminOpsRoutes.get("/integrity", (c) => {
 // the object state (head) is returned and the SPA shows the rest as "not evaluated" until MIG-0627.
 const MAX_STATIC_QUEUE_ROWS = 80;
 const MAX_BACKFILL_FAILURE_ROWS = 20;
+/** 3 recognized kinds × 4 actionable queue states; aggregate result has at most 12 rows. */
+const MAX_BACKFILL_COUNT_ROWS = 12;
 /** CURRENT src/lib/operationMode/policy.ts STATIC_REBUILD_ITEMS_PER_RUN (json-generator runs 1 target per run). */
 const STATIC_REBUILD_ITEMS_PER_RUN = 1;
 const SHARED_INPUT_OBJECTS = [
@@ -358,32 +468,68 @@ function backfillKindFromReason(reason: string): StaticBackfillKind | null {
 }
 
 adminOpsRoutes.get("/static-builds", async (c) => {
+  let oversizedKvState = false;
   const [queue, aggregates, backfillState, sharedInputs] = await Promise.all([
     c.env.DB.prepare(
-      "SELECT id, status, target_type, target_id, reason, priority, attempt_count, updated_at, error " +
-        "FROM static_rebuild_queue ORDER BY updated_at DESC LIMIT ?",
+      "SELECT id, status, target_type, target_id, reason, priority, attempt_count, updated_at, " +
+        "substr(error, 1, ?) AS error FROM static_rebuild_queue ORDER BY updated_at DESC LIMIT ?",
     )
-      .bind(MAX_STATIC_QUEUE_ROWS)
+      .bind(MAX_OPS_ROW_TEXT_CODE_UNITS + 1, MAX_STATIC_QUEUE_ROWS)
       .all<AdminStaticBuildsResponse["rows"][number]>(),
     c.env.DB.prepare(
-      `SELECT 'bf_count' AS kind, reason AS a, status AS b, COUNT(*) AS n
-         FROM static_rebuild_queue WHERE reason LIKE 'backfill_%' GROUP BY reason, status
+      `SELECT 'bf_count' AS kind, a, b, n FROM (
+         SELECT CASE
+           WHEN reason = 'backfill_video_v2' OR reason GLOB 'backfill_video_v2_*' THEN 'backfill_video_v2'
+           WHEN reason = 'backfill_user_profile' OR reason GLOB 'backfill_user_profile_*' THEN 'backfill_user_profile'
+           WHEN reason = 'backfill_event_crew' OR reason GLOB 'backfill_event_crew_*' THEN 'backfill_event_crew'
+         END AS a, status AS b, COUNT(*) AS n
+         FROM static_rebuild_queue
+         WHERE status IN ('pending', 'processing', 'failed', 'dead_letter')
+           AND (
+             reason = 'backfill_video_v2' OR reason GLOB 'backfill_video_v2_*'
+             OR reason = 'backfill_user_profile' OR reason GLOB 'backfill_user_profile_*'
+             OR reason = 'backfill_event_crew' OR reason GLOB 'backfill_event_crew_*'
+           )
+         GROUP BY a, b
+         LIMIT ?)
        UNION ALL
        SELECT 'bf_fail' AS kind, reason AS a, error AS b, NULL AS n FROM (
-         SELECT reason, error FROM static_rebuild_queue
-          WHERE reason LIKE 'backfill_%' AND status IN ('failed', 'dead_letter')
+         SELECT reason, substr(error, 1, ?) AS error FROM static_rebuild_queue
+          WHERE status IN ('failed', 'dead_letter')
+            AND (
+              reason = 'backfill_video_v2' OR reason GLOB 'backfill_video_v2_*'
+              OR reason = 'backfill_user_profile' OR reason GLOB 'backfill_user_profile_*'
+              OR reason = 'backfill_event_crew' OR reason GLOB 'backfill_event_crew_*'
+            )
           ORDER BY updated_at DESC LIMIT ?)
        UNION ALL
        SELECT 'count' AS kind, status AS a, NULL AS b, COUNT(*) AS n FROM static_rebuild_queue GROUP BY status
        UNION ALL
        SELECT 'mode' AS kind, operation_mode AS a, NULL AS b, NULL AS n FROM (SELECT operation_mode FROM system_settings LIMIT 1)`,
     )
-      .bind(MAX_BACKFILL_FAILURE_ROWS)
+      .bind(MAX_BACKFILL_COUNT_ROWS, MAX_BACKFILL_SUMMARY_ERROR_CODE_UNITS + 1, MAX_BACKFILL_FAILURE_ROWS)
       .all<{ kind: string; a: string | null; b: string | null; n: number | null }>(),
     (async () => {
       try {
         const raw = await c.env.KV?.get(STATIC_BACKFILL_KV_KEY);
-        return raw ? parseStaticBackfillState(JSON.parse(raw)) : createEmptyStaticBackfillState();
+        if (raw && (
+          raw.length > MAX_OPS_KV_STATE_BYTES ||
+          utf8Encoder.encode(raw).byteLength > MAX_OPS_KV_STATE_BYTES
+        )) {
+          // Reject oversize stored state BEFORE JSON.parse, as the S3 writer does.
+          oversizedKvState = true;
+          return createEmptyStaticBackfillState();
+        }
+        const state = raw ? parseStaticBackfillState(JSON.parse(raw)) : createEmptyStaticBackfillState();
+        if (STATIC_BACKFILL_KINDS.some(
+          (kind) => (state.runs[kind].cursor?.length ?? 0) > MAX_OPS_BACKFILL_CURSOR_CODE_UNITS,
+        )) {
+          // A resume token rejected by POST must never be offered as a working
+          // continuation token by GET. Do not shorten or silently replace it.
+          oversizedKvState = true;
+          return createEmptyStaticBackfillState();
+        }
+        return state;
       } catch {
         return createEmptyStaticBackfillState();
       }
@@ -400,6 +546,10 @@ adminOpsRoutes.get("/static-builds", async (c) => {
       }),
     ),
   ]);
+
+  if (oversizedKvState) {
+    return c.json({ error: "unavailable" }, 503);
+  }
 
   const counts = { pending: 0, processing: 0, failed: 0, dead_letter: 0, done: 0 };
   let operationMode = resolveOperationMode(null);
@@ -423,26 +573,24 @@ adminOpsRoutes.get("/static-builds", async (c) => {
       if (row.b === "failed" || row.b === "dead_letter") backfillQueue[kind].failed += count;
     }
   }
+  let truncated = false;
   for (const row of aggregates.results) {
     if (row.kind !== "bf_fail") continue;
     const kind = backfillKindFromReason(String(row.a ?? ""));
     if (!kind || backfillQueue[kind].lastError || !row.b) continue;
-    backfillQueue[kind].lastError = row.b;
+    // Prevent a giant provider diagnostic from being stringified or sent in
+    // the admin response. Keep ordinary error messages intact.
+    if (row.b.length > MAX_BACKFILL_SUMMARY_ERROR_CODE_UNITS) {
+      backfillQueue[kind].lastError = OMITTED_BACKFILL_ERROR;
+      truncated = true;
+    } else {
+      backfillQueue[kind].lastError = row.b;
+    }
   }
 
-  // ZERO_1102 S2: response <= 64 KiB (the queue rows carry error text).
-  const rows: AdminStaticBuildsResponse["rows"] = [];
-  let used = 0;
-  let truncated = false;
-  for (const row of queue.results) {
-    const size = utf8Size(row);
-    if (used + size > MAX_OPS_LIST_BYTES) {
-      truncated = true;
-      break;
-    }
-    used += size;
-    rows.push(row);
-  }
+  // Budget the complete JSON envelope FIRST, before adding the row list.
+  // This avoids O(rows²) serialization and never serializes an oversized
+  // persisted KV cursor or provider error to check whether it was oversized.
   const body: AdminStaticBuildsResponse = {
     operationMode,
     maxItemsPerRun: STATIC_REBUILD_ITEMS_PER_RUN,
@@ -451,8 +599,34 @@ adminOpsRoutes.get("/static-builds", async (c) => {
     backfillQueue,
     sharedInputs,
     truncated,
-    rows,
+    rows: [],
   };
+  const headerBytes = utf8Size(body);
+  if (headerBytes > MAX_OPS_HTTP_BYTES) {
+    // A continuation cursor is actionable; never shorten it to fit an HTTP body.
+    return c.json({ error: "unavailable" }, 503);
+  }
+  const availableRowBytes = Math.min(MAX_OPS_LIST_BYTES, MAX_OPS_HTTP_BYTES - headerBytes);
+  let used = 0;
+  for (const row of queue.results) {
+    // A single D1 string can exceed the entire S2 JSON serialization limit.
+    // Count input code units before JSON.stringify (control chars may expand
+    // to 6 escaped ASCII bytes per UTF-16 unit).
+    const textUnits = Object.values(row).reduce<number>(
+      (sum, value) => sum + (typeof value === "string" ? value.length : 0), 0,
+    );
+    if (textUnits > MAX_OPS_ROW_TEXT_CODE_UNITS) {
+      body.truncated = true;
+      break;
+    }
+    const size = utf8Size(row) + (body.rows.length === 0 ? 0 : 1);
+    if (used + size > availableRowBytes) {
+      body.truncated = true;
+      break;
+    }
+    used += size;
+    body.rows.push(row);
+  }
   return c.json(body);
 });
 
@@ -571,9 +745,12 @@ function securityResult(id: SecurityCheckId, rows: Array<{ total_count: number |
 }
 
 adminOpsRoutes.get("/security", async (c) => {
-  const statusQ = c.req.query("status");
+  // CURRENT Next searchParams rejects array-valued opt-ins and status filters.
+  const statuses = c.req.queries("status");
+  const statusQ = statuses?.length === 1 ? statuses[0] : undefined;
   const status = statusQ === "warn" || statusQ === "info" || statusQ === "ok" ? statusQ : "all";
-  const shouldRun = c.req.query("run") === "1";
+  const run = c.req.queries("run");
+  const shouldRun = run?.length === 1 && run[0] === "1";
   if (!shouldRun) {
     const idle: AdminSecurityResponse = { status, ran: false, results: [], error: null };
     return c.json(idle);
@@ -630,6 +807,9 @@ adminOpsRoutes.get("/security", async (c) => {
     },
   ];
   const body: AdminSecurityResponse = { status, ran: true, results, error: null };
+  if (!diagnosticResponseFits(body)) {
+    return c.json({ error: "unavailable" }, 503);
+  }
   return c.json(body);
 });
 
@@ -919,19 +1099,39 @@ adminOpsRoutes.get("/cost-guard", async (c) => {
         disabledFeaturesJson: settings.disabled_features_json,
       };
     }
+    // Reject oversized configuration rather than reporting false normal
+    // defaults or truncating the actionable settings fields.
+    const headerTextUnits = [found.reason, found.exceptionFeaturesJson, found.disabledFeaturesJson]
+      .reduce<number>((sum, value) => sum + (value?.length ?? 0), 0);
+    if (headerTextUnits > MAX_OPS_HTTP_BYTES) {
+      return c.json({ error: "unavailable" }, 503);
+    }
+    const headerBytes = utf8Size(found);
+    if (headerBytes > MAX_OPS_HTTP_BYTES) {
+      return c.json({ error: "unavailable" }, 503);
+    }
     const { results } = await c.env.DB.prepare(
       "SELECT id, created_at, actor_user_id, target_id, before_json, after_json FROM audit_logs " +
         "WHERE table_name = 'system_settings' AND operation = 'UPDATE' ORDER BY created_at DESC LIMIT ?",
     )
       .bind(MAX_COST_GUARD_HISTORY)
       .all<AdminCostGuardResponse["history"][number]>();
-    // ZERO_1102 S2: response <= 64 KiB (before/after snapshots are the large columns).
+    // Retain the 48 KiB history budget and bound the complete envelope.
+    // headerBytes includes the empty array; each preceding row adds a comma.
+    // truncated:true is one byte shorter than the measured false header.
     const history: AdminCostGuardResponse["history"] = [];
     let used = 0;
     let truncated = false;
     for (const row of results) {
+      const remaining = Math.min(MAX_OPS_LIST_BYTES - used, MAX_OPS_HTTP_BYTES - headerBytes - used - history.length);
+      const textUnits = Object.values(row).reduce<number>((sum, value) =>
+        sum + (typeof value === "string" ? value.length : 0), 0);
+      if (textUnits > remaining) {
+        truncated = true;
+        break;
+      }
       const size = utf8Size(row);
-      if (used + size > MAX_OPS_LIST_BYTES) {
+      if (size > remaining) {
         truncated = true;
         break;
       }

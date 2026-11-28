@@ -59,6 +59,17 @@ export function createD1(sqlite) {
       async first() {
         return run(sql, params).results[0] ?? null;
       },
+      // Drizzle's D1 driver reads mapped select columns through raw(). Keep
+      // column order (and duplicate column names) just like D1's array output.
+      async raw(options = {}) {
+        if (!READ.test(sql)) stats.writes += 1;
+        stats.statements += 1;
+        stats.maxBinds = Math.max(stats.maxBinds, params.length);
+        const prepared = sqlite.prepare(sql);
+        prepared.setReturnArrays(true);
+        const rows = prepared.all(...params);
+        return options.columnNames ? [prepared.columns().map((column) => column.name), ...rows] : rows;
+      },
     };
     self.__sql = sql;
     self.__params = params;
