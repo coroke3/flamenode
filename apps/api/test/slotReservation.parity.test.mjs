@@ -1,0 +1,2587 @@
+// MIG-0657 (SA-065..068): real CURRENT Server Actions (src/lib/actions/slot.ts) vs Hono
+// on the same migrated SQLite schema. Only Next/router/auth host ports are replaced;
+// DB, audit, outbox, queue, domain and server-core stay real.
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { runUnderRootTsx, createSqlite, insert } from "./support/personalHarness.mjs";
+
+if (runUnderRootTsx(import.meta.url)) {
+  const { registerHooks } = await import("node:module");
+  const stubs = {
+    "server-only": "export {}",
+    "next/cache": "export function revalidatePath() {}",
+    "next/navigation": "export function unstable_rethrow() {} export function redirect() {} export function notFound() {}",
+    "@/lib/auth/writeGuard": "export async function writeGuard(o) { return globalThis.__slotGuard(o); }",
+    "@/lib/serverCore/nextPorts":
+      "export const nextQueueWakeHost = { readEnv: () => globalThis.__wakeEnv(), readWaitUntil: () => null, readKv: () => null };",
+  };
+  registerHooks({
+    resolve(specifier, context, nextResolve) {
+      if (specifier in stubs) {
+        return {
+          url: `data:text/javascript,${encodeURIComponent(stubs[specifier])}`,
+          shortCircuit: true,
+        };
+      }
+      return nextResolve(specifier, context);
+    },
+  });
+
+  const { drizzle } = await import("drizzle-orm/d1");
+  const { atomicD1, seedChapterWorld, SITE, SESSION_USER, ROLES, ACTIVE } = await import("./support/chapterSeed.mjs");
+  const { Hono } = await import("hono");
+  const { app } = await import("../src/app.ts");
+  const { createSlotReservationRoutes } = await import("../src/routes/events/slotReservation.ts");
+  const current = await import("../../../src/lib/actions/slot.ts");
+  const { QUEUE_BINDING_NAMES, QUEUE_FEATURE_FLAG_NAMES } = await import(
+    "../../../packages/server-core/src/queues/wakeBudget.ts"
+  );
+  const { SlotMutationResultSchema } = await import("@flamenode/contracts");
+  const { WRITE_FEATURE_KEYS, parseDisabledFeaturesInput, evaluateCostGuardCore } = await import("@flamenode/domain/admin");
+  process.env.NEXT_PUBLIC_SITE_URL = SITE;
+
+  const NOW_SEC = 1800000000;
+
+  function seedSlotWorld(sqlite) {
+    seedChapterWorld(sqlite);
+    // Add a rejected active X user and a second approved X user for u_multi tests.
+    insert(sqlite, "x_users", { id: "x_rej", x_name: "Rejected", approval_status: "rejected" });
+    insert(sqlite, "user", {
+      id: "u_rej",
+      name: "u_rej",
+      discord_id: "d_u_rej",
+      role: "user",
+      is_banned: 0,
+      is_tos_accepted: 1,
+      active_x_user_id: "x_rej",
+    });
+    insert(sqlite, "user", {
+      id: "u_notos",
+      name: "u_notos",
+      discord_id: "d_u_notos",
+      role: "user",
+      is_banned: 0,
+      is_tos_accepted: 0,
+      active_x_user_id: null,
+    });
+    // Pending X request for u_pend (no approved links, 1 pending request x_pend).
+    insert(sqlite, "x_identity_requests", {
+      id: "xreq_pend_1",
+      request_type: "new_link",
+      requested_by_auth_user_id: "u_pend",
+      requested_x_id: "x_pend",
+      status: "pending",
+      requested_at: 100,
+      updated_at: 100,
+    });
+
+    // Public accepting-entries event with max_slots_per_video = 4, gap = 15 min.
+    sqlite
+      .prepare(
+        `UPDATE events SET
+          visibility_status = 'public',
+          start_time = ?, end_time = ?,
+          entry_start_time = ?, entry_end_time = ?,
+          max_slots_per_video = 4,
+          max_slot_reservation_groups_per_xid = 0,
+          slot_part_gap_minutes = 15
+        WHERE id = 'ev1'`,
+      )
+      .run(NOW_SEC + 1000, NOW_SEC + 10000, NOW_SEC - 1000, NOW_SEC + 5000);
+
+    // Pre-entry public event (operator override allowed for slot_manager/admin, denied for regular users).
+    sqlite
+      .prepare(
+        `UPDATE events SET
+          visibility_status = 'public',
+          start_time = ?, end_time = ?,
+          entry_start_time = ?, entry_end_time = ?,
+          max_slots_per_video = 3,
+          max_slot_reservation_groups_per_xid = 1,
+          slot_part_gap_minutes = 15
+        WHERE id = 'ev2'`,
+      )
+      .run(NOW_SEC + 5000, NOW_SEC + 10000, NOW_SEC + 1000, NOW_SEC + 4000);
+    insert(sqlite, "event_staff", {
+      id: "staff_ev2_slot",
+      event_id: "ev2",
+      x_user_id: "x_staff",
+      display_name: "Ev2 Slot Mgr",
+      permission_preset: "slot_manager",
+    });
+
+    // Limited event for X ID reservation cap (max 1 group per X ID, max 2 slots per video).
+    insert(sqlite, "events", {
+      id: "ev_limit",
+      title: "Limited Event",
+      visibility_status: "public",
+      start_time: NOW_SEC + 1000,
+      end_time: NOW_SEC + 10000,
+      entry_start_time: NOW_SEC - 1000,
+      entry_end_time: NOW_SEC + 5000,
+      max_slots_per_video: 2,
+      max_slot_reservation_groups_per_xid: 1,
+      slot_part_gap_minutes: 15,
+    });
+
+    // Closed event (ended) for operator override boundary rejection.
+    insert(sqlite, "events", {
+      id: "ev_closed",
+      title: "Closed Event",
+      visibility_status: "public",
+      start_time: NOW_SEC - 5000,
+      end_time: NOW_SEC - 1000,
+      entry_start_time: NOW_SEC - 6000,
+      entry_end_time: NOW_SEC - 2000,
+      max_slots_per_video: 4,
+      max_slot_reservation_groups_per_xid: 0,
+      slot_part_gap_minutes: 15,
+    });
+    insert(sqlite, "event_staff", {
+      id: "staff_closed_slot",
+      event_id: "ev_closed",
+      x_user_id: "x_staff",
+      display_name: "Closed Slot Mgr",
+      permission_preset: "slot_manager",
+    });
+
+    // 25 contiguous slots in ev1 (part 1: s01..s22 @ +600s each; part 2: s23..s25 @ +3600s later).
+    for (let i = 1; i <= 25; i += 1) {
+      const id = `s${String(i).padStart(2, "0")}`;
+      const startTime = i <= 22 ? NOW_SEC + 1000 + i * 600 : NOW_SEC + 30000 + i * 600;
+      insert(sqlite, "slots", {
+        id,
+        event_id: "ev1",
+        slot_label: `Slot ${i}`,
+        start_time: startTime,
+        sort_order: i,
+        status: "available",
+        updated_at: 100,
+        version: 1,
+      });
+    }
+    // Pre-existing submitted slot in ev1 (after part 2).
+    insert(sqlite, "slots", {
+      id: "s_sub",
+      event_id: "ev1",
+      reserved_by_user_id: "u_owner",
+      x_user_id: "x_owner",
+      reserved_x_id_snapshot: "x_owner",
+      display_name: "Submitted",
+      slot_label: "Slot Sub",
+      start_time: NOW_SEC + 50000,
+      sort_order: 26,
+      status: "submitted",
+      video_id: "v_pub",
+      updated_at: 100,
+      version: 1,
+    });
+    // Pre-existing Discord-only reserved slot group (x_user_id = null) for adoption test.
+    insert(sqlite, "slots", {
+      id: "s_un1",
+      event_id: "ev1",
+      reserved_by_user_id: "u_owner",
+      x_user_id: null,
+      reserved_x_id_snapshot: null,
+      display_name: "Unassigned",
+      slot_label: "Slot U1",
+      start_time: NOW_SEC + 60000,
+      sort_order: 27,
+      reservation_group_id: "grp_unassigned",
+      status: "reserved",
+      updated_at: 100,
+      version: 1,
+    });
+    insert(sqlite, "slots", {
+      id: "s_un2",
+      event_id: "ev1",
+      slot_label: "Slot U2",
+      start_time: NOW_SEC + 60600,
+      sort_order: 28,
+      status: "available",
+      updated_at: 100,
+      version: 1,
+    });
+
+    // Slots in ev2, ev_limit, ev_closed.
+    for (let i = 1; i <= 4; i += 1) {
+      insert(sqlite, "slots", {
+        id: `lim_${i}`,
+        event_id: "ev_limit",
+        slot_label: `Lim ${i}`,
+        start_time: NOW_SEC + 1000 + i * 600,
+        sort_order: i,
+        status: "available",
+        updated_at: 100,
+        version: 1,
+      });
+      insert(sqlite, "slots", {
+        id: `ev2_${i}`,
+        event_id: "ev2",
+        slot_label: `Ev2 ${i}`,
+        start_time: NOW_SEC + 5000 + i * 600,
+        sort_order: i,
+        status: "available",
+        updated_at: 100,
+        version: 1,
+      });
+    }
+    insert(sqlite, "slots", {
+      id: "closed_1",
+      event_id: "ev_closed",
+      slot_label: "Closed 1",
+      start_time: NOW_SEC - 4000,
+      sort_order: 1,
+      status: "available",
+      updated_at: 100,
+      version: 1,
+    });
+  }
+
+  function world(options) {
+    const sqlite = createSqlite();
+    seedSlotWorld(sqlite);
+    return { sqlite, d1: atomicD1(sqlite, options) };
+  }
+
+  const freeze = (initialId = 0) => {
+    const originalNow = Date.now;
+    const originalUuid = globalThis.crypto.randomUUID;
+    let n = initialId;
+    Date.now = () => NOW_SEC * 1000;
+    globalThis.crypto.randomUUID = () => `00000000-0000-4000-8000-${String(++n).padStart(12, "0")}`;
+    return () => {
+      Date.now = originalNow;
+      globalThis.crypto.randomUUID = originalUuid;
+    };
+  };
+
+  function state(w) {
+    return {
+      slots: w.sqlite.prepare("SELECT * FROM slots ORDER BY id").all(),
+      outbox: w.sqlite.prepare("SELECT * FROM notification_outbox ORDER BY id").all(),
+      queue: w.sqlite.prepare("SELECT * FROM static_rebuild_queue ORDER BY id").all(),
+      audits: w.sqlite.prepare("SELECT * FROM audit_logs ORDER BY id").all(),
+    };
+  }
+
+  const quiet = async (fn) => {
+    const original = { warn: console.warn, log: console.log, info: console.info, error: console.error };
+    console.warn = () => {};
+    console.log = () => {};
+    console.info = () => {};
+    console.error = () => {};
+    try {
+      return await fn();
+    } finally {
+      Object.assign(console, original);
+    }
+  };
+
+  async function runCurrent(w, user, op, args) {
+    const row = w.sqlite.prepare("SELECT id, name, role, active_x_user_id FROM user WHERE id = ?").get(user);
+    const approvedRows = w.sqlite
+      .prepare(
+        `SELECT l.x_user_id FROM x_user_account_links l
+         INNER JOIN x_users x ON x.id = l.x_user_id
+         WHERE l.auth_user_id = ? AND x.approval_status = 'approved'`,
+      )
+      .all(user);
+    const approvedXIds = approvedRows.map((r) => r.x_user_id);
+    const wakes = [];
+    globalThis.__wakeEnv = () => ({
+      [QUEUE_FEATURE_FLAG_NAMES.dispatch]: "1",
+      [QUEUE_BINDING_NAMES.notificationWake]: {
+        send: async (payload) => {
+          wakes.push({ kind: "notification", payload });
+        },
+      },
+      [QUEUE_BINDING_NAMES.staticRebuildWake]: {
+        send: async (payload) => {
+          wakes.push({ kind: "static_rebuild", payload });
+        },
+      },
+    });
+    globalThis.__slotGuard = async (opts) => {
+      const expectedFeature =
+        op === "reserve"
+          ? "reserve_slot"
+          : op === "release"
+            ? "release_slot"
+            : op === "extend"
+              ? "extend_slot_group"
+              : "merge_slot_groups";
+      assert.equal(opts.feature, expectedFeature);
+      return {
+        ok: true,
+        db: drizzle(w.d1),
+        user: {
+          id: row.id,
+          name: row.name,
+          role: row.role,
+          active_x_user_id: row.active_x_user_id,
+        },
+        activeXId: row.active_x_user_id,
+        approvedXIds,
+        hasPendingXRequest: false,
+      };
+    };
+    const form = new FormData();
+    let action;
+    if (op === "reserve") {
+      action = current.reserveSlot;
+      form.set("slot_id", args.slot_id);
+      form.set("display_name", args.display_name);
+      if (args.consecutive_count !== undefined) form.set("consecutive_count", String(args.consecutive_count));
+      if (args.operator_override !== undefined) form.set("operator_override", String(args.operator_override));
+    } else if (op === "release") {
+      action = current.releaseOwnSlot;
+      form.set("slot_id", args.slot_id);
+    } else if (op === "extend") {
+      action = current.extendOwnSlotGroup;
+      form.set("slot_id", args.slot_id);
+      form.set("direction", args.direction);
+      if (args.operator_override !== undefined) form.set("operator_override", String(args.operator_override));
+    } else {
+      action = current.mergeOwnSlotGroups;
+      form.set("gap_slot_id", args.gap_slot_id);
+      form.set("display_name", args.display_name);
+      if (args.operator_override !== undefined) form.set("operator_override", String(args.operator_override));
+    }
+    const result = await quiet(() => action(form));
+    return { result: JSON.parse(JSON.stringify(result)), wakes };
+  }
+
+  function honoApp(w, user, { banned = false, envExtra = {} } = {}) {
+    const sessionUser = user
+      ? {
+          ...SESSION_USER(user, ROLES[user] ?? "user", user === "u_rej" ? "x_rej" : (ACTIVE[user] ?? null)),
+          is_banned: banned ? 1 : 0,
+        }
+      : null;
+    const hono = new Hono();
+    hono.route(
+      "/api/events",
+      createSlotReservationRoutes({
+        session: async (c, next) => {
+          c.set("user", sessionUser);
+          c.set("sessionState", sessionUser ? "user" : "none");
+          await next();
+        },
+      }),
+    );
+    return (path, body, headers = { Origin: SITE }, raw) =>
+      hono.request(
+        path,
+        {
+          method: "POST",
+          headers: raw === undefined && body === undefined ? headers : { "content-type": "application/json", ...headers },
+          body: raw !== undefined ? raw : body === undefined ? undefined : JSON.stringify(body),
+        },
+        { DB: w.d1, NEXT_PUBLIC_SITE_URL: SITE, ...envExtra },
+      );
+  }
+
+  async function runHono(w, user, op, args, opts = {}) {
+    const wakes = [];
+    const call = honoApp(w, user, {
+      ...opts,
+      envExtra: {
+        [QUEUE_FEATURE_FLAG_NAMES.dispatch]: "1",
+        [QUEUE_BINDING_NAMES.notificationWake]: {
+          send: async (p) => {
+            wakes.push(p);
+          },
+        },
+        [QUEUE_BINDING_NAMES.staticRebuildWake]: {
+          send: async (p) => {
+            wakes.push(p);
+          },
+        },
+        ...(opts.envExtra ?? {}),
+      },
+    });
+    const eventId = args.eventId ?? "ev1";
+    let res;
+    if (op === "reserve") {
+      const { slot_id, eventId: _e, ...body } = args;
+      res = await call(`/api/events/${eventId}/slots/${slot_id}/reserve`, body);
+    } else if (op === "release") {
+      res = await call(`/api/events/${eventId}/slots/${args.slot_id}/release`, args.body);
+    } else if (op === "extend") {
+      const { slot_id, eventId: _e, ...body } = args;
+      res = await call(`/api/events/${eventId}/slots/${slot_id}/extend`, body);
+    } else {
+      const { eventId: _e, ...body } = args;
+      res = await call(`/api/events/${eventId}/slot-groups/merge`, body);
+    }
+    return { status: res.status, result: await res.json(), wakes, cacheControl: res.headers.get("cache-control") };
+  }
+
+  async function compareSteps(steps) {
+    const a = world();
+    const b = world();
+    const outcomes = [];
+    for (const [user, op, args, expectedStatus] of steps) {
+      const readsBefore = b.d1.stats.reads;
+      const batchesBefore = b.d1.stats.batches;
+      const thawA = freeze(outcomes.length * 100);
+      let expected;
+      try {
+        expected = await runCurrent(a, user, op, args);
+      } finally {
+        thawA();
+      }
+      const thawB = freeze(outcomes.length * 100);
+      let actual;
+      try {
+        actual = await runHono(b, user, op, args);
+      } finally {
+        thawB();
+      }
+      assert.deepEqual(actual.result, expected.result, `result ${user} ${op} ${JSON.stringify(args)}`);
+      assert.deepEqual(state(b), state(a), `database ${user} ${op} ${JSON.stringify(args)}`);
+      assert.equal(actual.status, expectedStatus, `status ${user} ${op} ${JSON.stringify(args)}`);
+      assert.equal(actual.cacheControl, "private, no-store");
+      assert.equal(SlotMutationResultSchema.safeParse(actual.result).success, true);
+      assert.equal(actual.wakes.length, 0, "D-13-41: Hono sends 0 queue wakes");
+      assert.ok(
+        b.d1.stats.reads - readsBefore <= 3,
+        `S3 D1 pre-read budget (<=3 incl. 2 guards): got ${b.d1.stats.reads - readsBefore} for ${op}`,
+      );
+      if (expectedStatus === 200) {
+        assert.ok(b.d1.stats.batches - batchesBefore <= 1, "at most 1 atomic D1 batch");
+      }
+      outcomes.push({ expected, actual });
+    }
+    return { a, b, outcomes };
+  }
+
+  function afterFirstRead(w, matches, after) {
+    let fired = false;
+    const prepare = w.d1.prepare.bind(w.d1);
+    w.d1.prepare = (sql) => {
+      const stmt = prepare(sql);
+      const bind = stmt.bind.bind(stmt);
+      stmt.bind = (...values) => {
+        const bound = bind(...values);
+        const first = bound.first.bind(bound);
+        bound.first = async () => {
+          const row = await first();
+          if (!fired && matches(sql)) {
+            fired = true;
+            after(w.sqlite);
+          }
+          return row;
+        };
+        return bound;
+      };
+      return stmt;
+    };
+    return () => fired;
+  }
+
+
+  // SEC #716: inspecting the raw first D1 projection is mandatory. Validating
+  // only the eventual HTTP body misses unbounded SQL JSON materialization.
+  function watchReserveFirstD1Row(w, inspect) {
+    let calls = 0;
+    const prepare = w.d1.prepare.bind(w.d1);
+    w.d1.prepare = (sql) => {
+      const stmt = prepare(sql);
+      if (!sql.includes("AS actor_json") || !sql.includes("AS approved_x_json")) return stmt;
+      assert.match(sql, /length\(CAST\(q\."x_user_id" AS BLOB\)\)/,
+        "shared approved-X JSON needs full-byte bound before materialization");
+      assert.match(sql, /instr\(u\."active_x_user_id", char\(0\)\)/,
+        "reserve actor must reject an embedded NUL in the selected ID");
+      assert.match(sql, /WITH approved_ids AS MATERIALIZED/,
+        "approved X bytes must be preflighted before the JSON aggregate");
+      assert.match(sql, /WITH staff_entries AS MATERIALIZED/,
+        "staff permission bytes must be preflighted before the JSON aggregate");
+      assert.match(sql, /ELSE \(SELECT json_group_array\(q\."x_user_id"\) FROM approved_ids q\)/,
+        "the approved X JSON builder must be in a lazy scalar CASE branch");
+      const bind = stmt.bind.bind(stmt);
+      stmt.bind = (...values) => {
+        const bound = bind(...values);
+        const first = bound.first.bind(bound);
+        bound.first = async () => {
+          const row = await first();
+          calls++;
+          assert.ok(row?.actor_json, "inspect the actual SQLite first-D1 snapshot");
+          const bytes = Object.values(row).reduce((n, value) =>
+            n + (typeof value === "string" ? Buffer.byteLength(value, "utf8") : 0), 0);
+          assert.ok(bytes < 64 * 1024, "first D1 row must be bounded before JS parsing");
+          inspect(row);
+          return row;
+        };
+        return bound;
+      };
+      return stmt;
+    };
+    return () => assert.equal(calls, 1, "reserve uses one inspected first D1 snapshot");
+  }
+
+  async function expectMalformedReservationRejected(w, user, inspect, args = {
+    eventId: "ev1", slot_id: "s01", display_name: "Safe", consecutive_count: 1,
+  }) {
+    const watched = watchReserveFirstD1Row(w, inspect);
+    const originalState = state(w);
+    const beforeReads = w.d1.stats.reads;
+    const beforeBatches = w.d1.stats.batches;
+    const response = await runHono(w, user, "reserve", args);
+    watched();
+    assert.equal(response.status, 503, "invalid SQL projection must fail closed");
+    assert.deepEqual(response.result, {
+      ok: false,
+      message: "枠の状態が変更されたか、安全な保存を完了できませんでした。画面を更新してもう一度お試しください。",
+    });
+    assert.equal(response.cacheControl, "private, no-store");
+    assert.equal(response.wakes.length, 0);
+    assert.deepEqual(state(w), originalState, "no slots/audit/outbox/queue writes");
+    assert.equal(w.d1.stats.batches, beforeBatches, "reject before any atomic D1 write batch");
+    assert.ok(w.d1.stats.reads - beforeReads <= 3, "S3 three-read budget");
+  }
+
+  for (const [label, bad] of [
+    ["180K after leading NUL", "\u0000" + "x".repeat(180_000)],
+    ["short embedded NUL", "a\u0000b"],
+  ]) {
+    test("SEC #716: selected Active X (" + label + ") is never projected into first D1 JSON", async () => {
+      const w = world();
+      w.sqlite.prepare('UPDATE "user" SET "active_x_user_id" = ? WHERE "id" = ?')
+        .run(bad, "u_owner");
+      if (label === "180K after leading NUL") {
+        // The new fused guard now rejects this oversized selected ID BEFORE
+        // the slot snapshot is queried. The old first-slot-row expectation
+        // cannot remain unconditional: 0 slot reads is strictly safer.
+        let gateReads = 0;
+        const prepare = w.d1.prepare.bind(w.d1);
+        w.d1.prepare = (sql) => {
+          const stmt = prepare(sql);
+          if (!sql.includes("AS slot_combined_write_gate")) return stmt;
+          const bind = stmt.bind.bind(stmt);
+          stmt.bind = (...args) => {
+            const bound = bind(...args);
+            const first = bound.first.bind(bound);
+            bound.first = async () => {
+              const raw = await first();
+              gateReads += 1;
+              assert.equal(raw?.slot_combined_write_gate, 1);
+              assert.equal(raw?.active_x_user_id, null,
+                "oversized selected ID never enters the fused D1 result");
+              assert.doesNotMatch(JSON.stringify(raw), /x{1000}/);
+              assert.ok(Buffer.byteLength(JSON.stringify(raw)) < 64 * 1024,
+                "fused guard first-row D1 wire bound");
+              return raw;
+            };
+            return bound;
+          };
+          return stmt;
+        };
+        const originalState = state(w);
+        const beforeReads = w.d1.stats.reads;
+        const beforeBatches = w.d1.stats.batches;
+        const response = await runHono(w, "u_owner", "reserve", {
+          eventId: "ev1", slot_id: "s01", display_name: "Safe", consecutive_count: 1,
+        });
+        assert.equal(gateReads, 1);
+        assert.equal(w.d1.stats.reads - beforeReads, 1,
+          "fake-session route stops at fused gate, before the slot snapshot");
+        assert.equal(response.status, 503);
+        assert.equal(response.result?.reason, "db_unavailable");
+        assert.equal(response.cacheControl, "private, no-store");
+        assert.equal(response.wakes.length, 0);
+        assert.equal(w.d1.stats.batches, beforeBatches);
+        assert.deepEqual(state(w), originalState);
+      } else {
+        // Short embedded NUL is within the gate's byte cap, but the slot
+        // snapshot's identity validator must still reject it.
+        await expectMalformedReservationRejected(w, "u_owner", (raw) => {
+          assert.equal(raw.actor_json, '{"__invalid_projection":1}');
+          assert.equal(raw.actor_json.includes(bad), false);
+        });
+      }
+    });
+
+    test("SEC #716: approved linked X (" + label + ") fails closed without auth truncation", async () => {
+      const w = world();
+      insert(w.sqlite, "x_users", { id: bad, x_name: "Legacy", approval_status: "approved" });
+      insert(w.sqlite, "x_user_account_links", {
+        x_user_id: bad, auth_user_id: "u_owner", link_role: "manager", created_at: 1,
+      });
+      await expectMalformedReservationRejected(w, "u_owner", (raw) => {
+        assert.equal(raw.approved_x_json, "[null]", "invalid linked row becomes SQL sentinel");
+        assert.equal(raw.approved_x_json.includes(bad), false);
+      });
+    });
+
+    test("SEC #716: pending requested X (" + label + ") stays a sentinel before normalization", async () => {
+      const w = world();
+      insert(w.sqlite, "x_identity_requests", {
+        id: "bad_pending_request", request_type: "new_link",
+        requested_by_auth_user_id: "u_pend", requested_x_id: bad,
+        status: "pending", requested_at: 200, updated_at: 200,
+      });
+      await expectMalformedReservationRejected(w, "u_pend", (raw) => {
+        const pending = JSON.parse(raw.pending_x_json);
+        assert.ok(pending.includes(null), "do not silently exclude the malformed request");
+        assert.equal(raw.pending_x_json.includes(bad), false);
+      });
+    });
+  }
+
+  for (const [label, updateColumn, invalidValue] of [
+    ["permission preset: NUL + 180K", "permission_preset", "\u0000" + "x".repeat(180_000)],
+    ["custom permission JSON: NUL + 180K", "custom_permission_keys_json", "\u0000" + "x".repeat(180_000)],
+    ["custom permission JSON: short NUL", "custom_permission_keys_json", "a\u0000b"],
+  ]) {
+    test("SEC #716: staff JSON (" + label + ") is bounded and fails closed", async () => {
+      const w = world();
+      assert.ok(["permission_preset", "custom_permission_keys_json"].includes(updateColumn));
+      const result = w.sqlite.prepare(
+        'UPDATE "event_staff" SET "' + updateColumn + '" = ? WHERE "id" = ?',
+      ).run(invalidValue, "staff_ev2_slot");
+      assert.equal(result.changes, 1, "fixture has exactly one approved event staff row");
+      await expectMalformedReservationRejected(w, "u_staff", raw => {
+        assert.equal(raw.staff_json, "[null]",
+          "unauthorized staff details must never enter first D1 JSON");
+        assert.equal(raw.staff_json.includes(invalidValue), false);
+      }, {
+        eventId: "ev2", slot_id: "ev2_1", display_name: "Safe", consecutive_count: 1,
+        operator_override: true,
+      });
+    });
+  }
+
+  for (const [description, apply, field] of [
+    ["180K event title", w =>
+      w.sqlite.prepare('UPDATE events SET title = ? WHERE id = ?')
+        .run("\u0000" + "x".repeat(180_000), "ev1"), "event_json"],
+    ["180K anchor slot label", w =>
+      w.sqlite.prepare('UPDATE slots SET slot_label = ? WHERE id = ?')
+        .run("\u0000" + "x".repeat(180_000), "s01"), "anchor_json"],
+    ["180K next slot label inside group JSON", w =>
+      w.sqlite.prepare('UPDATE slots SET slot_label = ? WHERE id = ?')
+        .run("\u0000" + "x".repeat(180_000), "s02"), "neighbors_json"],
+    ["TEXT in a numeric slot field", w =>
+      w.sqlite.prepare('UPDATE slots SET version = ? WHERE id = ?')
+        .run("x".repeat(180_000), "s01"), "anchor_json"],
+  ]) {
+    test("SEC #716: unsafe " + description + " is rejected before first D1 JSON", async () => {
+      const w = world();
+      apply(w);
+      await expectMalformedReservationRejected(w, "u_owner", raw => {
+        assert.ok(raw[field].includes('"__invalid_projection":1'),
+          "malformed legacy event/slot row becomes an explicit bounded sentinel");
+        assert.ok(Buffer.byteLength(raw[field], "utf8") < 2048);
+      }, {
+        eventId: "ev1", slot_id: "s01", display_name: "Safe",
+        consecutive_count: field === "neighbors_json" ? 2 : 1,
+      });
+    });
+  }
+
+
+  test("SEC #716: D1 wire JSON double-escaping stays under 64KiB", async () => {
+    const w = world();
+    // Every individual field is within the SQL byte limit. JSON1 expands
+    // U+0001 to 6 ASCII bytes and D1 quotes each backslash one more time.
+    // Four independently bounded JSON columns total ~58KiB on the SQL side
+    // yet >64KiB in the actual nested D1 transport JSON.
+    const controls = count => String.fromCharCode(1).repeat(count);
+    const eventTitle = controls(4096);
+    const slotLabel = controls(2048);
+    const displayName = controls(512);
+    const actorName = controls(512);
+    const innerJsonParts = [
+      JSON.stringify({ title: eventTitle }),
+      JSON.stringify({ slot_label: slotLabel, display_name: displayName }),
+      JSON.stringify([{ slot_label: slotLabel, display_name: displayName }]),
+      JSON.stringify({ discordName: actorName }),
+    ];
+    assert.ok(Buffer.byteLength(innerJsonParts.join(""), "utf8") < 60 * 1024,
+      "raw SQL JSON fits the old incorrect 60KiB first-row budget");
+    assert.ok(Buffer.byteLength(innerJsonParts.map(p => JSON.stringify(p)).join(""), "utf8") > 64 * 1024,
+      "outer D1 JSON double-escaping must cross the S3 transport ceiling");
+    w.sqlite.prepare('UPDATE events SET title = ? WHERE id = ?').run(eventTitle, "ev1");
+    w.sqlite.prepare(
+      "UPDATE slots SET slot_label = ?, display_name = ? WHERE id IN ('s01', 's02')",
+    ).run(slotLabel, displayName);
+    w.sqlite.prepare('UPDATE "user" SET name = ? WHERE id = ?').run(actorName, "u_owner");
+
+    let firstReads = 0;
+    const prepare = w.d1.prepare.bind(w.d1);
+    w.d1.prepare = sql => {
+      const stmt = prepare(sql);
+      if (!sql.includes("AS actor_json") ||
+          !sql.includes("projected_snapshot AS MATERIALIZED")) return stmt;
+      assert.match(sql, /json_quote\(p\."event_json"\)/,
+        "preflight must account for D1 outer JSON string escaping");
+      assert.match(sql, /json_quote\(p\."anchor_json"\)/);
+      const bind = stmt.bind.bind(stmt);
+      stmt.bind = (...values) => {
+        const bound = bind(...values);
+        const first = bound.first.bind(bound);
+        bound.first = async () => {
+          const row = await first();
+          firstReads++;
+          assert.equal(row.invalid_snapshot, 1,
+            "reject when D1 wire encoding would exceed 64KiB");
+          for (const name of ["event_json", "anchor_json", "actor_json", "approved_x_json"]) {
+            assert.equal(row[name], null, "no partially usable authorization context");
+          }
+          assert.ok(Buffer.byteLength(JSON.stringify(row), "utf8") < 1024,
+            "SQL must emit a tiny explicit fail-closed response");
+          return row;
+        };
+        return bound;
+      };
+      return stmt;
+    };
+    const initial = state(w);
+    const batchesBefore = w.d1.stats.batches;
+    const readsBefore = w.d1.stats.reads;
+    const thaw = freeze();
+    try {
+      const response = await runHono(w, "u_owner", "reserve", {
+        eventId: "ev1", slot_id: "s01", display_name: "Wire-safe", consecutive_count: 2,
+      });
+      assert.equal(response.status, 503);
+      assert.equal(response.cacheControl, "private, no-store");
+      assert.equal(response.wakes.length, 0);
+      assert.equal(firstReads, 1, "inspect one actual first D1 result");
+      assert.equal(w.d1.stats.batches, batchesBefore, "zero mutation batches");
+      assert.ok(w.d1.stats.reads - readsBefore <= 3);
+      assert.deepEqual(state(w), initial, "zero slot/audit/outbox/queue changes");
+    } finally {
+      thaw();
+    }
+  });
+
+  test("SEC #716: JSON escaping inflation is suppressed before a slot array aggregate", async () => {
+    const w = world();
+    w.sqlite.prepare('UPDATE events SET max_slots_per_video = 20 WHERE id = ?').run("ev1");
+    // Every individual value is within its SQL cap. The aggregate would
+    // exceed 60KiB; a lazy 20KiB array guard must fire first because JSON
+    // escapes control U+0001 to six output bytes per raw byte.
+    for (let i = 1; i <= 20; i++) {
+      const id = "s" + String(i).padStart(2, "0");
+      w.sqlite.prepare(
+        'UPDATE slots SET slot_label = ?, display_name = ? WHERE id = ?',
+      ).run(String.fromCharCode(1).repeat(2048), "D".repeat(512), id);
+    }
+    let firstReads = 0;
+    const prepare = w.d1.prepare.bind(w.d1);
+    w.d1.prepare = (sql) => {
+      const stmt = prepare(sql);
+      if (!sql.includes("AS neighbors_json") || !sql.includes("AS actor_json")) return stmt;
+      const bind = stmt.bind.bind(stmt);
+      stmt.bind = (...values) => {
+        const bound = bind(...values);
+        const first = bound.first.bind(bound);
+        bound.first = async () => {
+          const row = await first();
+          firstReads++;
+          assert.equal(row.invalid_snapshot, 0,
+            "the inner array's own 20KiB preflight should reject first");
+          assert.equal(row.neighbors_json, '[{"__invalid_projection":1}]',
+            "reject before slot JSON array materialization, with explicit sentinel");
+          assert.ok(row.actor_json, "non-sensitive bounded fields remain intact");
+          assert.ok(Buffer.byteLength(JSON.stringify(row), "utf8") < 4096,
+            "large slot group must not leave SQLite into D1");
+          return row;
+        };
+        return bound;
+      };
+      return stmt;
+    };
+    const before = state(w);
+    const batchesBefore = w.d1.stats.batches;
+    const response = await runHono(w, "u_owner", "reserve", {
+      eventId: "ev1", slot_id: "s01", display_name: "No mutation", consecutive_count: 20,
+    });
+    assert.equal(firstReads, 1, "only one first D1 reservation snapshot");
+    assert.equal(response.status, 503);
+    assert.equal(response.cacheControl, "private, no-store");
+    assert.deepEqual(state(w), before, "over-budget source must not mutate");
+    assert.equal(w.d1.stats.batches, batchesBefore);
+    assert.equal(response.wakes.length, 0);
+  });
+
+  test("SEC #716: legacy X IDs accept 128 Unicode codepoints / 512 UTF-8 bytes but reject 129 codepoints", async () => {
+    for (const [label, id, invalid, utf8Bytes, codepoints] of [
+      ["ASCII128", "a".repeat(128), false, 128, 128],
+      ["UTF8-128bytes", "あ".repeat(42) + "ab", false, 128, 44],
+      ["Japanese128codepoints", "あ".repeat(128), false, 384, 128],
+      ["Emoji128codepoints", "🌀".repeat(128), false, 512, 128],
+      ["ASCII129", "a".repeat(129), true, 129, 129],
+      ["Japanese129codepoints", "あ".repeat(129), true, 387, 129],
+      ["Emoji129codepoints", "🌀".repeat(129), true, 516, 129],
+    ]) {
+      // The fixture opens entries at NOW_SEC; the host's current clock is
+      // deliberately unrelated. Compare allowed CURRENT/Hono paths at the
+      // same deterministic instant used by the parity harness.
+      const thaw = freeze();
+      try {
+        const w = world();
+      assert.equal(Buffer.byteLength(id, "utf8"), utf8Bytes, label);
+      assert.equal(Array.from(id).length, codepoints, label);
+      insert(w.sqlite, "x_users", { id, x_name: label, approval_status: "approved" });
+      insert(w.sqlite, "x_user_account_links", {
+        x_user_id: id, auth_user_id: "u_owner", link_role: "manager", created_at: 1,
+      });
+      if (invalid) {
+        await expectMalformedReservationRejected(w, "u_owner", raw => {
+          assert.equal(raw.approved_x_json, "[null]");
+        });
+      } else {
+        const watched = watchReserveFirstD1Row(w, raw => {
+          assert.ok(JSON.parse(raw.approved_x_json).includes(id));
+        });
+        const response = await runHono(w, "u_owner", "reserve", {
+          eventId: "ev1", slot_id: "s01", display_name: "Valid " + label, consecutive_count: 1,
+        });
+        watched();
+        assert.equal(response.status, 200, "valid <=128 Unicode-codepoint linked X retains CURRENT rights");
+        assert.equal(response.wakes.length, 0);
+      }
+      } finally {
+        thaw();
+      }
+    }
+  });
+
+  test("SEC #716: exactly 100 canonical 20-byte approved links remain authorized and bounded", async () => {
+    const thaw = freeze();
+    try {
+    const w = world();
+    let count = w.sqlite.prepare(
+      "SELECT COUNT(*) AS n FROM x_user_account_links WHERE auth_user_id = ?",
+    ).get("u_owner").n;
+    assert.ok(count >= 1 && count < 100);
+    for (; count < 100; count++) {
+      const id = "approved_" + String(count).padStart(11, "0");
+      assert.equal(Buffer.byteLength(id, "utf8"), 20, "exercise the max canonical X handle");
+      insert(w.sqlite, "x_users", { id, x_name: id, approval_status: "approved" });
+      insert(w.sqlite, "x_user_account_links", {
+        x_user_id: id, auth_user_id: "u_owner", link_role: "manager", created_at: 1,
+      });
+    }
+    const watched = watchReserveFirstD1Row(w, raw => {
+      assert.equal(JSON.parse(raw.approved_x_json).length, 100,
+        "no arbitrary deletion from the authorization set");
+    });
+    const response = await runHono(w, "u_owner", "reserve", {
+      eventId: "ev1", slot_id: "s01", display_name: "Hundred links", consecutive_count: 1,
+    });
+    watched();
+    assert.equal(response.status, 200);
+    assert.equal(response.wakes.length, 0);
+    } finally {
+      thaw();
+    }
+  });
+
+
+  // SEC #716: reserve alone is insufficient. Release, extend and merge must
+  // reject corrupted group rows without issuing any atomic mutation batch.
+  for (const testCase of [
+    {
+      name: "release",
+      setup: [
+        ["reserve", { eventId: "ev1", slot_id: "s02", display_name: "Owned", consecutive_count: 2 }],
+      ],
+      corrupt: "s03",
+      operation: "release",
+      args: { eventId: "ev1", slot_id: "s02", body: {} },
+      field: "group_json",
+    },
+    {
+      name: "extend",
+      setup: [
+        ["reserve", { eventId: "ev1", slot_id: "s02", display_name: "Owned", consecutive_count: 2 }],
+      ],
+      corrupt: "s03",
+      operation: "extend",
+      args: { eventId: "ev1", slot_id: "s02", direction: "forward" },
+      field: "group_json",
+    },
+    {
+      name: "merge",
+      setup: [
+        ["reserve", { eventId: "ev1", slot_id: "s01", display_name: "Left", consecutive_count: 2 }],
+        ["reserve", { eventId: "ev1", slot_id: "s04", display_name: "Right", consecutive_count: 2 }],
+      ],
+      // The adjacent right anchor s04 must stay valid; corrupt only s05
+      // so that this test exercises right_group_json, not right_json.
+      corrupt: "s05",
+      operation: "merge",
+      args: { eventId: "ev1", gap_slot_id: "s03", display_name: "Merge" },
+      field: "right_group_json",
+    },
+  ]) {
+    test("SEC #716: " + testCase.name + " fails closed before mutation for oversized group member", async () => {
+      const w = world();
+      const thaw = freeze();
+      try {
+        for (const [op, args] of testCase.setup) {
+          const setup = await runHono(w, "u_owner", op, args);
+          assert.equal(setup.status, 200, "setup must establish an authorized reserved group");
+          assert.equal(setup.wakes.length, 0);
+        }
+        const hugeId = "\u0000" + "r".repeat(180_000);
+        const updated = w.sqlite.prepare(
+          'UPDATE slots SET slot_label = ? WHERE id = ?',
+        ).run(hugeId, testCase.corrupt);
+        assert.equal(updated.changes, 1, "fixture corrupts exactly one group member");
+
+        let firstD1Reads = 0;
+        const prepare = w.d1.prepare.bind(w.d1);
+        w.d1.prepare = sql => {
+          const stmt = prepare(sql);
+          if (!sql.includes("AS " + testCase.field) ||
+              !sql.includes("projected_snapshot AS MATERIALIZED")) return stmt;
+          const bind = stmt.bind.bind(stmt);
+          stmt.bind = (...values) => {
+            const bound = bind(...values);
+            const first = bound.first.bind(bound);
+            bound.first = async () => {
+              const row = await first();
+              firstD1Reads++;
+              assert.ok(row?.[testCase.field]?.includes('"__invalid_projection":1'),
+                "group must surface a fixed invalid marker, never omit its bad row");
+              assert.equal(row[testCase.field].includes(hugeId), false);
+              assert.ok(Buffer.byteLength(JSON.stringify(row), "utf8") < 64 * 1024,
+                "raw first D1 row must stay under S3 snapshot budget");
+              return row;
+            };
+            return bound;
+          };
+          return stmt;
+        };
+        const before = state(w);
+        const batchesBefore = w.d1.stats.batches;
+        const readsBefore = w.d1.stats.reads;
+        const rejected = await runHono(w, "u_owner", testCase.operation, testCase.args);
+        assert.equal(firstD1Reads, 1, "inspect exactly one first D1 snapshot");
+        assert.equal(rejected.status, 503, "do not mutate from corrupted authorization group");
+        assert.equal(rejected.cacheControl, "private, no-store");
+        assert.equal(rejected.wakes.length, 0);
+        assert.deepEqual(state(w), before, "no slot, outbox, queue or audit mutation");
+        assert.equal(w.d1.stats.batches, batchesBefore, "no atomic writes");
+        assert.ok(w.d1.stats.reads - readsBefore <= 3, "S3 D1 pre-read bound");
+      } finally {
+        thaw();
+      }
+    });
+  }
+
+  test("SEC #716: extend CTE edge ID is NUL-safe before outer D1 JSON quote", async () => {
+    const w = world();
+    const thaw = freeze();
+    try {
+      const seeded = await runHono(w, "u_owner", "reserve", {
+        eventId: "ev1", slot_id: "s02", display_name: "Group", consecutive_count: 2,
+      });
+      assert.equal(seeded.status, 200, "establish valid ownership and event window first");
+      const groupId = w.sqlite.prepare(
+        "SELECT reservation_group_id FROM slots WHERE id = 's02'",
+      ).get().reservation_group_id;
+      assert.ok(groupId, "two-slot reserve must assign a shared group ID");
+
+      // This non-adjacent third legacy row shares the same group ID, and its
+      // later start_time forces it to be cte_edge. A raw SELECT id would feed
+      // >180KiB of untrusted TEXT into json_quote before the D1 size gate.
+      const id = "\u0000" + "e".repeat(180_000);
+      insert(w.sqlite, "slots", {
+        id, event_id: "ev1", slot_label: "Legacy", start_time: NOW_SEC + 9000,
+        sort_order: 100, reserved_by_user_id: "u_owner", x_user_id: "x_owner",
+        reserved_x_id_snapshot: "x_owner", reservation_group_id: groupId,
+        display_name: "Legacy", status: "reserved", updated_at: 100, version: 1,
+      });
+
+      let firstD1Reads = 0;
+      const prepare = w.d1.prepare.bind(w.d1);
+      w.d1.prepare = sql => {
+        const stmt = prepare(sql);
+        if (!sql.includes("AS cte_edge_id") ||
+            !sql.includes("projected_snapshot AS MATERIALIZED")) return stmt;
+        assert.match(sql, /instr\("id", char\(0\)\)/,
+          "raw edge id must be checked before first D1 JSON quote");
+        const bind = stmt.bind.bind(stmt);
+        stmt.bind = (...args) => {
+          const bound = bind(...args);
+          const first = bound.first.bind(bound);
+          bound.first = async () => {
+            const row = await first();
+            firstD1Reads++;
+            assert.equal(row.invalid_snapshot, 0, "bounded sentinel fits the outer row");
+            assert.equal(row.cte_edge_id, '{"__invalid_projection":1}');
+            assert.equal(JSON.stringify(row).includes(id), false);
+            assert.ok(Buffer.byteLength(JSON.stringify(row), "utf8") < 64 * 1024);
+            return row;
+          };
+          return bound;
+        };
+        return stmt;
+      };
+      const before = state(w);
+      const batchesBefore = w.d1.stats.batches;
+      const readsBefore = w.d1.stats.reads;
+      const res = await runHono(w, "u_owner", "extend", {
+        eventId: "ev1", slot_id: "s02", direction: "forward",
+      });
+      assert.equal(firstD1Reads, 1, "inspect exactly one initial D1 snapshot");
+      assert.equal(res.status, 503);
+      assert.equal(res.cacheControl, "private, no-store");
+      assert.equal(res.wakes.length, 0);
+      assert.equal(w.d1.stats.batches, batchesBefore, "no mutation batch");
+      assert.ok(w.d1.stats.reads - readsBefore <= 3);
+      assert.deepEqual(state(w), before, "no slots/outbox/audit/queue changes");
+    } finally {
+      thaw();
+    }
+  });
+
+  test("T03 & T05: reserve, replay, extend (fwd/back/null-adopt), merge, and release match CURRENT field-by-field with 0 wakes", async () => {
+    const { b, outcomes } = await compareSteps([
+      // SA-065 reserve 2 slots (s02, s03) by u_owner (approved active X).
+      ["u_owner", "reserve", { eventId: "ev1", slot_id: "s02", display_name: "Alice Team", consecutive_count: 2 }, 200],
+      // SA-065 idempotent replay on own reserved slot s02.
+      ["u_owner", "reserve", { eventId: "ev1", slot_id: "s02", display_name: "Alice Team", consecutive_count: 2 }, 200],
+      // SA-067 extend forward (s04) and backward (s01).
+      ["u_owner", "extend", { eventId: "ev1", slot_id: "s02", direction: "forward" }, 200],
+      ["u_owner", "extend", { eventId: "ev1", slot_id: "s02", direction: "backward" }, 200],
+      // SA-066 release middle slot s02 (splits s01 vs s03..s04 with new sgrp).
+      ["u_owner", "release", { eventId: "ev1", slot_id: "s02" }, 200],
+      // SA-068 merge s01 and s03..s04 through gap s02 with new display_name.
+      ["u_owner", "merge", { eventId: "ev1", gap_slot_id: "s02", display_name: "Merged Team" }, 200],
+      // SA-066 release edge slot s01 (s02..s04 keep existing group).
+      ["u_owner", "release", { eventId: "ev1", slot_id: "s01" }, 200],
+      // SA-067 extend unassigned (Discord-only) group adopts null x_user_id rows for u_owner's active X.
+      ["u_owner", "extend", { eventId: "ev1", slot_id: "s_un1", direction: "forward" }, 200],
+      // SA-065 Discord-only (u_nox) and pending-X (u_pend) reservations.
+      ["u_nox", "reserve", { eventId: "ev1", slot_id: "s10", display_name: "Discord Only", consecutive_count: 1 }, 200],
+      ["u_pend", "reserve", { eventId: "ev1", slot_id: "s11", display_name: "Pending X", consecutive_count: 1 }, 200],
+      // SA-066 release singleton Discord-only slot s10.
+      ["u_nox", "release", { eventId: "ev1", slot_id: "s10", body: {} }, 200],
+    ]);
+
+    // T05: verify CURRENT emitted queue wakes while Hono emitted 0 (D-13-41).
+    assert.equal(outcomes[0].expected.wakes.length, 2); // notification + static_rebuild
+    assert.equal(outcomes[2].expected.wakes.length, 1); // static_rebuild
+    assert.equal(outcomes[4].expected.wakes.length, 1); // static_rebuild
+    assert.equal(outcomes[5].expected.wakes.length, 1); // static_rebuild
+    for (const o of outcomes) {
+      assert.equal(o.actual.wakes.length, 0);
+    }
+
+    // Verify notification_outbox event_id and payload_json match CURRENT.
+    const outbox = b.sqlite.prepare("SELECT * FROM notification_outbox ORDER BY id").all();
+    assert.equal(outbox.length, 3);
+    assert.equal(outbox[0].event_id, "ev1");
+    assert.equal(outbox[0].delivery_route, "channel");
+    assert.equal(JSON.parse(outbox[0].payload_json).webhook_target, "event");
+  });
+
+  test("T01: concurrent reserve on same slot allows exactly 1 success and rolls back loser cleanly", async () => {
+    const w = world();
+    const thaw = freeze();
+    try {
+      const fired = afterFirstRead(
+        w,
+        (sql) => /FROM "slots" WHERE "id" = \? AND "event_id" = \? LIMIT 1/i.test(sql),
+        (sqlite) => {
+          sqlite
+            .prepare(
+              `UPDATE slots SET status = 'reserved', reserved_by_user_id = 'u_other',
+               x_user_id = 'x_other', reserved_x_id_snapshot = 'x_other',
+               display_name = 'Winner', version = version + 1, updated_at = ?
+               WHERE id = 's05'`,
+            )
+            .run(NOW_SEC);
+        },
+      );
+      const res = await runHono(w, "u_owner", "reserve", {
+        eventId: "ev1",
+        slot_id: "s05",
+        display_name: "Loser",
+        consecutive_count: 1,
+      });
+      assert.equal(fired(), true);
+      assert.equal(res.status, 409);
+      assert.equal(res.result.ok, false);
+      assert.equal(w.sqlite.prepare("SELECT reserved_by_user_id, display_name, version FROM slots WHERE id = 's05'").get().display_name, "Winner");
+      assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+      assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM notification_outbox").get().n, 0);
+      assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 0);
+    } finally {
+      thaw();
+    }
+  });
+
+  test("T01 & T02: X-ID reservation limit exact/exceeded and concurrent limit race rollback", async () => {
+    // T02: lim_1 succeeds (1/1), lim_3 rejected with exact CURRENT limit message.
+    await compareSteps([
+      ["u_owner", "reserve", { eventId: "ev_limit", slot_id: "lim_1", display_name: "First", consecutive_count: 1 }, 200],
+      ["u_owner", "reserve", { eventId: "ev_limit", slot_id: "lim_3", display_name: "Second", consecutive_count: 1 }, 409],
+      // Max slots per video = 2 on ev_limit -> 3 rejected.
+      ["u_other", "reserve", { eventId: "ev_limit", slot_id: "lim_2", display_name: "OverMax", consecutive_count: 3 }, 409],
+    ]);
+
+    // T01: concurrent reserve bypassing pre-read limit triggers atomic buildReservationLimitGuardStatement rollback.
+    const w = world();
+    const thaw = freeze();
+    try {
+      const fired = afterFirstRead(
+        w,
+        (sql) => /FROM "slots" WHERE "id" = \? AND "event_id" = \? LIMIT 1/i.test(sql),
+        (sqlite) => {
+          sqlite
+            .prepare(
+              `UPDATE slots SET status = 'reserved', reserved_by_user_id = 'u_owner',
+               x_user_id = 'x_owner', reserved_x_id_snapshot = 'x_owner',
+               display_name = 'Race1', version = version + 1, updated_at = ?
+               WHERE id = 'lim_1'`,
+            )
+            .run(NOW_SEC);
+        },
+      );
+      const res = await runHono(w, "u_owner", "reserve", {
+        eventId: "ev_limit",
+        slot_id: "lim_3",
+        display_name: "Race2",
+        consecutive_count: 1,
+      });
+      assert.equal(fired(), true);
+      assert.equal(res.status, 409);
+      assert.equal(res.result.ok, false);
+      assert.match(res.result.message, /最大1件まで枠を確保できます/);
+      assert.equal(w.sqlite.prepare("SELECT status FROM slots WHERE id = 'lim_3'").get().status, "available");
+      assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+      assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM notification_outbox").get().n, 0);
+      assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 0);
+    } finally {
+      thaw();
+    }
+  });
+
+  test("S3 #725: real HTTPS-cookie concurrent X-ID cap race records the post-batch count read", async () => {
+    const w = world();
+    const token = "s3-xid-cap-race";
+    insert(w.sqlite, "session", {
+      sessionToken: token, userId: "u_owner", expires: NOW_SEC * 1000 + 60000,
+    });
+    const readsBefore = w.d1.stats.reads;
+    const batchesBefore = w.d1.stats.batches;
+    const sqlOffset = w.d1.stats.readSql.length;
+    let afterConcurrent = null;
+    const fired = afterFirstRead(
+      w,
+      (sql) => /FROM "slots" WHERE "id" = \? AND "event_id" = \? LIMIT 1/i.test(sql),
+      (sqlite) => {
+        sqlite
+          .prepare(
+            `UPDATE slots SET status = 'reserved', reserved_by_user_id = 'u_owner',
+             x_user_id = 'x_owner', reserved_x_id_snapshot = 'x_owner',
+             display_name = 'Race1', version = version + 1, updated_at = ?
+             WHERE id = 'lim_1'`,
+          )
+          .run(NOW_SEC);
+        afterConcurrent = state(w);
+      },
+    );
+    const thaw = freeze();
+    try {
+      const response = await app.request(SITE + "/api/events/ev_limit/slots/lim_3/reserve", {
+        method: "POST",
+        headers: {
+          Origin: SITE, cookie: "__Secure-authjs.session-token=" + token,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ display_name: "Race2", consecutive_count: 1 }),
+      }, { DB: w.d1, NEXT_PUBLIC_SITE_URL: SITE });
+      const result = await response.json();
+      assert.equal(response.status, 409);
+      assert.equal(result.ok, false);
+      assert.match(result.message, /最大1件まで枠を確保できます/);
+      assert.equal(response.headers.get("cache-control"), "private, no-store");
+      assert.equal(fired(), true, "the competing reservation must occur after the first slot snapshot");
+      const readCount = w.d1.stats.reads - readsBefore;
+      const statements = w.d1.stats.readSql.slice(sqlOffset);
+      assert.equal(readCount, 4,
+        "three real-cookie pre-reads plus the post-batch logical reservation-count recheck");
+      assert.equal(statements.length, readCount);
+      assert.match(statements[0], /FROM "session" s/);
+      assert.match(statements[1], /JOIN "system_settings" settings/);
+      assert.match(statements[2], /invalid_snapshot/);
+      assert.match(statements[3], /reserved_x_id_snapshot/);
+      assert.equal(w.d1.stats.batches - batchesBefore, 1, "one atomic batch attempt must roll back");
+      assert.deepEqual(state(w), afterConcurrent,
+        "the failed request must add no slot/audit/outbox/queue mutation beyond the injected competitor");
+    } finally {
+      thaw();
+      w.sqlite.close();
+    }
+  });
+
+  test("T02: pending X-ID reservation cap and legacy normalized snapshot match CURRENT", async () => {
+    // u_pend has no approved X link, only a pending new_link(x_pend).
+    // This exercises the single_pending CTE and pending_x_count, not the
+    // active-X branch tested by u_owner, while preserving the one-group cap.
+    await compareSteps([
+      ["u_pend", "reserve", { eventId: "ev_limit", slot_id: "lim_1", display_name: "Pending first", consecutive_count: 1 }, 200],
+      ["u_pend", "reserve", { eventId: "ev_limit", slot_id: "lim_3", display_name: "Pending second", consecutive_count: 1 }, 409],
+    ]);
+
+    const a = world();
+    const b = world();
+    for (const w of [a, b]) {
+      w.sqlite.prepare(
+        "UPDATE slots SET status = 'reserved', reserved_by_user_id = 'u_pend', " +
+        "x_user_id = NULL, reserved_x_id_snapshot = '@X_Pend', " +
+        "display_name = 'Legacy pending', version = version + 1 " +
+        "WHERE id = 'lim_1' AND event_id = 'ev_limit'",
+      ).run();
+    }
+
+    const args = { eventId: "ev_limit", slot_id: "lim_2", display_name: "Duplicate pending", consecutive_count: 1 };
+    const thawA = freeze();
+    let expected;
+    try {
+      expected = await runCurrent(a, "u_pend", "reserve", args);
+    } finally {
+      thawA();
+    }
+    const thawB = freeze();
+    let actual;
+    try {
+      actual = await runHono(b, "u_pend", "reserve", args);
+    } finally {
+      thawB();
+    }
+    assert.equal(actual.status, 409, "pending identity must not bypass the single-X reservation cap");
+    assert.deepEqual(actual.result, expected.result, "legacy pending snapshot must match CURRENT");
+    assert.match(actual.result.message, /最大1件まで枠を確保できます/);
+    assert.deepEqual(state(b), state(a), "rejection must not mutate slots, audit, outbox or static queue");
+    assert.equal(actual.wakes.length, 0);
+    assert.equal(b.d1.stats.batches, 0, "pre-read limit rejection must never start a D1 mutation batch");
+  });
+
+  test("T02: reserve D1 bind arity and legacy @/uppercase X-ID reservation cap match CURRENT", async () => {
+    const a = world();
+    const b = world();
+    for (const w of [a, b]) {
+      w.sqlite.prepare(
+        "UPDATE slots SET status = 'reserved', reserved_by_user_id = 'u_owner', " +
+        "x_user_id = 'x_owner', reserved_x_id_snapshot = '@X_Owner', " +
+        "display_name = 'Legacy', version = version + 1 " +
+        "WHERE id = 'lim_1' AND event_id = 'ev_limit'",
+      ).run();
+    }
+
+    let validatedReserveReads = 0;
+    const prepare = b.d1.prepare.bind(b.d1);
+    b.d1.prepare = (sql) => {
+      const stmt = prepare(sql);
+      if (sql.includes("WITH anchor AS") && sql.includes("AS active_x_count")) {
+        const bind = stmt.bind.bind(stmt);
+        stmt.bind = (...params) => {
+          validatedReserveReads += 1;
+          const placeholderCount = (sql.match(/\?/g) ?? []).length;
+          assert.equal(params.length, placeholderCount,
+            "Cloudflare D1 requires every reserve snapshot SQL placeholder to be bound");
+          return bind(...params);
+        };
+      }
+      return stmt;
+    };
+    const args = { eventId: "ev_limit", slot_id: "lim_2", display_name: "Second group", consecutive_count: 1 };
+    const thawA = freeze();
+    let expected;
+    try {
+      expected = await runCurrent(a, "u_owner", "reserve", args);
+    } finally {
+      thawA();
+    }
+    const thawB = freeze();
+    let actual;
+    try {
+      actual = await runHono(b, "u_owner", "reserve", args);
+    } finally {
+      thawB();
+    }
+    assert.equal(validatedReserveReads, 1, "one batched reserve snapshot read must be checked");
+    assert.equal(actual.status, 409);
+    assert.deepEqual(actual.result, expected.result);
+    assert.match(actual.result.message, /最大1件まで枠を確保できます/);
+    assert.deepEqual(state(b), state(a), "denied legacy-X second reservation must never write");
+    assert.equal(actual.wakes.length, 0);
+  });
+
+  test("T02/T03: all four slot mutation D1 snapshot SQL bindings match placeholder counts", async () => {
+    // Cloudflare D1 rejects mismatched bind arity; node:sqlite may silently
+    // substitute NULL for missing arguments, masking failures.
+    const w = world();
+    const observed = [];
+    const prepare = w.d1.prepare.bind(w.d1);
+    w.d1.prepare = (sql) => {
+      const stmt = prepare(sql);
+      if (/WITH (?:anchor|gap) AS \(/.test(sql) && sql.includes('projected_snapshot')) {
+        const bind = stmt.bind.bind(stmt);
+        stmt.bind = (...params) => {
+          assert.equal(params.length, (sql.match(/\?/g) ?? []).length,
+            "SA-065..068 D1 pre-read SQL and bound parameters must have equal arity");
+          observed.push(params.length);
+          return bind(...params);
+        };
+      }
+      return stmt;
+    };
+    const thaw = freeze();
+    try {
+      const steps = [
+        ["reserve", { eventId: "ev1", slot_id: "s02", display_name: "Arity", consecutive_count: 2 }],
+        ["extend", { eventId: "ev1", slot_id: "s02", direction: "forward" }],
+        ["extend", { eventId: "ev1", slot_id: "s02", direction: "backward" }],
+        ["release", { eventId: "ev1", slot_id: "s02" }],
+        ["merge", { eventId: "ev1", gap_slot_id: "s02", display_name: "Merged" }],
+      ];
+      for (const [op, args] of steps) {
+        const response = await runHono(w, "u_owner", op, args);
+        assert.equal(response.status, 200, op);
+        assert.equal(response.result.ok, true, op);
+      }
+    } finally {
+      thaw();
+    }
+    assert.deepEqual(observed, [16, 6, 6, 2, 6],
+      "reserve/extend/extend/release/merge must each read a single complete D1 snapshot");
+  });
+
+  test("T02: 20-slot bulk reserve stays within D1 query/bind budget and matches CURRENT", async () => {
+    const a = world();
+    const b = world();
+    a.sqlite.prepare("UPDATE events SET max_slots_per_video = 20 WHERE id = 'ev1'").run();
+    b.sqlite.prepare("UPDATE events SET max_slots_per_video = 20 WHERE id = 'ev1'").run();
+
+    const thawA = freeze();
+    const expected = await runCurrent(a, "u_owner", "reserve", {
+      eventId: "ev1",
+      slot_id: "s01",
+      display_name: "Bulk20",
+      consecutive_count: 20,
+    });
+    thawA();
+    const thawB = freeze();
+    const actual = await runHono(b, "u_owner", "reserve", {
+      eventId: "ev1",
+      slot_id: "s01",
+      display_name: "Bulk20",
+      consecutive_count: 20,
+    });
+    thawB();
+
+    assert.equal(actual.status, 200);
+    assert.deepEqual(actual.result, expected.result);
+    assert.deepEqual(state(b), state(a));
+    assert.ok(b.d1.stats.maxBinds <= 100, `maxBinds=${b.d1.stats.maxBinds} <= 100`);
+    assert.equal(b.d1.stats.reads, 2, "injected session: merged guard + mutation snapshot");
+    assert.equal(b.d1.stats.batches, 1);
+  });
+
+  test("T02: operator_override permissions, pre-entry window, cross-part/mismatch/ownership rejections match CURRENT", async () => {
+    await compareSteps([
+      // Non-staff regular user cannot use operator_override on pre-entry ev2.
+      ["u_owner", "reserve", { eventId: "ev2", slot_id: "ev2_1", display_name: "NoPerm", operator_override: true }, 403],
+      // Non-override on pre-entry ev2 is rejected (entry not open).
+      ["u_staff", "reserve", { eventId: "ev2", slot_id: "ev2_1", display_name: "WaitOpen", operator_override: false }, 409],
+      // slot_manager with operator_override succeeds on pre-entry ev2 (even 4 slots? max_slots_per_video is 3, override allows up to 20).
+      ["u_staff", "reserve", { eventId: "ev2", slot_id: "ev2_1", display_name: "StaffOp", consecutive_count: 2, operator_override: "1" }, 200],
+      // operator_override on ended event ev_closed is rejected.
+      ["u_staff", "reserve", { eventId: "ev_closed", slot_id: "closed_1", display_name: "Ended", operator_override: true }, 409],
+      // Cross-part reserve (s22 -> s23 gap > 15m) rejected.
+      ["u_owner", "reserve", { eventId: "ev1", slot_id: "s22", display_name: "CrossPart", consecutive_count: 2 }, 409],
+      // Submitted slot release rejected.
+      ["u_owner", "release", { eventId: "ev1", slot_id: "s_sub" }, 409],
+      // Different owner release rejected.
+      ["u_other", "release", { eventId: "ev1", slot_id: "s_un1" }, 403],
+      // Rejected active X user cannot operate on unassigned or another X's slot; can reserve Discord-only.
+      ["u_rej", "reserve", { eventId: "ev1", slot_id: "s20", display_name: "RejX" }, 200],
+      // Reserve already-taken slot by another user rejected.
+      ["u_other", "reserve", { eventId: "ev1", slot_id: "s20", display_name: "Taken" }, 409],
+      // Extend by another user rejected.
+      ["u_other", "extend", { eventId: "ev1", slot_id: "s20", direction: "forward" }, 403],
+      // Missing slot -> 404.
+      ["u_owner", "reserve", { eventId: "ev1", slot_id: "no_such_slot", display_name: "Missing" }, 404],
+    ]);
+  });
+
+  test("T02: cross-event URL mismatch fails closed with 404 and zero writes", async () => {
+    const w = world();
+    // s01 belongs to ev1, NOT ev2!
+    const res = await runHono(w, "u_owner", "reserve", {
+      eventId: "ev2",
+      slot_id: "s01",
+      display_name: "CrossEvent",
+      consecutive_count: 1,
+    });
+    assert.equal(res.status, 404);
+    assert.equal(res.result.ok, false);
+    assert.equal(w.sqlite.prepare("SELECT status FROM slots WHERE id = 's01'").get().status, "available");
+    assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+  });
+
+  test("T04: unauthenticated, banned, TOS, invalid origin, CostGuard, body-limit, and public GET isolation", async () => {
+    const w = world();
+    const callAnon = honoApp(w, null);
+    const callBanned = honoApp(w, "u_owner", { banned: true });
+    const callNoTos = honoApp(w, "u_notos");
+    const callOwner = honoApp(w, "u_owner");
+
+    // 1. Cross-origin rejected before any D1 read (403 invalid_origin).
+    const reads0 = w.d1.stats.reads;
+    const badOrigin = await callOwner("/api/events/ev1/slots/s01/reserve", { display_name: "X" }, { Origin: "https://evil.example" });
+    assert.equal(badOrigin.status, 403);
+    assert.equal((await badOrigin.json()).reason, "invalid_origin");
+    assert.equal(w.d1.stats.reads, reads0);
+
+    // 2. Unauthenticated -> 401.
+    const unauth = await callAnon("/api/events/ev1/slots/s01/reserve", { display_name: "X" });
+    assert.equal(unauth.status, 401);
+    assert.equal((await unauth.json()).reason, "unauthenticated");
+
+    // 3. Banned -> 403.
+    const banned = await callBanned("/api/events/ev1/slots/s01/reserve", { display_name: "X" });
+    assert.equal(banned.status, 403);
+    assert.equal((await banned.json()).reason, "banned");
+
+    // 4. TOS required -> 403.
+    const noTos = await callNoTos("/api/events/ev1/slots/s01/reserve", { display_name: "X" });
+    assert.equal(noTos.status, 403);
+    assert.equal((await noTos.json()).reason, "tos_required");
+
+    // 5. Release rejects extra body fields (400), accepts empty body (200 or 404/409).
+    const badRelease = await callOwner("/api/events/ev1/slots/s01/release", { slot_id: "spoof" });
+    assert.equal(badRelease.status, 400);
+
+    // 6. Oversized body > 64 KiB -> 413.
+    const big = await callOwner(
+      "/api/events/ev1/slots/s01/reserve",
+      undefined,
+      { Origin: SITE },
+      JSON.stringify({ display_name: "a".repeat(70000) }),
+    );
+    assert.equal(big.status, 413);
+
+    // 7. CostGuard maintenance_mode -> 503.
+    w.sqlite.prepare("UPDATE system_settings SET operation_mode = 'maintenance' WHERE id = 'default'").run();
+    const maint = await callOwner("/api/events/ev1/slots/s01/reserve", { display_name: "X" });
+    assert.equal(maint.status, 503);
+    assert.equal((await maint.json()).reason, "maintenance_mode");
+    w.sqlite.prepare("UPDATE system_settings SET operation_mode = 'normal' WHERE id = 'default'").run();
+
+    // 8. Mounted real `app`: public GET /api/events and /api/events/ev1/slots/viewer-overlay remain public (no Origin/session required),
+    // while POST /api/events/ev1/slots/s01/reserve requires Origin + session.
+    const pubListRes = await app.request("/api/events", { method: "GET" }, { DB: w.d1, NEXT_PUBLIC_SITE_URL: SITE });
+    assert.equal(pubListRes.status, 200);
+    const pubOverlayRes = await app.request(
+      "/api/events/ev1/slots/viewer-overlay",
+      { method: "GET" },
+      { DB: w.d1, NEXT_PUBLIC_SITE_URL: SITE },
+    );
+    assert.equal(pubOverlayRes.status, 200);
+    assert.equal((await pubOverlayRes.json()).loggedIn, false);
+    const mountedBadOrigin = await app.request(
+      "/api/events/ev1/slots/s01/reserve",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", Origin: "https://evil.example" },
+        body: JSON.stringify({ display_name: "X" }),
+      },
+      { DB: w.d1, NEXT_PUBLIC_SITE_URL: SITE },
+    );
+    assert.equal(mountedBadOrigin.status, 403);
+    const mountedNoSession = await app.request(
+      "/api/events/ev1/slots/s01/reserve",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", Origin: SITE },
+        body: JSON.stringify({ display_name: "X" }),
+      },
+      { DB: w.d1, NEXT_PUBLIC_SITE_URL: SITE },
+    );
+    assert.equal(mountedNoSession.status, 401);
+
+    assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+  });
+
+  test("S3 #725: real HTTPS secure-cookie mutation paths stay within 3 D1 pre-reads", async () => {
+    const w = world();
+    const token = "synthetic-s3-reservation-session";
+    insert(w.sqlite, "session", {
+      sessionToken: token, userId: "u_owner", expires: NOW_SEC * 1000 + 60000,
+    });
+    const thaw = freeze();
+    // Match production HTTPS URL semantics: Hono's relative app.request(path)
+    // uses a local HTTP origin and would select a different Auth.js cookie name.
+    const post = (path, body, headers = {}) => app.request(SITE + path, {
+      method: "POST",
+      headers: {
+        Origin: SITE, cookie: "__Secure-authjs.session-token=" + token,
+        "content-type": "application/json", ...headers,
+      },
+      body: JSON.stringify(body),
+    }, { DB: w.d1, NEXT_PUBLIC_SITE_URL: SITE });
+    const cases = [
+      ["reserve", "/api/events/ev1/slots/s02/reserve",
+        { display_name: "Real Cookie", consecutive_count: 2 }],
+      ["extend-forward", "/api/events/ev1/slots/s02/extend", { direction: "forward" }],
+      ["extend-backward", "/api/events/ev1/slots/s02/extend", { direction: "backward" }],
+      ["release", "/api/events/ev1/slots/s02/release", {}],
+      ["merge", "/api/events/ev1/slot-groups/merge",
+        { gap_slot_id: "s02", display_name: "Merged" }],
+    ];
+    try {
+      for (const [operation, path, body] of cases) {
+        const beforeReads = w.d1.stats.reads;
+        const sqlOffset = w.d1.stats.readSql.length;
+        const beforeBatches = w.d1.stats.batches;
+        const response = await post(path, body);
+        const result = await response.json();
+        assert.equal(response.status, 200, operation + ": " + JSON.stringify(result));
+        assert.equal(result.ok, true, operation);
+        assert.equal(response.headers.get("cache-control"), "private, no-store");
+        const readCount = w.d1.stats.reads - beforeReads;
+        const statements = w.d1.stats.readSql.slice(sqlOffset);
+        assert.equal(readCount, 3, "ZERO_1102 S3 three-read budget " + operation);
+        assert.equal(statements.length, readCount);
+        assert.match(statements[0], /FROM "session" s/);
+        assert.match(statements[1], /terms_reaccept_required/);
+        assert.match(statements[1], /JOIN "system_settings" settings/);
+        assert.match(statements[2], /invalid_snapshot/);
+        assert.equal(w.d1.stats.batches - beforeBatches, 1,
+          operation + " must use one atomic batch");
+      }
+      for (const [name, headers, status, expectedReads, reason] of [
+        ["invalid-origin", { Origin: "https://evil.example" }, 403, 0, "invalid_origin"],
+        ["no-cookie", { cookie: "" }, 401, 0, "unauthenticated"],
+        ["invalid-token", { cookie: "__Secure-authjs.session-token=invalid" }, 401, 1, "unauthenticated"],
+      ]) {
+        const beforeReads = w.d1.stats.reads;
+        const beforeBatches = w.d1.stats.batches;
+        const response = await post("/api/events/ev1/slots/s20/reserve",
+          { display_name: "Denied" }, headers);
+        assert.equal(response.status, status, name);
+        assert.equal((await response.json()).reason, reason, name);
+        assert.equal(w.d1.stats.reads - beforeReads, expectedReads, name);
+        assert.equal(w.d1.stats.batches - beforeBatches, 0, name);
+      }
+      insert(w.sqlite, "session", {
+        sessionToken: "s3-noto", userId: "u_notos", expires: NOW_SEC * 1000 + 60000,
+      });
+      const beforeTos = w.d1.stats.reads;
+      const batchesBeforeTos = w.d1.stats.batches;
+      const noTos = await post("/api/events/ev1/slots/s20/reserve",
+        { display_name: "Denied" }, { cookie: "__Secure-authjs.session-token=s3-noto" });
+      assert.equal(noTos.status, 403);
+      assert.equal((await noTos.json()).reason, "tos_required");
+      assert.equal(w.d1.stats.reads - beforeTos, 2);
+      assert.equal(w.d1.stats.batches - batchesBeforeTos, 0);
+
+      w.sqlite.prepare("UPDATE system_settings SET operation_mode = 'maintenance' WHERE id = 'default'").run();
+      const beforeCost = w.d1.stats.reads;
+      const batchesBeforeCost = w.d1.stats.batches;
+      const maintenance = await post("/api/events/ev1/slots/s20/reserve",
+        { display_name: "Denied" });
+      assert.equal(maintenance.status, 503);
+      assert.equal((await maintenance.json()).reason, "maintenance_mode");
+      assert.equal(w.d1.stats.reads - beforeCost, 2, "merged CostGuard stops before snapshot");
+      assert.equal(w.d1.stats.batches - batchesBeforeCost, 0);
+    } finally {
+      thaw();
+    }
+  });
+
+  test("S3 #725: reuse pending count only for the exact CURRENT reservation count key", async () => {
+    for (const [raw, countKey, occupied, expectedReads] of [
+      ["\t@@X_Pend\u3000", "x_pend", true, 3],
+      ["@ \t@X_Pend", "x_pend", true, 3],
+      ["\t@@X_Pend\u3000", "x_pend", false, 3],
+      ["\u00c4Pend", "\u00e4pend", true, 4],
+    ]) {
+      const a = world();
+      const b = world();
+      for (const w of [a, b]) {
+        // No active identity: exercise the actual pending-only count path,
+        // rather than accidentally satisfying the active-X fast path.
+        w.sqlite.prepare("UPDATE user SET active_x_user_id = NULL WHERE id = 'u_pend'").run();
+        w.sqlite.prepare("UPDATE x_identity_requests SET requested_x_id = ? WHERE id = 'xreq_pend_1'").run(raw);
+        if (occupied) {
+          w.sqlite.prepare(
+            "UPDATE slots SET status = 'reserved', reserved_by_user_id = 'u_pend', " +
+            "x_user_id = NULL, reserved_x_id_snapshot = ?, display_name = 'Legacy pending', " +
+            "version = version + 1 WHERE id = 'lim_1' AND event_id = 'ev_limit'",
+          ).run(countKey);
+        }
+      }
+      const token = "s3-pending-count-key-session";
+      insert(b.sqlite, "session", {
+        sessionToken: token, userId: "u_pend", expires: NOW_SEC * 1000 + 60000,
+      });
+      const args = { eventId: "ev_limit", slot_id: "lim_2", display_name: "Pending count", consecutive_count: 1 };
+      const thawA = freeze();
+      let expected;
+      try {
+        expected = await runCurrent(a, "u_pend", "reserve", args);
+      } finally {
+        thawA();
+      }
+      const reads = b.d1.stats.reads;
+      const batches = b.d1.stats.batches;
+      const thawB = freeze();
+      try {
+        const response = await app.request(SITE + "/api/events/ev_limit/slots/lim_2/reserve", {
+          method: "POST",
+          headers: {
+            Origin: SITE, cookie: "__Secure-authjs.session-token=" + token,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ display_name: args.display_name, consecutive_count: 1 }),
+        }, { DB: b.d1, NEXT_PUBLIC_SITE_URL: SITE });
+        const result = await response.json();
+        assert.equal(expected.result.ok, !occupied);
+        assert.equal(response.status, occupied ? 409 : 200);
+        assert.equal(response.headers.get("cache-control"), "private, no-store");
+        assert.deepEqual(result, expected.result);
+        if (occupied) assert.match(result.message, /最大1件まで枠を確保できます/);
+        assert.deepEqual(state(b), state(a), "CURRENT slot/audit/outbox/queue parity");
+        // Non-ASCII case folding mismatch remains a known S3 blocker.
+        assert.equal(b.d1.stats.reads - reads, expectedReads, JSON.stringify(raw));
+        assert.equal(b.d1.stats.batches - batches, occupied ? 0 : 1);
+      } finally {
+        thawB();
+      }
+    }
+  });
+
+  test("S3 #725: tied legacy group edges preserve CURRENT neighbor and three reads", async () => {
+    for (const direction of ["forward", "backward"]) {
+      for (const [availableBetween, wide, crowded] of [
+        [true, false, false], [false, false, false], [true, true, false],
+        [false, true, true],
+      ]) {
+        const a = world();
+        const b = world();
+        for (const w of [a, b]) {
+          if (wide) {
+            w.sqlite.prepare("UPDATE events SET title = ? WHERE id = 'ev1'").run("\\".repeat(4096));
+            // Force a full-size SQL-order neighbor on either side, with the
+            // CURRENT JS locale-ordered edge still choosing tie_Z.
+            for (const id of ["tie_0", "tie_z"]) {
+              insert(w.sqlite, "slots", {
+                id, event_id: "ev1", start_time: NOW_SEC + 1100,
+                sort_order: 0, status: "available", slot_label: "\\".repeat(2048),
+                updated_at: 100, version: 1,
+              });
+            }
+          }
+          const group = {
+            event_id: "ev1", start_time: NOW_SEC + 1100, sort_order: 0,
+            status: "reserved", reserved_by_user_id: "u_owner", x_user_id: "x_owner",
+            reserved_x_id_snapshot: "x_owner", reservation_group_id: "legacy_tied_group",
+            display_name: wide ? "\\".repeat(512) : "Legacy", updated_at: 100, version: 1,
+          };
+          const groupIds = crowded
+            ? direction === "forward" ? ["tie_A", "tie_a", "tie_B"] : ["tie_A", "tie_a", "tie_b"]
+            : ["tie_A", "tie_a"];
+          for (const id of groupIds) {
+            insert(w.sqlite, "slots", { ...group, id, slot_label: wide ? "\\".repeat(1565) : id });
+          }
+          if (availableBetween) {
+            insert(w.sqlite, "slots", {
+              id: "tie_Z", event_id: "ev1", start_time: NOW_SEC + 1100,
+              sort_order: 0, status: "available", slot_label: wide ? "\\".repeat(2048) : "Between",
+              updated_at: 100, version: 1,
+            });
+          }
+        }
+        const token = "s3-tied-group-session";
+        insert(b.sqlite, "session", {
+          sessionToken: token, userId: "u_owner", expires: NOW_SEC * 1000 + 60000,
+        });
+        const args = { eventId: "ev1", slot_id: "tie_A", direction };
+        const thawA = freeze();
+        let expected;
+        try {
+          expected = await runCurrent(a, "u_owner", "extend", args);
+        } finally {
+          thawA();
+        }
+        let wideSnapshots = 0;
+        if (wide) {
+          const prepare = b.d1.prepare.bind(b.d1);
+          b.d1.prepare = sql => {
+            const stmt = prepare(sql);
+            if (!sql.includes("alternate_neighbors AS MATERIALIZED")) return stmt;
+            const bind = stmt.bind.bind(stmt);
+            stmt.bind = (...values) => {
+              assert.equal(values.length, 6);
+              const bound = bind(...values);
+              const first = bound.first.bind(bound);
+              bound.first = async () => {
+                const row = await first();
+                wideSnapshots++;
+                assert.equal(row.invalid_snapshot, 0);
+                assert.ok(Buffer.byteLength(JSON.stringify(row), "utf8") < 64 * 1024);
+                assert.equal(JSON.parse(row.group_json).filter(item => item.__anchor_reference === 1).length, 1);
+                const edgeId = direction === "forward" ? crowded ? "tie_B" : "tie_A" : "tie_a";
+                const alternates = JSON.parse(row.alternate_neighbors_json);
+                const alternate = alternates.find(entry => entry.edge_id === edgeId);
+                if (crowded) {
+                  assert.deepEqual(alternate, { edge_id: edgeId, neighbor: null, unavailable_neighbor: 1 });
+                  assert.equal(alternates.length, 2);
+                  // Reconstruct the exact former full alternate items from the
+                  // mandatory snapshot. Every tied neighbor is another group
+                  // row here. The former wire budget would omit both items.
+                  const group = JSON.parse(row.group_json)
+                    .map(item => item.__anchor_reference === 1 ? JSON.parse(row.anchor_json) : item)
+                    .sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+                  const prior = alternates.map(item => {
+                    assert.equal(item.unavailable_neighbor, 1);
+                    const index = group.findIndex(g => g.id === item.edge_id);
+                    const neighbor = group[index + (direction === "forward" ? 1 : -1)];
+                    assert.ok(neighbor);
+                    assert.equal(neighbor.status, "reserved");
+                    return { edge_id: item.edge_id, neighbor };
+                  });
+                  const mandatoryBytes = Object.entries(row)
+                    .filter(([key]) => key !== "alternate_neighbors_json" && key !== "invalid_snapshot")
+                    .reduce((sum, [, value]) => sum + Buffer.byteLength(JSON.stringify(value), "utf8"), 0);
+                  const oldOptionalBytes = Buffer.byteLength(JSON.stringify(JSON.stringify(prior)), "utf8");
+                  assert.ok(mandatoryBytes + oldOptionalBytes > 58 * 1024, "former full projection must overflow");
+                } else {
+                  assert.equal(alternate.neighbor.id, "tie_Z", "valid alternate must fit without a fourth read");
+                  assert.equal(alternate.neighbor.slot_label, "\\".repeat(2048));
+                }
+                return row;
+              };
+              return bound;
+            };
+            return stmt;
+          };
+        }
+        const reads = b.d1.stats.reads;
+        const batches = b.d1.stats.batches;
+        const thawB = freeze();
+        try {
+          const response = await app.request(SITE + "/api/events/ev1/slots/tie_A/extend", {
+            method: "POST",
+            headers: {
+              Origin: SITE, cookie: "__Secure-authjs.session-token=" + token,
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({ direction }),
+          }, { DB: b.d1, NEXT_PUBLIC_SITE_URL: SITE });
+          const result = await response.json();
+          assert.equal(expected.result.ok, availableBetween, direction + " CURRENT");
+          if (availableBetween) assert.equal(expected.result.slotId, "tie_Z");
+          assert.equal(response.status, availableBetween ? 200 : 409);
+          assert.equal(response.headers.get("cache-control"), "private, no-store");
+          assert.deepEqual(result, expected.result, direction + " result parity");
+          assert.deepEqual(state(b), state(a), direction + " atomic state parity");
+          assert.equal(b.d1.stats.reads - reads, 3, direction + " tied-edge S3 read budget");
+          assert.equal(wideSnapshots, wide ? 1 : 0);
+          assert.equal(b.d1.stats.batches - batches, availableBetween ? 1 : 0);
+        } finally {
+          thawB();
+        }
+      }
+    }
+  });
+
+  test("SEC #716: tied-edge invalid candidate is bounded before mutation, including fallback", async () => {
+    for (const direction of ["forward", "backward"]) {
+      for (const [label, omitAlternates] of [
+        ["x".repeat(180_000), false],
+        ["legacy\u0000label", false],
+        ["x".repeat(180_000), true],
+        ["legacy\u0000label", true],
+      ]) {
+        const w = world();
+        const group = {
+          event_id: "ev1", start_time: NOW_SEC + 1100, sort_order: 0,
+          status: "reserved", reserved_by_user_id: "u_owner", x_user_id: "x_owner",
+          reserved_x_id_snapshot: "x_owner", reservation_group_id: "legacy_tied_group",
+          display_name: "Legacy", updated_at: 100, version: 1,
+        };
+        for (const id of ["tie_A", "tie_a"]) {
+          insert(w.sqlite, "slots", { ...group, id, slot_label: id });
+        }
+        insert(w.sqlite, "slots", {
+          id: "tie_Z", event_id: "ev1", start_time: NOW_SEC + 1100,
+          sort_order: 0, status: "available", slot_label: label, updated_at: 100, version: 1,
+        });
+        const token = "s3-tied-fallback-session";
+        insert(w.sqlite, "session", {
+          sessionToken: token, userId: "u_owner", expires: NOW_SEC * 1000 + 60000,
+        });
+        let fallbackReads = 0;
+        let snapshotReads = 0;
+        const prepare = w.d1.prepare.bind(w.d1);
+        w.d1.prepare = sql => {
+          const stmt = prepare(sql);
+          const isFallback = sql.includes("WITH fallback_edge");
+          const isSnapshot = sql.includes("alternate_neighbors AS MATERIALIZED");
+          if (!isFallback && !isSnapshot) return stmt;
+          const bind = stmt.bind.bind(stmt);
+          stmt.bind = (...values) => {
+            assert.equal(values.length, isFallback ? 4 : 6);
+            const bound = bind(...values);
+            const first = bound.first.bind(bound);
+            bound.first = async () => {
+              const row = await first();
+              assert.equal(row.invalid_snapshot, 0);
+              assert.ok(Buffer.byteLength(JSON.stringify(row), "utf8") < 64 * 1024);
+              if (isFallback) {
+                fallbackReads++;
+                assert.deepEqual(JSON.parse(row.neighbor_json), { __invalid_projection: 1 });
+                assert.equal(row.neighbor_json.includes(label), false);
+                return row;
+              }
+              snapshotReads++;
+              const edgeId = direction === "forward" ? "tie_A" : "tie_a";
+              const alternate = JSON.parse(row.alternate_neighbors_json)
+                .find(entry => entry.edge_id === edgeId);
+              assert.deepEqual(alternate, { edge_id: edgeId, neighbor: null, invalid_neighbor: 1 });
+              assert.equal(row.alternate_neighbors_json.includes(label), false);
+              // Inject omission at the D1 boundary to exercise the retained
+              // fallback independently of the exact aggregate wire threshold.
+              return omitAlternates ? { ...row, alternate_neighbors_json: null } : row;
+            };
+            return bound;
+          };
+          return stmt;
+        };
+        const before = state(w);
+        const reads = w.d1.stats.reads;
+        const batches = w.d1.stats.batches;
+        const wakes = [];
+        const thaw = freeze();
+        try {
+          const response = await app.request(SITE + "/api/events/ev1/slots/tie_A/extend", {
+            method: "POST",
+            headers: {
+              Origin: SITE, cookie: "__Secure-authjs.session-token=" + token,
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({ direction }),
+          }, {
+            DB: w.d1, NEXT_PUBLIC_SITE_URL: SITE,
+            [QUEUE_FEATURE_FLAG_NAMES.dispatch]: "1",
+            [QUEUE_BINDING_NAMES.notificationWake]: { send: async p => wakes.push(p) },
+            [QUEUE_BINDING_NAMES.staticRebuildWake]: { send: async p => wakes.push(p) },
+          });
+          assert.equal(response.status, 503, direction);
+          assert.equal(response.headers.get("cache-control"), "private, no-store");
+          const result = await response.json();
+          assert.deepEqual(result, {
+            ok: false,
+            message: "枠の状態が変更されたか、安全な保存を完了できませんでした。画面を更新してもう一度お試しください。",
+          });
+          assert.equal(snapshotReads, 1);
+          assert.equal(fallbackReads, omitAlternates ? 1 : 0);
+          // Injected optional omission still needs four attempted reads.
+          assert.equal(w.d1.stats.reads - reads, omitAlternates ? 4 : 3,
+            "session + gate + snapshot; bounded fallback only on omission");
+          assert.equal(w.d1.stats.batches - batches, 0);
+          assert.deepEqual(state(w), before);
+          assert.deepEqual(wakes, []);
+        } finally {
+          thaw();
+        }
+      }
+    }
+  });
+
+  test("SEC #716: an invalid unselected tied neighbor does not poison an occupied edge", async () => {
+    for (const direction of ["forward", "backward"]) {
+      const w = world();
+      const group = {
+        event_id: "ev1", start_time: NOW_SEC + 1100, sort_order: 0,
+        status: "reserved", reserved_by_user_id: "u_owner", x_user_id: "x_owner",
+        reserved_x_id_snapshot: "x_owner", reservation_group_id: "legacy_tied_group",
+        display_name: "Legacy", updated_at: 100, version: 1,
+      };
+      const ids = direction === "forward" ? ["tie_A", "tie_B", "tie_a"] : ["tie_A", "tie_a", "tie_b"];
+      for (const id of ids) insert(w.sqlite, "slots", { ...group, id, slot_label: id });
+      insert(w.sqlite, "slots", {
+        id: direction === "forward" ? "tie_AZ" : "tie_az",
+        event_id: "ev1", start_time: NOW_SEC + 1100, sort_order: 0,
+        status: "available", slot_label: "x".repeat(180_000), updated_at: 100, version: 1,
+      });
+      const token = "s3-unselected-invalid-neighbor";
+      insert(w.sqlite, "session", {
+        sessionToken: token, userId: "u_owner", expires: NOW_SEC * 1000 + 60000,
+      });
+      const before = state(w);
+      const reads = w.d1.stats.reads;
+      const batches = w.d1.stats.batches;
+      const thaw = freeze();
+      try {
+        const response = await app.request(SITE + "/api/events/ev1/slots/tie_A/extend", {
+          method: "POST",
+          headers: {
+            Origin: SITE, cookie: "__Secure-authjs.session-token=" + token,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ direction }),
+        }, { DB: w.d1, NEXT_PUBLIC_SITE_URL: SITE });
+        assert.equal(response.status, 409, direction);
+        assert.equal(response.headers.get("cache-control"), "private, no-store");
+        assert.deepEqual(await response.json(), {
+          ok: false, message: "拡張可能な隣接空き枠がありません。",
+        });
+        assert.equal(w.d1.stats.reads - reads, 3);
+        assert.equal(w.d1.stats.batches - batches, 0);
+        assert.deepEqual(state(w), before);
+      } finally {
+        thaw();
+      }
+    }
+  });
+
+  test("SEC #716: primary tied-edge marker is local and respects CURRENT denial order", async () => {
+    for (const direction of ["forward", "backward"]) {
+      for (const mode of ["available", "occupied", "selected_invalid", "foreign", "closed", "cap"]) {
+        const a = world();
+        const b = world();
+        const tied = mode === "available" || mode === "occupied";
+        const sqlEdge = direction === "forward" ? "tie_a" : "tie_A";
+        const ids = tied ? ["tie_A", "tie_a"] : [sqlEdge];
+        const anchor = ids[0];
+        const user = mode === "foreign" ? "u_other" : "u_owner";
+        const malformed = direction === "forward" ? "x".repeat(180_000) : "legacy\u0000label";
+        for (const w of [a, b]) {
+          const group = {
+            event_id: "ev1", start_time: NOW_SEC + 1100, sort_order: 0,
+            status: "reserved", reserved_by_user_id: "u_owner", x_user_id: "x_owner",
+            reserved_x_id_snapshot: "x_owner", reservation_group_id: "legacy_primary_marker",
+            display_name: "Legacy", updated_at: 100, version: 1,
+          };
+          for (const id of ids) insert(w.sqlite, "slots", { ...group, id, slot_label: id });
+          if (tied) {
+            insert(w.sqlite, "slots", {
+              id: "tie_Z", event_id: "ev1", start_time: NOW_SEC + 1100, sort_order: 0,
+              status: mode === "available" ? "available" : "reserved",
+              ...(mode === "occupied" ? {
+                reserved_by_user_id: "u_other", x_user_id: "x_other",
+                reserved_x_id_snapshot: "x_other", display_name: "Other",
+              } : {}),
+              slot_label: "Between", updated_at: 100, version: 1,
+            });
+          }
+          insert(w.sqlite, "slots", {
+            id: direction === "forward" ? "tie_z" : "tie_0", event_id: "ev1",
+            start_time: NOW_SEC + 1100, sort_order: 0, status: "available",
+            slot_label: malformed, updated_at: 100, version: 1,
+          });
+          if (mode === "closed") {
+            w.sqlite.prepare("UPDATE events SET entry_end_time = ? WHERE id = 'ev1'").run(NOW_SEC - 1);
+          }
+          if (mode === "cap") {
+            w.sqlite.prepare("UPDATE events SET max_slots_per_video = 1 WHERE id = 'ev1'").run();
+          }
+        }
+        const token = "s3-primary-edge-marker";
+        insert(b.sqlite, "session", {
+          sessionToken: token, userId: user, expires: NOW_SEC * 1000 + 60000,
+        });
+        let expected;
+        if (mode !== "selected_invalid") {
+          const thawA = freeze();
+          try {
+            expected = await runCurrent(a, user, "extend", { eventId: "ev1", slot_id: anchor, direction });
+          } finally {
+            thawA();
+          }
+        }
+        let snapshots = 0;
+        const prepare = b.d1.prepare.bind(b.d1);
+        b.d1.prepare = sql => {
+          const stmt = prepare(sql);
+          if (!sql.includes("alternate_neighbors AS MATERIALIZED")) return stmt;
+          const bind = stmt.bind.bind(stmt);
+          stmt.bind = (...values) => {
+            assert.equal(values.length, 6);
+            const bound = bind(...values);
+            const first = bound.first.bind(bound);
+            bound.first = async () => {
+              const row = await first();
+              snapshots++;
+              assert.equal(row.invalid_snapshot, 0);
+              assert.deepEqual(JSON.parse(row.neighbor_json), { invalid_neighbor: 1 });
+              assert.equal(row.neighbor_json.includes(malformed), false);
+              assert.ok(Buffer.byteLength(JSON.stringify(row), "utf8") < 64 * 1024);
+              if (tied) {
+                const jsEdge = direction === "forward" ? "tie_A" : "tie_a";
+                const alternate = JSON.parse(row.alternate_neighbors_json).find(x => x.edge_id === jsEdge);
+                assert.equal(alternate.neighbor.id, "tie_Z");
+              }
+              return row;
+            };
+            return bound;
+          };
+          return stmt;
+        };
+        const before = state(b);
+        const reads = b.d1.stats.reads;
+        const batches = b.d1.stats.batches;
+        const thawB = freeze();
+        try {
+          const response = await app.request(SITE + "/api/events/ev1/slots/" + anchor + "/extend", {
+            method: "POST",
+            headers: {
+              Origin: SITE, cookie: "__Secure-authjs.session-token=" + token,
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({ direction }),
+          }, { DB: b.d1, NEXT_PUBLIC_SITE_URL: SITE });
+          const label = direction + " " + mode;
+          const status = mode === "available" ? 200 : mode === "selected_invalid" ? 503 : mode === "foreign" ? 403 : 409;
+          assert.equal(response.status, status, label);
+          assert.equal(response.headers.get("cache-control"), "private, no-store");
+          const result = await response.json();
+          if (expected) {
+            assert.deepEqual(result, expected.result, label + " CURRENT parity");
+            assert.deepEqual(state(b), state(a), label + " atomic state parity");
+            if (mode === "available") assert.equal(result.slotId, "tie_Z");
+          } else {
+            assert.deepEqual(result, {
+              ok: false,
+              message: "枠の状態が変更されたか、安全な保存を完了できませんでした。画面を更新してもう一度お試しください。",
+            });
+          }
+          if (mode !== "available") assert.deepEqual(state(b), before);
+          assert.equal(snapshots, 1, label);
+          assert.equal(b.d1.stats.reads - reads, 3, label);
+          assert.equal(b.d1.stats.batches - batches, mode === "available" ? 1 : 0, label);
+        } finally {
+          thawB();
+        }
+      }
+    }
+  });
+
+  test("S3 #725: real HTTPS cookie checks latest major ToS and recovery without stale acceptance", async () => {
+    const w = world();
+    insert(w.sqlite, "session", {
+      sessionToken: "s3-current-terms", userId: "u_owner", expires: NOW_SEC * 1000 + 60000,
+    });
+    const thaw = freeze();
+    const post = (slotId) => app.request(SITE + "/api/events/ev1/slots/" + slotId + "/reserve", {
+      method: "POST",
+      headers: {
+        Origin: SITE, cookie: "__Secure-authjs.session-token=s3-current-terms",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ display_name: "Current major" }),
+    }, { DB: w.d1, NEXT_PUBLIC_SITE_URL: SITE });
+    const major = (id, at) => insert(w.sqlite, "terms_versions", {
+      id, version_label: id, body_markdown: "synthetic terms", status: "published",
+      severity: "major", published_at: at, created_by_user_id: "u_admin",
+      created_at: at, updated_at: at,
+    });
+    const denied = async (slotId, reason) => {
+      const beforeReads = w.d1.stats.reads;
+      const beforeBatches = w.d1.stats.batches;
+      const previous = state(w);
+      const response = await post(slotId);
+      assert.equal(response.status, 403);
+      assert.equal(response.headers.get("cache-control"), "private, no-store");
+      assert.equal((await response.json()).reason, reason);
+      assert.equal(w.d1.stats.reads - beforeReads, 2,
+        "session and fresh ToS only; no CostGuard/slot snapshot on deny");
+      assert.equal(w.d1.stats.batches - beforeBatches, 0);
+      assert.deepEqual(state(w), previous, "a ToS rejection never writes");
+    };
+    try {
+      major("s3-major-1", NOW_SEC - 100);
+      await denied("s20", "tos_reaccept_required");
+      // A persisted stale flag is NOT authoritative. Only current major
+      // version acceptance or an applicable consent row clears the gate.
+      w.sqlite.prepare("UPDATE user SET accepted_terms_version_id = ?, terms_reaccept_required = 0 WHERE id = ?")
+        .run("s3-major-1", "u_owner");
+      const first = await post("s20");
+      assert.equal(first.status, 200);
+      assert.equal((await first.json()).ok, true);
+
+      major("s3-major-2", NOW_SEC - 50);
+      await denied("s21", "tos_reaccept_required");
+      insert(w.sqlite, "user_tos_consents", {
+        id: "s3-consent-major-2", user_id: "u_owner",
+        terms_version_id: "s3-major-2", consented_at: NOW_SEC - 40,
+        consent_context: "entry",
+      });
+      const allowed = await post("s21");
+      assert.equal(allowed.status, 200,
+        "the new major's explicit consent permits a fresh valid reservation");
+      assert.equal((await allowed.json()).ok, true);
+    } finally {
+      thaw();
+    }
+  });
+
+  test("SEC #716 / S3 #725: canonical SA-019 list fits the fused CostGuard gate", async () => {
+    const canonical = (features) => {
+      const result = parseDisabledFeaturesInput({ features, reason: "synthetic", confirm: "APPLY" });
+      assert.equal(result.ok, true, "valid CURRENT SA-019 input");
+      return JSON.stringify(result.features);
+    };
+    const all = canonical(WRITE_FEATURE_KEYS);
+    const exceptReserve = canonical(WRITE_FEATURE_KEYS.filter((key) => key !== "reserve_slot"));
+    const maxBytes = Buffer.byteLength(all, "utf8");
+    assert.ok(Buffer.byteLength(exceptReserve, "utf8") > 768,
+      "regression must exercise the previously rejected valid list");
+    // Seven identity/mode caps and the unchanged exception cap sum to 8,064.
+    // Worst-case six-byte JSON escaping plus 2KiB of fixed keys/numbers stays bounded.
+    assert.ok((8064 + maxBytes) * 6 + 2048 < 64 * 1024,
+      "canonical feature growth must not violate the full gate-row wire budget");
+    const cases = [
+      { label: "reserve enabled in large canonical list", raw: exceptReserve, status: 200, reason: null },
+      { label: "reserve disabled in full canonical list", raw: all, status: 503, reason: "cost_guard_blocked" },
+      { label: "full canonical list with active reserve exception", raw: all, exception: true, status: 200, reason: null },
+      { label: "malformed within byte bound", raw: '["reserve_slot",', status: 503, reason: "cost_guard_blocked" },
+      { label: "malformed JSON after canonical list", raw: all + "x", oversized: true, status: 503, reason: "cost_guard_blocked" },
+    ];
+    for (const fixture of cases) {
+      const w = world();
+      const token = "s3-canonical-cost-guard";
+      insert(w.sqlite, "session", {
+        sessionToken: token, userId: "u_owner", expires: NOW_SEC * 1000 + 60000,
+      });
+      const exceptionUntil = fixture.exception ? NOW_SEC + 60 : null;
+      const exceptionJson = fixture.exception ? JSON.stringify(["reserve_slot"]) : null;
+      w.sqlite.prepare(`UPDATE system_settings SET operation_mode = 'normal',
+        disabled_features_json = ?, cost_guard_exception_until = ?,
+        cost_guard_exception_features_json = ? WHERE id = 'default'`)
+        .run(fixture.raw, exceptionUntil, exceptionJson);
+      const currentDecision = evaluateCostGuardCore({
+        feature: "reserve_slot", operationMode: "normal", disabledFeaturesJson: fixture.raw,
+        exceptionUntil, exceptionFeaturesJson: exceptionJson, now: NOW_SEC,
+      });
+      assert.equal(currentDecision.blocked, fixture.status !== 200, fixture.label);
+      if (fixture.oversized) assert.equal(Buffer.byteLength(fixture.raw, "utf8"), maxBytes + 1);
+      let gateRow;
+      const prepare = w.d1.prepare.bind(w.d1);
+      w.d1.prepare = (sql) => {
+        const statement = prepare(sql);
+        if (!sql.includes("slot_combined_write_gate")) return statement;
+        const bind = statement.bind.bind(statement);
+        statement.bind = (...params) => {
+          const bound = bind(...params);
+          const first = bound.first.bind(bound);
+          bound.first = async () => {
+            gateRow = await first();
+            return gateRow;
+          };
+          return bound;
+        };
+        return statement;
+      };
+      const before = state(w);
+      const thaw = freeze();
+      try {
+        const response = await app.request(SITE + "/api/events/ev1/slots/s20/reserve", {
+          method: "POST",
+          headers: {
+            Origin: SITE, cookie: "__Secure-authjs.session-token=" + token,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ display_name: "Canonical CostGuard" }),
+        }, { DB: w.d1, NEXT_PUBLIC_SITE_URL: SITE });
+        const result = await response.json();
+        assert.equal(response.status, fixture.status, fixture.label + ": " + JSON.stringify(result));
+        assert.equal(response.headers.get("cache-control"), "private, no-store");
+        assert.equal(result.ok, fixture.status === 200, fixture.label);
+        assert.ok(gateRow, fixture.label + " executes the real fused gate");
+        assert.equal(gateRow.slot_combined_write_gate, 1);
+        assert.equal(gateRow.disabled_feature_state, fixture.oversized ? -1 :
+          fixture.raw === all ? 1 : fixture.label === "malformed within byte bound" ? -1 : 0);
+        assert.equal(gateRow.disabled_features_json, undefined,
+          "arbitrary persisted JSON is evaluated in SQLite, never returned through D1");
+        assert.ok(Buffer.byteLength(JSON.stringify(gateRow), "utf8") < 64 * 1024);
+        assert.match(w.d1.stats.readSql[0], /FROM "session" s/);
+        assert.match(w.d1.stats.readSql[1], /slot_combined_write_gate/);
+        if (fixture.status === 200) {
+          assert.equal(w.d1.stats.reads, 3, fixture.label);
+          assert.match(w.d1.stats.readSql[2], /invalid_snapshot/);
+          assert.equal(w.d1.stats.batches, 1, fixture.label);
+          assert.equal(w.sqlite.prepare("SELECT status FROM slots WHERE id = 's20'").get().status, "reserved");
+        } else {
+          assert.equal(result.reason, fixture.reason, fixture.label);
+          assert.equal(w.d1.stats.reads, 2, fixture.label);
+          assert.equal(w.d1.stats.batches, 0, fixture.label);
+          assert.deepEqual(state(w), before, fixture.label + " cannot write slots/audit/outbox/queue");
+        }
+      } finally {
+        thaw();
+      }
+    }
+  });
+
+  test("S3 #725: fused CostGuard preserves exception, mode and disabled-list precedence", async () => {
+    const longException = "[" + " ".repeat(900) + Array(50).fill('"reserve_slot"').join(",") + "]";
+    const longUnrelatedDisabled = "[" + " ".repeat(900) + Array(100).fill('"edit_video"').join(",") + "]";
+    const cases = [
+      {
+        label: "active exception overrides oversized mode and disabled list",
+        mode: "M".repeat(180_000),
+        disabled: "[" + Array(100).fill('"reserve_slot"').join(",") + "]",
+        exceptionUntil: NOW_SEC + 60, exception: longException, status: 200,
+      },
+      {
+        label: "expired exception does not override maintenance mode",
+        mode: "maintenance", disabled: '{"not":"a feature list"}',
+        exceptionUntil: NOW_SEC - 1, exception: '["reserve_slot"]',
+        status: 503, reason: "maintenance_mode",
+      },
+      {
+        label: "maintenance mode is decided before malformed disabled list",
+        mode: "maintenance", disabled: '{"not":"a feature list"}',
+        exceptionUntil: null, exception: null, status: 503, reason: "maintenance_mode",
+      },
+      {
+        label: "normal mode rejects malformed disabled list",
+        mode: "normal", disabled: '{"not":"a feature list"}',
+        exceptionUntil: null, exception: null, status: 503, reason: "cost_guard_blocked",
+      },
+      {
+        label: "normal mode accepts 100 duplicate known keys and legal whitespace",
+        mode: "normal", disabled: longUnrelatedDisabled,
+        exceptionUntil: null, exception: null, status: 200,
+      },
+      {
+        label: "normal mode blocks when the selected feature is disabled",
+        mode: "normal", disabled: '["edit_video","reserve_slot","reserve_slot"]',
+        exceptionUntil: null, exception: null, status: 503, reason: "cost_guard_blocked",
+      },
+      {
+        label: "raw NUL after live exception must not bypass maintenance",
+        mode: "maintenance", disabled: "[]", exceptionUntil: NOW_SEC + 60,
+        exception: '["reserve_slot"]' + String.fromCharCode(0) + "garbage",
+        status: 503, reason: "cost_guard_blocked",
+      },
+      {
+        label: "raw NUL after unrelated disabled list fails closed",
+        mode: "normal", disabled: '["edit_video"]' + String.fromCharCode(0) + "garbage",
+        exceptionUntil: null, exception: null, status: 503, reason: "cost_guard_blocked",
+      },
+      {
+        label: "escaped NUL in exception feature is not a known key",
+        mode: "maintenance", disabled: "[]", exceptionUntil: NOW_SEC + 60,
+        exception: '["reserve_slot\\u0000"]',
+        status: 503, reason: "cost_guard_blocked",
+      },
+      {
+        label: "malformed exception is rejected before maintenance mode",
+        mode: "maintenance", disabled: "[]", exceptionUntil: NOW_SEC + 60,
+        exception: '{"not":"an array"}', status: 503, reason: "cost_guard_blocked",
+      },
+    ];
+    for (const fixture of cases) {
+      const w = world();
+      const token = "s3-costguard-precedence";
+      insert(w.sqlite, "session", {
+        sessionToken: token, userId: "u_owner", expires: NOW_SEC * 1000 + 60_000,
+      });
+      w.sqlite.prepare(`UPDATE system_settings SET operation_mode = ?,
+        disabled_features_json = ?, cost_guard_exception_until = ?,
+        cost_guard_exception_features_json = ? WHERE id = 'default'`)
+        .run(fixture.mode, fixture.disabled, fixture.exceptionUntil, fixture.exception);
+      const expected = evaluateCostGuardCore({
+        feature: "reserve_slot", operationMode: fixture.mode,
+        disabledFeaturesJson: fixture.disabled, exceptionUntil: fixture.exceptionUntil,
+        exceptionFeaturesJson: fixture.exception, now: NOW_SEC,
+      });
+      assert.equal(expected.blocked, fixture.status !== 200, fixture.label);
+      let gateRow;
+      const prepare = w.d1.prepare.bind(w.d1);
+      w.d1.prepare = (sql) => {
+        const statement = prepare(sql);
+        if (!sql.includes("slot_combined_write_gate")) return statement;
+        const bind = statement.bind.bind(statement);
+        statement.bind = (...params) => {
+          const bound = bind(...params);
+          const first = bound.first.bind(bound);
+          bound.first = async () => { gateRow = await first(); return gateRow; };
+          return bound;
+        };
+        return statement;
+      };
+      const before = state(w);
+      const thaw = freeze();
+      try {
+        const response = await app.request(SITE + "/api/events/ev1/slots/s20/reserve", {
+          method: "POST",
+          headers: {
+            Origin: SITE, cookie: "__Secure-authjs.session-token=" + token,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ display_name: "CostGuard precedence" }),
+        }, { DB: w.d1, NEXT_PUBLIC_SITE_URL: SITE });
+        const body = await response.json();
+        assert.equal(response.status, fixture.status, fixture.label + ": " + JSON.stringify(body));
+        assert.equal(response.headers.get("cache-control"), "private, no-store");
+        assert.ok(gateRow, fixture.label);
+        assert.equal(gateRow.disabled_features_json, undefined);
+        assert.equal(gateRow.cost_guard_exception_features_json, undefined);
+        assert.ok(Buffer.byteLength(JSON.stringify(gateRow), "utf8") < 64 * 1024);
+        assert.match(w.d1.stats.readSql[0], /FROM "session" s/);
+        assert.match(w.d1.stats.readSql[1], /slot_combined_write_gate/);
+        if (fixture.status === 200) {
+          assert.equal(body.ok, true, fixture.label);
+          assert.equal(w.d1.stats.reads, 3, fixture.label);
+          assert.equal(w.d1.stats.batches, 1, fixture.label);
+        } else {
+          assert.equal(body.reason, fixture.reason, fixture.label);
+          assert.equal(w.d1.stats.reads, 2, fixture.label);
+          assert.equal(w.d1.stats.batches, 0, fixture.label);
+          assert.deepEqual(state(w), before, fixture.label + " no slot/audit/outbox/queue write");
+        }
+      } finally {
+        thaw();
+      }
+    }
+  });
+
+  test("SEC #716 / S3 #725: fused gate bounds legacy first-row data before D1 wire", async () => {
+    // These columns are read only by the new fused gate, not by the preceding
+    // Auth.js session SELECT. Exercise actual HTTPS-cookie + Hono + SQLite.
+    for (const field of [
+      {
+        label: "active X icon",
+        table: "x_users", column: "icon_url", idColumn: "id",
+        userId: (db) => db.prepare("SELECT active_x_user_id AS id FROM user WHERE id = 'u_owner'").get().id,
+        alias: "x_icon_url", marker: "invalid_actor_snapshot", reason: "db_unavailable",
+        value: String.fromCharCode(1).repeat(180_000),
+      },
+      {
+        label: "CostGuard disabled feature JSON",
+        table: "system_settings", column: "disabled_features_json", idColumn: "id",
+        userId: () => "default", alias: "disabled_features_json", marker: "disabled_feature_state",
+        markerValue: -1, notProjected: true, reason: "cost_guard_blocked",
+        value: JSON.stringify({ oversized: "A".repeat(180_000) }),
+      },
+      {
+        label: "audit retention column with invalid TEXT storage type",
+        table: "system_settings", column: "audit_normal_retention_days", idColumn: "id",
+        userId: () => "default", alias: "audit_normal_retention_days",
+        marker: "invalid_audit_settings", reason: "db_unavailable",
+        value: "invalid-" + "X".repeat(180_000),
+      },
+    ]) {
+      const w = world();
+      const token = "s3-gate-wire-budget";
+      insert(w.sqlite, "session", {
+        sessionToken: token, userId: "u_owner", expires: NOW_SEC * 1000 + 60_000,
+      });
+      const affectedId = field.userId(w.sqlite);
+      assert.ok(affectedId, "fixture contains the selected active X");
+      w.sqlite.prepare(`UPDATE "${field.table}" SET "${field.column}" = ? WHERE "${field.idColumn}" = ?`)
+        .run(field.value, affectedId);
+      let capturedGateRow;
+      const prepare = w.d1.prepare.bind(w.d1);
+      w.d1.prepare = (sql) => {
+        const statement = prepare(sql);
+        if (!sql.includes("slot_combined_write_gate")) return statement;
+        const bind = statement.bind.bind(statement);
+        statement.bind = (...params) => {
+          const bound = bind(...params);
+          const first = bound.first.bind(bound);
+          bound.first = async () => {
+            capturedGateRow = await first();
+            return capturedGateRow;
+          };
+          return bound;
+        };
+        return statement;
+      };
+      const before = state(w);
+      const thaw = freeze();
+      try {
+        const response = await app.request(SITE + "/api/events/ev1/slots/s20/reserve", {
+          method: "POST",
+          headers: {
+            Origin: SITE, cookie: "__Secure-authjs.session-token=" + token,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ display_name: "No unbounded gate" }),
+        }, { DB: w.d1, NEXT_PUBLIC_SITE_URL: SITE });
+        const body = await response.json();
+        assert.equal(response.status, 503, field.label);
+        assert.equal(response.headers.get("cache-control"), "private, no-store", field.label);
+        assert.equal(body.reason, field.reason ?? "db_unavailable", field.label);
+        assert.equal(capturedGateRow?.slot_combined_write_gate, 1, field.label);
+        if (field.marker) {
+          assert.equal(capturedGateRow[field.marker], field.markerValue ?? 1, field.label);
+          assert.equal(capturedGateRow[field.alias], field.notProjected ? undefined : null,
+            field.label + " must never reach the D1 first-row result");
+        } else {
+          assert.equal(capturedGateRow[field.alias], null,
+            field.label + " must never reach the D1 first-row result");
+        }
+        assert.ok(Buffer.byteLength(JSON.stringify(capturedGateRow), "utf8") < 64 * 1024,
+          field.label + " D1 transport row is bounded");
+        assert.ok(Buffer.byteLength(JSON.stringify(body), "utf8") < 2048);
+        assert.equal(w.d1.stats.reads, 2, field.label + " stops after session + gate");
+        assert.equal(w.d1.stats.batches, 0, field.label);
+        assert.deepEqual(state(w), before, field.label + " cannot modify data or audit/outbox");
+      } finally {
+        thaw();
+      }
+    }
+  });
+
+  test("S3 #725: real HTTPS cookie D1 faults fail closed at each pre-read boundary", async () => {
+    const stages = [
+      ["session", /FROM "session" s/, "database_unavailable"],
+      ["merged-tos-cost", /JOIN "system_settings" settings/, "db_unavailable"],
+      ["slot", /invalid_snapshot/, null],
+    ];
+    for (const [stage, sqlPattern, denyReason] of stages) {
+      const w = world();
+      insert(w.sqlite, "session", {
+        sessionToken: "s3-lookup-fault", userId: "u_owner",
+        expires: NOW_SEC * 1000 + 60000,
+      });
+      const initial = state(w);
+      const prepare = w.d1.prepare.bind(w.d1);
+      let intercepted = 0;
+      w.d1.prepare = (sql) => {
+        const statement = prepare(sql);
+        if (!sqlPattern.test(sql)) return statement;
+        const bind = statement.bind.bind(statement);
+        statement.bind = (...args) => {
+          const bound = bind(...args);
+          bound.first = async () => {
+            intercepted += 1;
+            throw new Error("S3_SENSITIVE_PROVIDER_ERROR_MUST_NOT_LEAK");
+          };
+          return bound;
+        };
+        return statement;
+      };
+      const originalError = console.error;
+      const captured = [];
+      console.error = (...args) => { captured.push(args.join(" ")); };
+      const thaw = freeze();
+      try {
+        const response = await app.request(SITE + "/api/events/ev1/slots/s20/reserve", {
+          method: "POST",
+          headers: {
+            Origin: SITE, cookie: "__Secure-authjs.session-token=s3-lookup-fault",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ display_name: "No write on failure" }),
+        }, { DB: w.d1, NEXT_PUBLIC_SITE_URL: SITE });
+        const body = await response.json();
+        assert.equal(response.status, 503, stage);
+        assert.equal(response.headers.get("cache-control"), "private, no-store", stage);
+        assert.equal(body.ok, false, stage);
+        if (denyReason) assert.equal(body.reason, denyReason, stage);
+        assert.equal(intercepted, 1, stage + " must actually exercise the injected D1 fault");
+        assert.equal(w.d1.stats.batches, 0, stage);
+        assert.deepEqual(state(w), initial, stage + " must not mutate DB state");
+        assert.doesNotMatch(captured.join("\n"), /S3_SENSITIVE_PROVIDER_ERROR_MUST_NOT_LEAK/,
+          "provider error content must not enter logs");
+        assert.doesNotMatch(JSON.stringify(body), /S3_SENSITIVE_PROVIDER_ERROR_MUST_NOT_LEAK/,
+          "provider error content must not reach client");
+      } finally {
+        thaw();
+        console.error = originalError;
+      }
+    }
+  });
+
+  // A failing provider and a failing diagnostic sink must not alter the fixed
+  // private HTTP response. Throw after the actual third SQLite read (not in
+  // auth or ToS), so each of the four mounted route catch boundaries is tested.
+  for (const [operation, path, input] of [
+    ["reserve", "/api/events/ev1/slots/s20/reserve", { display_name: "No write" }],
+    ["release", "/api/events/ev1/slots/s20/release", {}],
+    ["extend", "/api/events/ev1/slots/s20/extend", { direction: "forward" }],
+    ["merge", "/api/events/ev1/slot-groups/merge", { gap_slot_id: "s20", display_name: "No write" }],
+  ]) {
+    test("MIG-0657: " + operation + " provider and diagnostic failures retain private 503", async () => {
+      const marker = "SLOT_DIAGNOSTIC_PRIVATE_FIXTURE";
+      let fault;
+      let intercepted = 0;
+      let nameReads = 0;
+      let prototypeReads = 0;
+      const w = world({
+        beforeRead(sql) {
+          if (sql.includes("invalid_snapshot")) {
+            intercepted += 1;
+            throw fault;
+          }
+        },
+      });
+      insert(w.sqlite, "session", {
+        sessionToken: "slot-diagnostic-fault", userId: "u_owner",
+        expires: NOW_SEC * 1000 + 60000,
+      });
+      const fixtures = [
+        ["throwing name", Object.defineProperty(new Error(marker), "name", {
+          get() { nameReads += 1; throw new Error(marker); },
+        }), false],
+        ["untrusted name", Object.assign(new Error(marker), { name: marker }), false],
+        ["throwing prototype", new Proxy(new Error(marker), {
+          getPrototypeOf() { prototypeReads += 1; throw new Error(marker); },
+        }), false],
+        ["throwing logger", new Error(marker), true],
+      ];
+      const before = state(w);
+      const originalError = console.error;
+      const thaw = freeze();
+      try {
+        for (const [label, injected, sinkFails] of fixtures) {
+          fault = injected;
+          const readCount = w.d1.stats.reads;
+          const batchCount = w.d1.stats.batches;
+          const faultCount = intercepted;
+          const captured = [];
+          console.error = (...args) => {
+            captured.push(args);
+            if (sinkFails) throw new Error(marker);
+          };
+          const response = await app.request(SITE + path, {
+            method: "POST",
+            headers: {
+              Origin: SITE, cookie: "__Secure-authjs.session-token=slot-diagnostic-fault",
+              "content-type": "application/json",
+            },
+            body: JSON.stringify(input),
+          }, { DB: w.d1, NEXT_PUBLIC_SITE_URL: SITE });
+          assert.equal(response.status, 503, label);
+          assert.equal(response.headers.get("cache-control"), "private, no-store", label);
+          assert.deepEqual(await response.json(), {
+            ok: false,
+            message: "枠の状態が変更されたか、安全な保存を完了できませんでした。画面を更新してもう一度お試しください。",
+          }, label);
+          assert.equal(intercepted - faultCount, 1, label);
+          assert.equal(w.d1.stats.reads - readCount, 3, label + " session + gate + snapshot");
+          assert.equal(w.d1.stats.batches - batchCount, 0, label);
+          assert.deepEqual(state(w), before, label + " no slot/audit/outbox/queue writes");
+          assert.equal(nameReads, 0, label);
+          assert.equal(prototypeReads, 0, label);
+          assert.deepEqual(captured, [["[slot-reservation] " + operation + " failed"]], label);
+        }
+      } finally {
+        console.error = originalError;
+        thaw();
+        w.sqlite.close();
+      }
+    });
+  }
+}
