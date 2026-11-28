@@ -4,8 +4,11 @@ import assert from "node:assert/strict";
 import React from "react";
 import { MemoryRouter } from "react-router-dom";
 import { renderToStaticMarkup } from "react-dom/server";
+import { createRoot } from "react-dom/client";
+import { JSDOM, VirtualConsole } from "jsdom";
 import { createXIdMergesApi, xMergeReadPath } from "../.test-dist/apps/ops/src/api/xidMerges.js";
-import { AdminXIdMergesContent } from "../.test-dist/apps/ops/src/routes/admin/AdminXIdMerges.js";
+import { AdminXIdMerges, AdminXIdMergesContent } from "../.test-dist/apps/ops/src/routes/admin/AdminXIdMerges.js";
+import { useApiResult } from "../.test-dist/apps/ops/src/routes/useApiResult.js";
 
 const merge = {
   id: "mg1", request_type: "merge", status: "pending",
@@ -121,4 +124,122 @@ test("U02a: selected impact preserves CURRENT table detail, zero counts, work ID
   assert.match(zero, /<summary>0 行 \/ 影響行はありません。<\/summary>/);
   assert.match(zero, /<code>event_staff\.x_user_id<\/code>: 0/);
   assert.match(zero, /作品への直接参照はありません/);
+});
+
+test("MIG-0732 U02a: explicit authorization loss clears mounted X merge data on refresh and navigation", async () => {
+  const privateLabel = "PRIVATE_MERGE_PREVIEW";
+  const privateSnapshot = {
+    ...requests,
+    requests: [{
+      ...merge, source_name: privateLabel,
+      preview: [{ ...merge.preview[0], title: privateLabel + "_VIDEO" }],
+    }],
+  };
+  // JSDOM does not implement full-document location.assign; the route still
+  // receives the real forbidden response. Test data disappearance, not a
+  // successful browser redirect.
+  const virtualConsole = new VirtualConsole();
+  const dom = new JSDOM("<!doctype html><html><body><div id='root'></div></body></html>", {
+    url: "https://flamenode.test/admin/x-id-merges?impact=mg1", virtualConsole,
+  });
+  const globals = {
+    window: dom.window, document: dom.window.document, navigator: dom.window.navigator,
+    HTMLElement: dom.window.HTMLElement, Node: dom.window.Node,
+    IS_REACT_ACT_ENVIRONMENT: true, fetch: globalThis.fetch,
+  };
+  const original = new Map(Object.keys(globals).map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  let root;
+  try {
+    for (const [key, value] of Object.entries(globals)) {
+      Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
+    }
+    const target = document.getElementById("root");
+    root = createRoot(target);
+    let response;
+    const refreshCalls = [];
+    const api = createXIdMergesApi(async (path, init) => {
+      refreshCalls.push({ path, method: init.method, cache: init.cache });
+      return response();
+    });
+    const read = signal => api.get("requests", "mg1", signal);
+    // The production read-only screen does not expose a successful-state
+    // refresh control. Exercise its actual loader and hook through an
+    // isolated mounted harness rather than adding a production trigger.
+    function RefreshHarness({ refreshKey }) {
+      const result = useApiResult(read, xMergeReadPath("requests", "mg1"), refreshKey);
+      return result.status === "ok"
+        ? React.createElement(AdminXIdMergesContent, { data: result.data })
+        : React.createElement("p", { role: "status" }, result.status);
+    }
+    for (const [code, expected] of [[401, "anonymous"], [403, "forbidden"], [404, "notFound"]]) {
+      const render = async refreshKey => {
+        await React.act(async () => {
+          root.render(React.createElement(MemoryRouter, { key: code },
+            React.createElement(RefreshHarness, { refreshKey })));
+        });
+      };
+      response = () => json(200, privateSnapshot);
+      await render(0);
+      assert.match(target.textContent, /PRIVATE_MERGE_PREVIEW_VIDEO/);
+      response = () => json(503, {});
+      await render(1);
+      // Existing shared hook policy retains same-key data on transient 503.
+      // This observation is not acceptance of that policy for this screen.
+      assert.match(target.textContent, /PRIVATE_MERGE_PREVIEW_VIDEO/);
+      response = () => code === 403 ? new Response("invalid-json", { status: 403 }) : json(code, {});
+      await render(2);
+      assert.equal(target.textContent, expected);
+      assert.doesNotMatch(target.textContent, /PRIVATE_MERGE_PREVIEW|vid\/1|@alice/);
+    }
+    assert.equal(refreshCalls.length, 9);
+    assert.ok(refreshCalls.every(call => call.path === "/api/admin-read/x-id-merges?impact=mg1"
+      && call.method === "GET" && call.cache === "no-store"));
+
+    // Mount the actual route and follow its actual view link. A new query
+    // key must hide the old authorized snapshot before the new GET settles.
+    const routeCalls = [];
+    let resolveDenied;
+    globalThis.fetch = (path, init) => {
+      routeCalls.push({ path, method: init.method, signal: init.signal });
+      return routeCalls.length === 1
+        ? Promise.resolve(json(200, privateSnapshot))
+        : new Promise(resolve => { resolveDenied = resolve; });
+    };
+    await React.act(async () => {
+      root.render(React.createElement(MemoryRouter, {
+        key: "actual-route", initialEntries: ["/admin/x-id-merges?impact=mg1"],
+      }, React.createElement(AdminXIdMerges)));
+    });
+    assert.match(target.textContent, /PRIVATE_MERGE_PREVIEW_VIDEO/);
+    const link = target.querySelector('a[href="/admin/x-id-merges?view=reverts"]');
+    assert.ok(link);
+    await React.act(async () => {
+      link.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
+    });
+    assert.equal(routeCalls.length, 2);
+    assert.equal(routeCalls[0].signal.aborted, true);
+    assert.deepEqual(routeCalls.map(({ path, method }) => [path, method]), [
+      ["/api/admin-read/x-id-merges?impact=mg1", "GET"],
+      ["/api/admin-read/x-id-merges?view=reverts", "GET"],
+    ]);
+    assert.doesNotMatch(target.textContent, /PRIVATE_MERGE_PREVIEW|vid\/1|@alice/);
+    assert.match(target.textContent, /読み込み中/);
+    assert.equal(typeof resolveDenied, "function");
+    await React.act(async () => {
+      resolveDenied(new Response("invalid-json", { status: 403 }));
+    });
+    assert.doesNotMatch(target.textContent, /PRIVATE_MERGE_PREVIEW|vid\/1|@alice/);
+    assert.equal(target.querySelector("table"), null);
+    assert.match(target.textContent, /読み込み中/);
+  } finally {
+    try {
+      if (root) await React.act(async () => { root.unmount(); });
+    } finally {
+      dom.window.close();
+      for (const [key, descriptor] of original) {
+        if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+        else delete globalThis[key];
+      }
+    }
+  }
 });
