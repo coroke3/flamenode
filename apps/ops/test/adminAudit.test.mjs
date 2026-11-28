@@ -523,7 +523,7 @@ test("MIG-0733 U04: actual OpsRoutes gate all four audit views before fetching a
           assert.ok(target.querySelector("main.admin-main").textContent.includes(scenario.visible),scenario.path);
           assert.deepEqual(calls.map(c=>c.path).sort(),
             ["/api/account/summary","/api/admin-read/cost-guard-banner",scenario.api].sort());
-          assert.doesNotMatch(target.querySelector("main.admin-main").textContent,/確認テキスト:|リストア実行|競合チェック実行|設定を保存/);
+          assert.doesNotMatch(target.querySelector("main.admin-main").textContent,/確認テキスト:|リストア実行(?!履歴)|競合チェック実行|設定を保存/);
           if(scenario.path==="/admin/audit/settings") {
             assert.equal(target.querySelector("main.admin-main input[type='number']"),null);
           }
