@@ -1926,6 +1926,15 @@ test("U03a SA-088: stage/general question policy changes fail the same audited b
       { name: "staff can link private event", requested: ["ev_open"], staff: [{ event: "ev_open", preset: "reviewer" }], expected: ["ev_closed","ev_open"] },
       { name: "public staff has no permission", requested: ["ev_open"], staff: [{ event: "ev_open", preset: "public_staff" }], expected: ["ev_closed"] },
       { name: "malformed custom preset", requested: ["ev_open"], staff: [{ event: "ev_open", preset: "custom", json: "{" }], expected: ["ev_closed"] },
+      // SEC-930: inherited-only custom keys must not grant modification of
+      // a locked event; existing locked links are retained. Mixed recognized
+      // aliases and explicitly delegated keys keep CURRENT behavior.
+      ...Object.getOwnPropertyNames(Object.prototype).flatMap((key) => [
+        { name: "inherited-only cannot add " + key, requested: ["ev_open"], staff: [{ event: "ev_open", preset: "custom", json: JSON.stringify([key]) }], expected: ["ev_closed"] },
+        { name: "inherited-only retains existing " + key, current: ["ev_open"], requested: [], staff: [{ event: "ev_open", preset: "custom", json: JSON.stringify([key]) }], expected: ["ev_closed","ev_open"] },
+        { name: "valid legacy alias alongside " + key, requested: ["ev_open"], staff: [{ event: "ev_open", preset: "custom", json: JSON.stringify([key,"videos.title"]) }], expected: ["ev_closed","ev_open"] },
+        { name: "explicit admin-only grant alongside " + key, requested: ["ev_open"], staff: [{ event: "ev_open", preset: "custom", json: JSON.stringify([key,"xid.link_requests"]) }], expected: ["ev_closed","ev_open"] },
+      ]),
       { name: "unapproved other actor cannot link", requested: ["ev_open"], staff: [{ event: "ev_open", preset: "owner", x: "x_notos" }], expected: ["ev_closed"] },
       { name: "nonactive approved X staff", requested: ["ev_open"], staff: [{ event: "ev_open", preset: "manager", x: "x_canon" }], linkCanon: true, expected: ["ev_closed","ev_open"] },
       { name: "duplicate IDs dedupe", requested: ["ev_open","ev_open","ev_closed"], allow: ["ev_open"], expected: ["ev_closed","ev_open"] },
