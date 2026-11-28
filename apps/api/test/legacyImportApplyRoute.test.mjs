@@ -1677,6 +1677,98 @@ test("MIG-0645 U02ba: real Auth.js session exposes four pre-reads; S3 three-read
   assert.ok(4 > 3, "the actual session path exceeds ZERO_1102's three pre-read ceiling");
 });
 
+test("MIG-0645 U02bb: real Auth.js session video create, receipt replay and private replacement each retain four-read budget", async () => {
+  const { bucket } = previewBucket({ failCompleteOnce: true });
+  const { request, sqlite, d1Budget } = setup({
+    bucket, captureD1Budget: true, realSession: true, applyStep: legacyImportD1ApplyStep,
+  });
+  extendLegacyImportUserSchema(sqlite);
+  extendLegacyImportSoftwareSchema(sqlite);
+  extendLegacyImportEventSchema(sqlite);
+  extendLegacyImportQuestionSchema(sqlite);
+  extendLegacyImportVideoCreateSchema(sqlite);
+  sqlite.exec('CREATE TABLE "session" ("sessionToken" TEXT PRIMARY KEY, "userId" TEXT, expires INTEGER)');
+  sqlite.prepare('INSERT INTO "session" ("sessionToken", "userId", expires) VALUES (?, ?, ?)')
+    .run("valid-session-token", ADMIN.id, Date.now() + 3600_000);
+  seedEvent(sqlite, { id: "ev-1", visibility_status: "private" });
+
+  const plan = questionPlan(1);
+  const video = {
+    id: "real-session-video", primary_event_id: "ev-1", creator_x_user_id: null,
+    collaboration_type: "individual", source_type: "youtube", creator_display_name: "Creator",
+    creator_display_name_yomi: null, creator_icon_url: null, creator_youtube_channel_url: null,
+    creator_profile_text: null, creator_other_social_links: null, title: "Real session video",
+    music: null, credit: null, music_reference_url: null, closing_comment: null,
+    youtube_video_id: "abcdefghijk", intro_comment: null, highlights: null, production_story: null,
+    visibility_status: "private", scheduling_type: "manual", scheduled_time: null, created_at: 1700000000,
+  };
+  plan.videos.push(video);
+  plan.videoEvents.push({ video_id: video.id, event_id: "ev-1" });
+  plan.videoMembers.push({
+    id: "real-session-member", video_id: video.id, x_user_id: null,
+    name: "Creator", role: null, order_index: 0,
+  });
+  plan.videoChapters.push({
+    id: "real-session-chapter", video_id: video.id, x_user_id: null,
+    chapter_time: 5, chapter_label: "Intro", note: null, visibility: "public",
+  });
+  plan.videoSoftwares.push({ video_id: video.id, label: "Test Software" });
+  plan.videoCustomAnswers.push({
+    video_id: video.id, event_id: "ev-1", question_id: "question-0",
+    question_key: "question_0", answer_text: "Original answer", answer_json: null,
+  });
+
+  const { form } = await createApplyCredential(bucket, ADMIN.id, plan);
+  await reachQuestionStage(request, form);
+  const questions = await request(form());
+  assert.equal(questions.status, 200, JSON.stringify(await questions.clone().json()));
+  assert.equal((await questions.json()).progress.stage, "videos");
+
+  // The video D1 batch commits, then the simulated final R2 completion CAS
+  // fails. The response must report committed progress, never false rollback.
+  const createMark = d1Budget.mark();
+  const pending = await request(form());
+  assert.equal(pending.status, 503, JSON.stringify(await pending.clone().json()));
+  const pendingBody = await pending.json();
+  assert.equal(pendingBody.kind, "committed_progress_pending");
+  assert.equal(pendingBody.result.created.videos, 1);
+  d1Budget.assertSince(createMark, "real-session video create", 4, 1);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM videos WHERE id = ?").get(video.id).n, 1);
+
+  // Durable marker replay must recover the already-committed result without
+  // another D1 batch, audit, canonical write or Queue mutation.
+  const auditCount = sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n;
+  const replayMark = d1Budget.mark();
+  const replay = await request(form());
+  assert.equal(replay.status, 200, JSON.stringify(await replay.clone().json()));
+  assert.equal((await replay.json()).result.created.videos, 1);
+  d1Budget.assertSince(replayMark, "real-session video receipt replay", 4, 0);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, auditCount);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM videos WHERE id = ?").get(video.id).n, 1);
+
+  // Exercise the same real-session budget on the owned private-to-private
+  // replacement path, including the combined entity/answer proof snapshot.
+  const replacementPlan = structuredClone(plan);
+  replacementPlan.videos[0].title = "Replaced after real-session receipt";
+  replacementPlan.videoCustomAnswers[0].answer_text = "Changed answer";
+  const replacement = await createApplyCredential(
+    bucket, ADMIN.id, replacementPlan, "replace_imported",
+  );
+  await reachQuestionStage(request, replacement.form);
+  const replacementQuestions = await request(replacement.form());
+  assert.equal(replacementQuestions.status, 200, JSON.stringify(await replacementQuestions.clone().json()));
+  assert.equal((await replacementQuestions.json()).progress.stage, "videos");
+  const replacementMark = d1Budget.mark();
+  const replaced = await request(replacement.form());
+  assert.equal(replaced.status, 200, JSON.stringify(await replaced.clone().json()));
+  assert.equal((await replaced.json()).result.replaced.videos, 1);
+  d1Budget.assertSince(replacementMark, "real-session private video replacement", 4, 1);
+  assert.equal(sqlite.prepare("SELECT title FROM videos WHERE id = ?").get(video.id).title,
+    "Replaced after real-session receipt");
+  assert.equal(sqlite.prepare("SELECT answer_text FROM video_custom_answers WHERE video_id = ?").get(video.id).answer_text,
+    "Changed answer");
+});
+
 test("MIG-0645 U02az: mixed-case and Unicode video proofs use SQLite BINARY; historical proofs match one whole order only", async () => {
   const { bucket } = previewBucket();
   let serverDb;
