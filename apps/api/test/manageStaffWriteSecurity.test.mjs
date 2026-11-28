@@ -4,11 +4,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Hono } from "hono";
+import { redirect, unstable_rethrow } from "next/navigation";
 import { EventStaffCsvBodySchema } from "@flamenode/contracts";
 import { drizzle } from "drizzle-orm/d1";
 import * as schema from "@flamenode/db/schema";
 import { registerStaffWriteRoutes } from "../src/routes/manage/staffWrite.ts";
-import { LAST_OWNER_ERROR } from "@flamenode/server-core/event/eventOwnership";
+import {
+  assertActorMayAssignOwner,
+  LAST_OWNER_ERROR,
+  transferEventOwnership,
+} from "@flamenode/server-core/event/eventOwnership";
 import { createAdminD1, seedBase, seedEvent } from "./helpers/sqliteD1.mjs";
 
 const ADMIN = { id: "admin-1", name: "Admin", role: "admin", is_banned: 0 };
@@ -125,7 +130,7 @@ function setup({ user = ADMIN, fault, failQueue = false, failRouteDb = false, ro
     { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) },
     { DB: db },
   );
-  return { sqlite, stats, count, before, initial, receipt, send };
+  return { db, sqlite, stats, count, before, initial, receipt, send };
 }
 
 async function withThrowingDiagnostics(run) {
@@ -857,5 +862,103 @@ test("SEC-800: shared ownership-core provider reads cannot impersonate allowlist
     } finally {
       s.sqlite.close();
     }
+  }
+});
+
+
+
+function captureNextRedirectError() {
+  try {
+    redirect("/events/ev-1");
+  } catch (error) {
+    return error;
+  }
+  throw new Error("Next redirect did not interrupt control flow");
+}
+
+test("SEC-800: shared ownership read wrappers preserve pinned Next control-flow causes", async () => {
+  const redirectError = captureNextRedirectError();
+  const eventStaffWhere = (statement) =>
+    statement.match(/\bWHERE\b([\s\S]*?)(?:\bORDER\s+BY\b|\bLIMIT\b|$)/i)?.[1] ?? "";
+  const ownerRowsRead = (statement) => {
+    const where = eventStaffWhere(statement);
+    return /"event_staff"\."event_id"\s*=\s*\?/i.test(where) &&
+      /"event_staff"\."permission_preset"\s*=\s*\?/i.test(where) &&
+      /\bEXISTS\s*\(/i.test(where) && /\bx_users\b/i.test(where);
+  };
+  const approvedLinkedXRead = (statement) =>
+    /FROM\s+"x_user_account_links"\s+INNER JOIN\s+"x_users"/i.test(statement) &&
+    /"x_user_account_links"\."auth_user_id"\s*=\s*\?/i.test(statement) &&
+    /"x_users"\."approval_status"\s*=\s*\?/i.test(statement) &&
+    !/"x_user_account_links"\."link_role"\s*=\s*\?/i.test(statement);
+  const transferTargetRead = (statement) => {
+    const where = eventStaffWhere(statement);
+    return /"event_staff"\."event_id"\s*=\s*\?/i.test(where) &&
+      /"event_staff"\."id"\s+IN\s*\(\s*\?\s*,\s*\?\s*\)/i.test(where);
+  };
+  const cases = [
+    ["owner eligibility read", ownerRowsRead, (db) => assertActorMayAssignOwner({
+      db, eventId: "ev-1", actorUserId: "admin-1", isSiteAdmin: false,
+    })],
+    ["approved-X eligibility read", approvedLinkedXRead, (db) => assertActorMayAssignOwner({
+      db, eventId: "ev-1", actorUserId: "admin-1", isSiteAdmin: false,
+    })],
+    ["ownership transfer target read", transferTargetRead, (db) => transferEventOwnership({
+      db, eventId: "ev-1", fromStaffId: "s-owner", toStaffId: "s-target",
+      actorUserId: "admin-1", reason: "handover", confirmText: "TRANSFER ev-1",
+      selfConfirmText: "SELF CHANGE ev-1",
+    })],
+  ];
+  for (const [label, match, invoke] of cases) {
+    const s = setup({ user: MEMBER, fault: { match, error: redirectError } });
+    try {
+      let wrapped;
+      try {
+        await invoke(drizzle(s.db, { schema }));
+      } catch (error) {
+        wrapped = error;
+      }
+      assert.ok(wrapped instanceof Error, label + ": provider read was wrapped");
+      assert.equal(wrapped.message, "event ownership preparation read failed", label);
+      assert.throws(() => unstable_rethrow(wrapped), (error) => error === redirectError, label);
+      assert.equal(s.receipt.readFaults, 1, label);
+      assert.equal(s.stats.batches, 0, label);
+      assert.deepEqual(s.before(), s.initial, label);
+    } finally {
+      s.sqlite.close();
+    }
+  }
+});
+
+test("SEC-800: genuine non-owner denial remains the fixed 409 after both reads succeed", async () => {
+  const s = setup({ user: MEMBER });
+  try {
+    s.sqlite.exec(
+      "INSERT INTO x_users (id, x_name, approval_status) VALUES ('other_owner_x', 'Other Owner', 'approved');\n" +
+      "INSERT INTO x_user_account_links (auth_user_id, x_user_id, link_role) VALUES ('admin-2', 'other_owner_x', 'owner');\n" +
+      "UPDATE event_staff SET x_user_id = 'other_owner_x' WHERE id = 's-owner';\n" +
+      "INSERT INTO event_staff (id, event_id, x_user_id, display_name, permission_preset, custom_permission_keys_json, is_public, created_at, updated_at) " +
+      "VALUES ('s-member', 'ev-1', 'owner_x', 'Member Manager', 'custom', '[\\"event.members\\"]', 0, 1, 1);"
+    );
+    const before = s.before();
+    await withThrowingDiagnostics(async ({ errors, warnings }) => {
+      const result = await s.send("POST", "/", { ...upsert, permission_preset: "owner" });
+      assert.equal(result.status, 409, await result.clone().text());
+      assert.equal(result.headers.get("cache-control"), "private, no-store");
+      assert.deepEqual(await result.json(), {
+        ok: false, message: "代表権限を付与できるのはイベント代表者または管理者だけです。",
+      });
+      assert.deepEqual(errors, []);
+      assert.equal(warnings(), 0);
+    });
+    assert.equal(s.receipt.readFaults, 0);
+    assert.equal(s.stats.batches, 0);
+    assert.deepEqual(s.before(), before);
+    assert.equal(
+      s.sqlite.prepare("SELECT permission_preset FROM event_staff WHERE id='s-owner'").get().permission_preset,
+      "owner",
+    );
+  } finally {
+    s.sqlite.close();
   }
 });

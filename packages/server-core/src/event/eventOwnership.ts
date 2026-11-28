@@ -39,8 +39,11 @@ const OPERABLE_OWNER_ERROR =
  * must never cross this boundary with attacker/provider-controlled text.
  */
 class EventOwnershipPreparationReadError extends Error {
-  constructor() {
-    super("event ownership preparation read failed");
+  constructor(cause: unknown) {
+    // CURRENT Next.js 15.5.28 unstable_rethrow walks Error.cause for nested
+    // redirect/notFound control-flow errors. Keep the outer message fixed so
+    // provider text remains non-domain and is never reflected by adapters.
+    super("event ownership preparation read failed", { cause });
     this.name = "EventOwnershipPreparationReadError";
   }
 }
@@ -48,8 +51,8 @@ class EventOwnershipPreparationReadError extends Error {
 async function ownershipPreparationRead<T>(read: () => Promise<T>): Promise<T> {
   try {
     return await read();
-  } catch {
-    throw new EventOwnershipPreparationReadError();
+  } catch (cause) {
+    throw new EventOwnershipPreparationReadError(cause);
   }
 }
 
