@@ -10,8 +10,12 @@ const dangerSource = await readFile(
   new URL("./event-admin-danger.ts", import.meta.url),
   "utf8",
 );
-const reuseSource = await readFile(
+const reuseBridge = await readFile(
   new URL("../event/eventIdReuse.ts", import.meta.url),
+  "utf8",
+);
+const reuseSource = await readFile(
+  new URL("../../../packages/server-core/src/visibility/eventIdReuse.ts", import.meta.url),
   "utf8",
 );
 
@@ -32,13 +36,19 @@ test("event ID rename handles a reusable target tombstone before moving the fenc
 });
 
 test("reuse verification is fail-closed across queue, tracked artifacts, R2, and manifest", () => {
+  assert.match(reuseBridge, /from "@flamenode\/server-core\/visibility\/eventIdReuse"/);
+  assert.match(reuseBridge, /return preCommitEventIdReuseCore\(input, nextEventIdReuseHost\)/);
+  assert.match(reuseBridge, /return compensateEventIdReuseCore\(input, nextEventIdReuseHost\)/);
+  assert.match(reuseBridge, /requireBucket: \(\) => getEnv\(\)\.BUCKET/);
+  assert.match(reuseBridge, /readManifest: readPublicVisibilityBlockedEntitiesManifest/);
+  assert.match(reuseBridge, /writeManifest: writePublicVisibilityBlockedEntitiesManifest/);
   for (const pattern of [
     /hasCompletedEventIdRenameCleanup/,
     /staticArtifacts/,
     /eventComposedObjectKey/,
     /eventBaseObjectKey/,
     /eventSlotsObjectKey/,
-    /readPublicVisibilityBlockedEntitiesManifest/,
+    /host\.readManifest/,
     /releaseBlockedEntityInManifest/,
     /ifMatchEtag/,
   ]) {

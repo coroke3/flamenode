@@ -8,10 +8,14 @@ function readRepoFile(path) {
 
 test("blank create-event IDs are omitted for server-side auto-generation", () => {
   const source = readRepoFile("src/lib/event/eventForm.ts");
+  const domainSource = readRepoFile("packages/domain/src/event/eventIdInput.ts");
+  const formSource = readRepoFile("packages/domain/src/event/form.ts");
 
-  assert.match(source, /function normalizeOptionalEventId\(value: unknown\)/);
-  assert.match(source, /typeof value === "string" && value\.trim\(\) === ""/);
-  assert.match(source, /id: z\.preprocess\(/);
+  // Additional domain exports may be co-imported as MIG-0652 progresses.
+  assert.match(source, /export\s*\{[^}]*\bparseEventForm\b[^}]*\}\s*from\s*"@flamenode\/domain\/event\/form"/s);
+  assert.match(formSource, /id: z\.preprocess\(\s*normalizeOptionalEventId/);
+  assert.match(domainSource, /function normalizeOptionalEventId\(value: unknown\)/);
+  assert.match(domainSource, /typeof value === "string" && value\.trim\(\) === ""/);
 });
 
 test("create-event IDs are validated server-side with the route-safe pattern", () => {

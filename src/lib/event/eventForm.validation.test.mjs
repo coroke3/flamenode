@@ -4,8 +4,12 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { validateEventDateValues } from "./eventFormValidation.ts";
 
-const eventFormSource = readFileSync(
+const eventFormBridge = readFileSync(
   fileURLToPath(new URL("./eventForm.ts", import.meta.url)),
+  "utf8",
+);
+const eventFormSource = readFileSync(
+  new URL("../../../packages/domain/src/event/form.ts", import.meta.url),
   "utf8",
 );
 
@@ -48,6 +52,7 @@ test("event form rejects invalid and reversed event/entry datetimes", () => {
 test("event form rejects fractional binary flags", () => {
   // Keep this assertion independent of zod/Next path aliases for the plain
   // Node unit runner while pinning the actual schema's integer-only checks.
+  assert.match(eventFormBridge, /export\s*\{[^}]*\beventSchema\b[^}]*\}\s*from\s*"@flamenode\/domain\/event\/form"/s);
   for (const field of [
     "allow_user_video_event_links",
     "allow_unslotted_posts",

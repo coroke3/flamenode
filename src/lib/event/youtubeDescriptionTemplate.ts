@@ -16,7 +16,14 @@
  * removed safely so raw tokens never leak into a YouTube description.
  */
 
-export const MAX_YOUTUBE_DESCRIPTION_TEMPLATE_LENGTH = 10_000;
+import {
+  MAX_YOUTUBE_DESCRIPTION_TEMPLATE_LENGTH,
+  normalizeYoutubeDescriptionTemplate,
+} from "@flamenode/domain/event/youtubeDescriptionTemplate";
+export {
+  MAX_YOUTUBE_DESCRIPTION_TEMPLATE_LENGTH,
+  normalizeYoutubeDescriptionTemplate,
+};
 
 export const YOUTUBE_DESCRIPTION_VARIABLE_GROUPS = [
   "イベント",
@@ -230,13 +237,6 @@ const ALLOWED_VARIABLES = new Set<YoutubeDescriptionVariableKey>(
   YOUTUBE_DESCRIPTION_VARIABLES.map((variable) => variable.key),
 );
 
-export function normalizeYoutubeDescriptionTemplate(
-  value: string | null | undefined,
-): string | null {
-  if (typeof value !== "string") return null;
-  const normalized = value.replace(/\r\n?/g, "\n").trim();
-  return normalized || null;
-}
 
 export interface RenderedYoutubeDescription {
   text: string;

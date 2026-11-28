@@ -1,13 +1,7 @@
 import type { events } from "@/lib/db/schema";
+import type { EventEditSection } from "@flamenode/server-core/event/updatePayload";
 
-export type EventEditSection = "basic" | "publish" | "questions" | "slots";
-
-export const EVENT_SECTION_PERMISSION_KEYS = {
-  basic: "event.basic",
-  publish: "event.publish",
-  questions: "event.questions",
-  slots: "event.slots",
-} as const satisfies Record<EventEditSection, string>;
+export { EVENT_SECTION_PERMISSION_KEYS, type EventEditSection } from "@flamenode/server-core/event/updatePayload";
 
 type EventRow = typeof events.$inferSelect;
 

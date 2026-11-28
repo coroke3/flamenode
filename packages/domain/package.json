@@ -29,7 +29,11 @@
     "./admin": "./src/admin/index.ts",
     "./user": "./src/user/index.ts",
     "./db/transientError": "./src/db/transientError.ts",
-    "./event/status": "./src/event/status.ts"
+    "./event/status": "./src/event/status.ts",
+    "./url": "./src/url.ts",
+    "./video/formSettings": "./src/video/formSettings.ts",
+    "./event/form": "./src/event/form.ts",
+    "./event/youtubeDescriptionTemplate": "./src/event/youtubeDescriptionTemplate.ts"
   },
   "scripts": {
     "build": "tsc",

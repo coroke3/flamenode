@@ -32,7 +32,7 @@ const [
   staticArtifactTrackingSource,
 ] = await Promise.all([
   read("middleware.ts"),
-  read("src/lib/event/eventIdReuse.ts"),
+  read("packages/server-core/src/visibility/eventIdReuse.ts"),
   read("src/lib/publicData/trendingLoader.ts"),
   read("app/api/public/about-stats/route.ts"),
   read("app/api/public/events/[id]/staff/route.ts"),
