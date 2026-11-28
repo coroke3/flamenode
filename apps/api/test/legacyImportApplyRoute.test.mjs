@@ -6,13 +6,18 @@ import { test } from "node:test";
 import { Hono } from "hono";
 import { normalizeLegacyFiles } from "@flamenode/server-core/legacyImport/normalize";
 import { createLegacyImportPreview } from "@flamenode/server-core/legacyImport/previewStore";
+import {
+  legacyImportReceiptMatchesProgress,
+  legacyImportSkipSnapshotFingerprint,
+} from "@flamenode/server-core/legacyImport/progress";
 import { createAdminRoutes } from "../src/routes/admin/index.ts";
 import { createLegacyImportApplyRoutes } from "../src/routes/admin/legacyImportApplyRoute.ts";
 import { createAdminD1, seedBase } from "./helpers/sqliteD1.mjs";
 
 const SITE = "https://app.flamenode.example";
-// Test-only durable receipt fingerprint; never persist a bearer preview token in audit rows.
+// CURRENT RH-002 durable run identity; the bearer preview token itself is never persisted.
 const previewFingerprint = (token) => createHash("sha256").update(token).digest("hex");
+const runDigest = (token) => previewFingerprint(token).slice(0, 24);
 const ADMIN = { id: "admin-1", name: "Admin", email: null, image: null,
   role: "admin", is_banned: 0, active_x_user_id: null };
 
@@ -307,17 +312,61 @@ test("MIG-0645 U02o Hono: committed SQLite D1 audit receipt survives R2 CAS fail
       assert.equal(input.previewToken, credential.previewToken);
       assert.equal(input.planHash, credential.planHash);
       assert.equal(input.progress.stage, "system_user");
-      const target = "hono-step:" + previewFingerprint(credential.previewToken);
+      const identity = {
+        runDigest: runDigest(credential.previewToken),
+        planHash: credential.planHash,
+        stage: input.progress.stage,
+        index: input.progress.index,
+      };
+      const target = `${identity.runDigest}:${identity.planHash.slice(0, 24)}:${identity.stage}:${identity.index}`;
+      const nextProgress = {
+        stage: "x_users",
+        index: 0,
+        counts: input.progress.counts,
+        skipExistingEventIds: input.strategy === "skip_existing"
+          ? [...input.progress.skipExistingEventIds].sort()
+          : [],
+        skipExistingVideoIds: input.strategy === "skip_existing"
+          ? [...input.progress.skipExistingVideoIds].sort()
+          : [],
+      };
       const receipts = sqlite.prepare(
         "SELECT after_json FROM audit_logs WHERE table_name = 'legacy_import_steps' AND target_id = ? AND context = 'legacy_import:step'",
       ).all(target);
       assert.ok(receipts.length <= 1, "a duplicate or conflicting marker must fail closed");
       if (receipts.length === 1) {
-        const receipt = JSON.parse(receipts[0].after_json);
-        assert.deepEqual(receipt, {
-          preview_fingerprint: previewFingerprint(credential.previewToken), plan_hash: credential.planHash,
-          actor: ADMIN.id, stage: "system_user", next_stage: "x_users",
-        }, "a replay must validate the durable marker identity");
+        const stored = JSON.parse(receipts[0].after_json);
+        if (
+          !stored || typeof stored !== "object" ||
+          typeof stored.run_digest !== "string" ||
+          typeof stored.plan_hash !== "string" ||
+          typeof stored.stage !== "string" ||
+          !Number.isSafeInteger(stored.index) ||
+          !stored.outcome || typeof stored.outcome !== "object" ||
+          stored.outcome.kind !== "system_user" ||
+          typeof stored.next_stage !== "string" ||
+          !Number.isSafeInteger(stored.next_index) ||
+          !stored.next_counts || typeof stored.next_counts !== "object" ||
+          Array.isArray(stored.next_counts) ||
+          typeof stored.skip_event_snapshot_fingerprint !== "string" ||
+          typeof stored.skip_video_snapshot_fingerprint !== "string"
+        ) {
+          throw new Error("invalid durable import step receipt");
+        }
+        const receipt = {
+          runDigest: stored.run_digest,
+          planHash: stored.plan_hash,
+          stage: stored.stage,
+          index: stored.index,
+          nextStage: stored.next_stage,
+          nextIndex: stored.next_index,
+          nextCounts: stored.next_counts,
+          skipEventSnapshotFingerprint: stored.skip_event_snapshot_fingerprint,
+          skipVideoSnapshotFingerprint: stored.skip_video_snapshot_fingerprint,
+        };
+        if (!legacyImportReceiptMatchesProgress(receipt, identity, nextProgress)) {
+          throw new Error("durable import step receipt does not match recomputed progress");
+        }
       } else {
         await mutateWithAudit(input.db, {
           mutationStatements: [
@@ -336,15 +385,25 @@ test("MIG-0645 U02o Hono: committed SQLite D1 audit receipt survives R2 CAS fail
               retention_class: "long_audit", restore_strategy: "none" },
             { table_name: "legacy_import_steps", target_id: target,
               operation: "SYSTEM", before: null,
-              after: { preview_fingerprint: previewFingerprint(credential.previewToken), plan_hash: credential.planHash,
-                actor: ADMIN.id, stage: "system_user", next_stage: "x_users" },
+              after: {
+                run_digest: identity.runDigest,
+                plan_hash: identity.planHash,
+                stage: identity.stage,
+                index: identity.index,
+                outcome: { kind: "system_user" },
+                next_stage: nextProgress.stage,
+                next_index: nextProgress.index,
+                next_counts: nextProgress.counts,
+                skip_event_snapshot_fingerprint: legacyImportSkipSnapshotFingerprint(nextProgress.skipExistingEventIds),
+                skip_video_snapshot_fingerprint: legacyImportSkipSnapshotFingerprint(nextProgress.skipExistingVideoIds),
+              },
               actor_user_id: ADMIN.id, context: "legacy_import:step",
               retention_class: "long_audit", restore_strategy: "none" },
           ],
         });
         durableWrites++;
       }
-      return { progress: { ...input.progress, stage: "x_users", index: 0 }, complete: false };
+      return { progress: { ...input.progress, ...nextProgress }, complete: false };
     },
   });
   try {
@@ -361,21 +420,28 @@ test("MIG-0645 U02o Hono: committed SQLite D1 audit receipt survives R2 CAS fail
     // A committed receipt with hostile/mismatched identity is never evidence
     // that this request may advance R2. Reject, release and preserve D1.
     const auditRow = sqlite.prepare(
-      "SELECT id, target_id, after_json FROM audit_logs WHERE table_name = 'legacy_import_steps'",
+      "SELECT id, target_id, after_json, actor_user_id FROM audit_logs WHERE table_name = 'legacy_import_steps'",
     ).get();
     assert.ok(auditRow);
     const originalReceipt = auditRow.after_json;
     assert.ok(!auditRow.target_id.includes(credential.previewToken), "raw preview token must not be an audit target");
     assert.ok(!originalReceipt.includes(credential.previewToken), "audit sanitization must not store the bearer token");
+    assert.equal(auditRow.actor_user_id, ADMIN.id);
     const expected = JSON.parse(originalReceipt);
-    assert.equal(expected.preview_fingerprint, previewFingerprint(credential.previewToken),
-      "stored fingerprint must be replay-verifiable after audit sanitization");
+    assert.equal(expected.run_digest, runDigest(credential.previewToken),
+      "the persisted run digest must match CURRENT's 24-character identity");
+    assert.equal(expected.plan_hash, credential.planHash);
     const unsafeMarkers = [
-      ["plan_hash mismatch", JSON.stringify({ ...expected, plan_hash: "0".repeat(64) })],
-      ["preview fingerprint mismatch", JSON.stringify({ ...expected, preview_fingerprint: "0".repeat(64) })],
-      ["actor mismatch", JSON.stringify({ ...expected, actor: "different-admin" })],
+      ["run digest mismatch", JSON.stringify({ ...expected, run_digest: "0".repeat(24) })],
+      ["plan hash mismatch", JSON.stringify({ ...expected, plan_hash: "0".repeat(64) })],
       ["stage mismatch", JSON.stringify({ ...expected, stage: "videos" })],
+      ["index mismatch", JSON.stringify({ ...expected, index: 1 })],
+      ["outcome mismatch", JSON.stringify({ ...expected, outcome: { kind: "video" } })],
       ["next stage mismatch", JSON.stringify({ ...expected, next_stage: "complete" })],
+      ["next index mismatch", JSON.stringify({ ...expected, next_index: 1 })],
+      ["next counts mismatch", JSON.stringify({ ...expected, next_counts: { forged: true } })],
+      ["event skip fingerprint mismatch", JSON.stringify({ ...expected, skip_event_snapshot_fingerprint: "0:0000000000000000" })],
+      ["video skip fingerprint mismatch", JSON.stringify({ ...expected, skip_video_snapshot_fingerprint: "0:0000000000000000" })],
       ["malformed JSON", '{"incomplete":'],
     ];
     for (const [reason, brokenJson] of unsafeMarkers) {
@@ -398,9 +464,9 @@ test("MIG-0645 U02o Hono: committed SQLite D1 audit receipt survives R2 CAS fail
     assert.equal(second.status, 200, JSON.stringify(await second.clone().json()));
     const recovered = await second.json();
     assert.equal(recovered.progress.stage, "x_users");
-    assert.equal(recovered.attempt, 8, "all six rejected receipts consume an R2 claim");
+    assert.equal(recovered.attempt, unsafeMarkers.length + 2, "each rejected receipt consumes one R2 claim");
     assert.equal(record().progress.stage, "x_users");
-    assert.equal(getD1ApplyCalls(), 8, "all rejected receipts and recovery invoke the read-only adapter");
+    assert.equal(getD1ApplyCalls(), unsafeMarkers.length + 2, "all rejected receipts and recovery invoke the read-only adapter");
     assert.equal(stats.batches, 1, "replaying a committed D1 audit must never write another batch");
     assert.equal(durableWrites, 1);
     for (const [table, count] of [["x_users", 1], ["static_rebuild_queue", 1], ["audit_logs", 2]]) {
