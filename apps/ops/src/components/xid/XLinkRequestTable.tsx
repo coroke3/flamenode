@@ -4,6 +4,7 @@ import type { AdminXLinkRequestRow } from "@flamenode/contracts";
 import type { XidLinkRequestsApi } from "../../api/xidLinkRequests.js";
 import { ManageXIcon } from "../shared/ManageXIcon.js";
 import { FnTable } from "../shared/FnTable.js";
+import { Icon } from "../shared/Icon.js";
 
 const dateFormatter = new Intl.DateTimeFormat("ja-JP", {
   timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit",
@@ -104,7 +105,12 @@ export function XLinkRequestTable({ rows, api, onChanged, allowMutations = false
         <td>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             {row.discord_image ? <img src={row.discord_image} alt="" width={32} height={32}
-              style={{ borderRadius: 999, objectFit: "cover" }} /> : null}
+              style={{ borderRadius: 999, objectFit: "cover" }} /> : (
+              <span style={{ width: 32, height: 32, borderRadius: 999, display: "grid",
+                placeItems: "center", background: "var(--bg-elevated)", color: "var(--text-muted)" }}>
+                <Icon name="discord" size={14} aria-hidden />
+              </span>
+            )}
             <span><strong>{row.discord_name ?? "Discord user"}</strong><br />
               <small>{row.requested_by_auth_user_id}</small></span>
           </div>

@@ -2,8 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { createRoot } from "react-dom/client";
+import { MemoryRouter } from "react-router-dom";
+import { JSDOM } from "jsdom";
 import { createXidLinkRequestsApi } from "../.test-dist/apps/ops/src/api/xidLinkRequests.js";
 import { XLinkRequestTable, formatRequestTime } from "../.test-dist/apps/ops/src/components/xid/XLinkRequestTable.js";
+import { AdminXLinkRequests } from "../.test-dist/apps/ops/src/routes/admin/AdminXLinkRequests.js";
 
 const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 const pending = {
@@ -77,4 +81,72 @@ test("MIG-0732 U01: read-only table hides destructive controls; opt-in preserves
   }));
   assert.ok(empty.includes("承認待ちの X ID 連携申請はありません"));
   assert.notEqual(formatRequestTime(1_700_000_000), "-");
+});
+
+test("MIG-0732 U01: mounted read-only screen retains CURRENT history times and Discord fallback", async (t) => {
+  const now = 1_700_000_600;
+  t.mock.method(Date, "now", () => now * 1000);
+  const fixture = {
+    pending: [
+      pending,
+      { ...pending, id: "request-2", discord_name: "With image", discord_image: "https://cdn.example.test/avatar.png" },
+    ],
+    recentRejected: [{
+      id: "rejected-1", requested_x_id: "rejected", requested_by_auth_user_id: "auth-2",
+      request_type: "alias", requested_at: now - 300,
+    }],
+    recentAudit: [{
+      id: "audit-1", table_name: "x_identity_requests", operation: "update",
+      target_id: "request-1", created_at: now - 3600,
+      changedKeys: ["status", "decision_reason"],
+    }],
+  };
+  const dom = new JSDOM("<!doctype html><html><body><div id='root'></div></body></html>", {
+    url: "https://flamenode.test/admin/x-link-requests",
+  });
+  const globals = {
+    window: dom.window, document: dom.window.document, navigator: dom.window.navigator,
+    HTMLElement: dom.window.HTMLElement, Node: dom.window.Node, IS_REACT_ACT_ENVIRONMENT: true,
+  };
+  const calls = [];
+  globals.fetch = async (path, init) => {
+    calls.push({ path, method: init.method, cache: init.cache });
+    return json(200, fixture);
+  };
+  const original = new Map(Object.keys(globals).map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  let root;
+  try {
+    for (const [key, value] of Object.entries(globals)) {
+      Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
+    }
+    const target = document.getElementById("root");
+    root = createRoot(target);
+    await React.act(async () => {
+      root.render(React.createElement(MemoryRouter, { initialEntries: ["/admin/x-link-requests"] },
+        React.createElement(AdminXLinkRequests)));
+    });
+    assert.deepEqual(calls, [{ path: "/api/admin-read/x-link-requests", method: "GET", cache: "no-store" }]);
+    const tables = target.querySelectorAll("table");
+    assert.equal(tables.length, 3);
+    const applicants = tables[0].querySelectorAll("tbody tr");
+    assert.equal(applicants[0].cells[3].querySelector("svg[aria-hidden='true']")?.getAttribute("width"), "14");
+    assert.equal(applicants[1].cells[3].querySelector("img")?.getAttribute("src"), "https://cdn.example.test/avatar.png");
+    assert.equal(tables[1].querySelector("tbody tr").cells[3].textContent, "5分前");
+    const auditTime = tables[2].querySelector("tbody tr").cells[0];
+    assert.equal(auditTime.children[0].textContent, formatRequestTime(now - 3600));
+    assert.equal(auditTime.children[1].textContent, "1時間前");
+    assert.match(tables[2].textContent, /status, decision_reason/);
+    assert.ok([...target.querySelectorAll("button")].every(button =>
+      !["承認", "却下", "理由を添えて却下"].includes(button.textContent.trim())));
+  } finally {
+    try {
+      if (root) await React.act(async () => { root.unmount(); });
+    } finally {
+      dom.window.close();
+      for (const [key, descriptor] of original) {
+        if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+        else delete globalThis[key];
+      }
+    }
+  }
 });

@@ -7,7 +7,8 @@ import { ConsolePageHeader } from "../../components/shared/ConsolePageHeader.js"
 import { FnTable } from "../../components/shared/FnTable.js";
 import { OpsLink } from "../../components/shared/OpsLink.js";
 import { AdminUserManagementTabs } from "../../components/admin/AdminUserManagementTabs.js";
-import { XLinkRequestTable, formatRequestTime } from "../../components/xid/XLinkRequestTable.js";
+import { XLinkRequestTable } from "../../components/xid/XLinkRequestTable.js";
+import { formatRelative, formatUnix } from "./adminFormat.js";
 
 const READ_PATH = "/api/admin-read/x-link-requests";
 function requestTypeLabel(type: string): string {
@@ -49,7 +50,7 @@ export function AdminXLinkRequests(): React.ReactElement {
           <td>@{row.requested_x_id ?? "—"}</td>
           <td><span className="fn-badge fn-badge-soft">{requestTypeLabel(row.request_type)}</span></td>
           <td className="fn-mono">{row.requested_by_auth_user_id}</td>
-          <td className="fn-muted">{formatRequestTime(row.requested_at)}</td>
+          <td className="fn-muted">{formatRelative(row.requested_at)}</td>
         </tr>)}</tbody></FnTable>
     </section> : null}
     <section style={{ marginTop: 28 }}>
@@ -60,7 +61,7 @@ export function AdminXLinkRequests(): React.ReactElement {
       {data.recentAudit.length > 0 ? <FnTable>
         <thead><tr><th>日時</th><th>テーブル</th><th>操作</th><th>対象 ID</th><th>差分</th></tr></thead>
         <tbody>{data.recentAudit.map(log => <tr key={log.id}>
-          <td>{formatRequestTime(log.created_at)}</td>
+          <td><div>{formatUnix(log.created_at)}</div><div className="fn-muted" style={{ fontSize: 11 }}>{formatRelative(log.created_at)}</div></td>
           <td className="fn-mono">{log.table_name}</td>
           <td>{log.operation}</td>
           <td className="fn-mono">{log.target_id ?? "—"}</td>
