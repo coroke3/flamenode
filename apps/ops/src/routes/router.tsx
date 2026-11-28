@@ -9,6 +9,10 @@ import { AdminEvents } from "./admin/AdminEvents.js";
 import { AdminNotifications } from "./admin/AdminNotifications.js";
 import { AdminCompatRedirect } from "./admin/AdminRedirects.js";
 import { AdminTop } from "./admin/AdminTop.js";
+import { AuditList } from "./admin/AuditList.js";
+import { AuditDetail } from "./admin/AuditDetail.js";
+import { AuditRestoreRuns } from "./admin/AuditRestoreRuns.js";
+import { AuditSettings } from "./admin/AuditSettings.js";
 import { AnnouncementCreatePage, AnnouncementEditPage } from "./admin/AnnouncementEditor.js";
 import { AnnouncementsPage } from "./admin/Announcements.js";
 import { EventGroupCreatePage, EventGroupEditPage } from "./admin/EventGroupEdit.js";
@@ -65,6 +69,14 @@ export function ManageStaffRoute({ fetchFn }: { fetchFn?: OpsFetch }): React.Rea
     : <p role="alert">イベントIDが不正です。</p>;
 }
 
+/** MIG-0733 U04: read-only audit details; destructive restore is disabled until MIG-0662. */
+export function AdminAuditDetailRoute({ fetchFn = fetch }: { fetchFn?: OpsFetch } = {}): React.ReactElement {
+  const { id } = useParams<"id">();
+  return id
+    ? <AuditDetail id={id} fetchFn={fetchFn} allowRestore={false} />
+    : <p role="alert">監査ログIDが不正です。</p>;
+}
+
 export function OpsRoutes({ api }: { api: OpsApi }): React.ReactElement {
   // MIG-0719: retain the MIG-0726 Admin shell and routes alongside Manage.
   const manage = (
@@ -111,6 +123,10 @@ export function OpsRoutes({ api }: { api: OpsApi }): React.ReactElement {
               <Route path="youtube-sync/playlists" element={<YoutubePlaylists />} />
               <Route path="youtube-quota" element={<YoutubeQuota />} />
               <Route path="history" element={<AdminCompatRedirect />} />
+              <Route path="audit" element={<AuditList />} />
+              <Route path="audit/restore" element={<AuditRestoreRuns />} />
+              <Route path="audit/settings" element={<AuditSettings readOnly />} />
+              <Route path="audit/:id" element={<AdminAuditDetailRoute />} />
               <Route path="event-groups" element={<EventGroupsPage />} />
               <Route path="event-groups/new" element={<EventGroupCreatePage />} />
               <Route path="event-groups/:id/edit" element={<EventGroupEditPage />} />
