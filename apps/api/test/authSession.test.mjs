@@ -188,6 +188,53 @@ test("Cookie extraction and parsing", async (t) => {
     assert.equal(extractSessionToken(`${name}.0=${half}; ${name}.1=${half}b`, { secure: true }), null);
   });
 
+  await t.test("URI decoding is bounded by the remaining joined-token budget without changing Auth.js parity", () => {
+    const cap = MAX_SESSION_TOKEN_LENGTH;
+    for (const secure of [true, false]) {
+      const name = secure ? "__Secure-authjs.session-token" : "authjs.session-token";
+      for (const unit of ["a", "é", "あ", "🚀", "\u0000", "%", " ", "\t"]) {
+        for (const size of [cap - 1, cap, cap + 1]) {
+          const value = unit.repeat(Math.floor(size / unit.length)) + "a".repeat(size % unit.length);
+          const encoded = encodeURIComponent(value);
+          const header = name + "=" + encoded;
+          assert.equal(parseCookieHeader(header)[name], value);
+          assert.equal(extractSessionToken(header, { secure }), size <= cap ? value : null);
+        }
+      }
+      // Percent encoding can legitimately shrink nine raw units to one.
+      const bmp = "%E3%81%82";
+      const half = cap / 2;
+      assert.equal(extractSessionToken(name + ".1=" + bmp.repeat(half) + "; " + name + ".0=" + "a".repeat(half), { secure }), "a".repeat(half) + "あ".repeat(half));
+      assert.equal(extractSessionToken(name + ".0=" + "a".repeat(half) + "; " + name + ".1=" + bmp.repeat(half + 1), { secure }), null);
+      assert.equal(extractSessionToken(name + ".0=" + "a".repeat(cap) + "; " + name + ".1= \t", { secure }), "a".repeat(cap));
+      for (const raw of ["%GG", "%E3%81", "%ED%A0%80", "%41%GG", "%", "%00%GG"]) {
+        assert.equal(extractSessionToken(name + "=" + raw, { secure }), raw);
+      }
+      // Do not decode rejected large values or any duplicate-cookie value.
+      const decode = globalThis.decodeURIComponent;
+      const decodedLengths = [];
+      globalThis.decodeURIComponent = (value) => { decodedLengths.push(value.length); return decode(value); };
+      try {
+        const oversized = "%41".repeat(40000);
+        assert.equal(extractSessionToken(name + "=" + oversized, { secure }), null);
+        assert.deepEqual(decodedLengths, []);
+        assert.equal(extractSessionToken(name + ".0=%61; " + name + ".0=" + oversized + "; " + name + ".1=%62", { secure }), "ab");
+        assert.deepEqual(decodedLengths, [3, 3]);
+        assert.equal(extractSessionToken(name + ".0=" + "a".repeat(cap - 1) + "; " + name + ".1=" + bmp, { secure }), "a".repeat(cap - 1) + "あ");
+        assert.equal(decodedLengths.at(-1), 9);
+        assert.equal(extractSessionToken(name + ".0=" + "a".repeat(cap - 1) + "; " + name + ".1=" + bmp + "%61", { secure }), null);
+        assert.equal(decodedLengths.at(-1), 9);
+      } finally {
+        globalThis.decodeURIComponent = decode;
+      }
+      // Preserve parseInt suffix semantics, including NaN and a final dot,
+      // without splitting a potentially header-sized dotted name.
+      const dotted = name + ".".repeat(60000);
+      assert.equal(extractSessionToken(dotted + "2=c; " + name + ".0=a; " + name + ".1=b", { secure }), "abc");
+      assert.equal(extractSessionToken(dotted + "=a; " + name + ".1=b", { secure }), "ab");
+    }
+  });
+
   await t.test("a 32KB header of ~900 shuffled chunks fails closed", () => {
     const name = "__Secure-authjs.session-token";
     const count = 900;

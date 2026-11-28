@@ -94,16 +94,37 @@ function trimCookieSpacesEnd(text: string): string {
   return last ? text.slice(0, last.index + 1) : "";
 }
 
-// The value between `=` and the segment end, trimmed, and URI-decoded only when it
-// contains `%` and decodes cleanly. Quotes are kept, as in Auth.js parse.
-function readCookieValue(header: string, eqIdx: number, endIdx: number): string {
-  const val = trimCookieSpacesEnd(header.slice(skipCookieSpaces(header, eqIdx + 1), endIdx));
+// Trim exactly the same spaces/tabs as Auth.js; keep quotes and malformed
+// URI encoding unchanged. The reference full parser remains unbounded.
+function readCookieRawValue(header: string, eqIdx: number, endIdx: number): string {
+  return trimCookieSpacesEnd(header.slice(skipCookieSpaces(header, eqIdx + 1), endIdx));
+}
+
+function decodeCookieValue(val: string): string {
   if (!val.includes("%")) return val;
   try {
     return decodeURIComponent(val);
   } catch {
     return val;
   }
+}
+
+function readCookieValue(header: string, eqIdx: number, endIdx: number): string {
+  return decodeCookieValue(readCookieRawValue(header, eqIdx, endIdx));
+}
+
+// Each decoded UTF-16 unit can consume at most nine raw code units:
+// a percent-encoded three-byte BMP character is %XX%XX%XX; an astral
+// character consumes twelve raw units for two decoded units. Unescaped
+// input and the malformed-escape fallback cannot shrink more than this.
+// Check the remaining joined-token budget before allocating a decoded value.
+const MAX_URI_UNITS_PER_DECODED_UNIT = 9;
+function readBoundedCookieValue(header: string, eqIdx: number, endIdx: number, remaining: number): string | null {
+  const raw = readCookieRawValue(header, eqIdx, endIdx);
+  if (raw.length > remaining * MAX_URI_UNITS_PER_DECODED_UNIT) return null;
+  if (!raw.includes("%")) return raw.length <= remaining ? raw : null;
+  const decoded = decodeCookieValue(raw);
+  return decoded.length <= remaining ? decoded : null;
 }
 
 /**
@@ -155,6 +176,7 @@ function readPrefixedCookies(
   prefix: string,
   onNew: (key: string, value: string) => boolean,
   maxMatches: number,
+  remaining: () => number,
 ): boolean {
   if (header.length < 2) return true;
   const seen: Record<string, true> = Object.create(null);
@@ -187,7 +209,8 @@ function readPrefixedCookies(
       const key = trimCookieSpacesEnd(header.slice(m, eqIdx));
       if (seen[key] === undefined) {
         seen[key] = true;
-        if (!onNew(key, readCookieValue(header, eqIdx, endIdx))) return false;
+        const value = readBoundedCookieValue(header, eqIdx, endIdx, remaining());
+        if (value === null || !onNew(key, value)) return false;
       }
     }
     from = endIdx + 1;
@@ -219,10 +242,13 @@ export function extractSessionToken(
       length += value.length;
       if (chunks.length === MAX_SESSION_COOKIE_CHUNKS || length > MAX_SESSION_TOKEN_LENGTH) return false;
       // Same index as the SessionStore comparator, computed once per chunk.
-      chunks.push({ index: parseInt(name.split(".").pop() || "0"), value });
+      // Only the final suffix matters. Avoid allocating an array for every
+      // dot in a large attacker-controlled name.
+      chunks.push({ index: parseInt(name.slice(name.lastIndexOf(".") + 1) || "0"), value });
       return true;
     },
     MAX_SESSION_COOKIE_NAMES,
+    () => MAX_SESSION_TOKEN_LENGTH - length,
   );
   if (!complete || chunks.length === 0) return null;
   if (chunks.length === 1) return chunks[0].value;
