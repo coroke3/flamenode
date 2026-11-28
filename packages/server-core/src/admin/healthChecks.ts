@@ -376,7 +376,9 @@ function diagnosticNonNegativeSafeInteger(value: unknown): number {
   const decimal = typeof value === "number"
     ? Number.isSafeInteger(value) ? String(value) : ""
     : typeof value === "string" ? value : "";
-  if (!/^(0|[1-9][0-9]*)$/.test(decimal)) {
+  // The largest safe integer has 16 decimal digits; reject longer
+  // provider receipts before scanning or converting their text.
+  if (decimal.length > 16 || !/^(0|[1-9][0-9]*)$/.test(decimal)) {
     throw new Error("unrepresentable diagnostic integer");
   }
   const parsed = Number(decimal);

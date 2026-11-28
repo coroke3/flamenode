@@ -1791,6 +1791,14 @@ if (runUnderRootTsx(import.meta.url)) {
       ["wrong diff", [set(sample(), 6, "7")], false],
       ["unsafe count", [set(sample(), 1, "9007199254740992")], false],
       ["zero plus sample", [sample("a", 0)], false],
+      ["maximum safe numeric actual", [sample("a", 1, Number.MAX_SAFE_INTEGER, 0).map((v, i) => i === 2 ? v : Number(v))], true],
+      ["leading zero", [set(sample(), 4, "06")], false],
+      ["noncanonical sign", [set(sample(), 4, "+6")], false],
+      ["trailing newline", [set(sample(), 4, "6\n")], false],
+      ...[0, 1, 3, 4, 5, 6, 7, 8, 9].flatMap(index => [
+        ["17-digit diagnostic field " + index, [set(sample(), index, "1".repeat(17))], false],
+        ["oversized diagnostic field " + index, [set(sample(), index, "9".repeat(65536))], false],
+      ]),
     ];
     for (const [label, arrays, accepted] of cases) {
       for (const objectRows of [false, true]) {
