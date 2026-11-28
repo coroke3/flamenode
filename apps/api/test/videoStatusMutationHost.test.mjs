@@ -5,6 +5,7 @@ import { sql } from "drizzle-orm";
 import { AuditMutationError, asBatchRunnable } from "@flamenode/server-core/audit/mutate";
 import { loadManageVideoStatusSnapshot, planManageVideoStatusCommitAssertion } from "@flamenode/server-core/video/manageStatusAccess";
 import { planVideoVisibilityTransition } from "@flamenode/server-core/visibility/videoTransition";
+import { STATIC_REBUILD_BULK_UPSERT_ROWS } from "@flamenode/server-core/staticRebuild/enqueue";
 import { createVideoVisibilityTransitionHost } from "../src/visibility/videoTransitionHost.ts";
 import * as schema from "@flamenode/db/schema";
 import { createSqlite } from "./support/personalHarness.mjs";
@@ -409,10 +410,15 @@ test("MIG-0603: full quiet-status planner, real audited D1 queue and stale grant
     assert.equal(transition.notificationBatch.statements.length, 0,
       "private changes do not notify recipients");
     assert.equal(transition.audits.length, 1);
-    assert.equal(transition.queueBatch.statements.length, 1,
-      "the real static-rebuild target fanout is one bounded bulk UPSERT");
     assert.ok(transition.queueBatch.acceptedTargetCount >= 10,
       "the real planner retains global, event and video targets");
+    assert.ok(transition.queueBatch.acceptedTargetCount <= STATIC_REBUILD_BULK_UPSERT_ROWS,
+      "this fixture stays within one bounded JSON1 UPSERT chunk");
+    assert.equal(transition.queueBatch.statements.length, 2,
+      "one bounded bulk UPSERT plus one atomic public-build generation invalidation");
+    assert.deepEqual(transition.queueBatch.expectedChanges,
+      [transition.queueBatch.acceptedTargetCount, 1],
+      "the UPSERT accounts for every deduped target and the generation update changes one row");
 
     const actorSnapshot = {
       discord_id: "d_mgr", discord_name: "Name mgr",
