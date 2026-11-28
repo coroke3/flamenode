@@ -794,7 +794,7 @@ export async function readSlotSubmissionVideoEventReceipt(
                event_custom_questions.event_id ASC,
                event_custom_questions.sort_order ASC,
                event_custom_questions.id ASC
-      LIMIT (json_array_length(input.event_ids_json) * ${MAX_VIDEO_CUSTOM_QUESTIONS_READ} + 1)
+      LIMIT ((SELECT COUNT(*) FROM requested_event_ids) * ${MAX_VIDEO_CUSTOM_QUESTIONS_READ} + 1)
     )) AS receipt_general_questions_json,
     (SELECT json_group_array(json_array(
       id, event_id, question_key, label, description, placeholder,
