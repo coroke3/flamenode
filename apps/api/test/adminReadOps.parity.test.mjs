@@ -1738,6 +1738,57 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+  test("MIG-0626 U06: Auth like-count summary and sample receipt rejects incomplete or inconsistent provider rows", async () => {
+    const { runAuthLikeCountDriftCandidate } = await import("@flamenode/server-core/admin/healthChecks");
+    const keys = ["invalid_count", "drift_count", "id", "id_bytes", "stored", "actual", "diff",
+      "threshold", "ratio_threshold", "ratio_triggered"];
+    const sample = (id = "v1", count = 1, actual = 0, stored = 6) => {
+      const ratio = Math.floor(actual / 20) + (actual % 20 === 0 ? 0 : 1);
+      return ["0", String(count), id, Buffer.byteLength(id), String(stored), String(actual),
+        String(Math.abs(stored - actual)), String(Math.max(5, ratio)), String(ratio), ratio >= 5 ? 1 : 0];
+    };
+    const empty = ["0", "0", null, null, null, null, null, null, null, null];
+    const set = (row, index, value) => row.map((item, i) => i === index ? value : item);
+    const cases = [
+      ["empty", [empty], true],
+      ["single", [sample()], true],
+      ["two", [sample("a", 2), sample("b", 2)], true],
+      ["five of seven", Array.from({ length: 5 }, (_, i) => sample("v" + i, 7)), true],
+      ["ratio 101", [sample("a", 1, 101, 0)], true],
+      ["maximum safe actual", [sample("a", 1, Number.MAX_SAFE_INTEGER, 0)], true],
+      ["missing rows", [sample("a", 2)], false],
+      ["missing all samples", [["0", "1", ...empty.slice(2)]], false],
+      ["inconsistent repeated count", [sample("a", 2), sample("b", 3)], false],
+      ["later invalid summary", [sample("a", 2), set(sample("b", 2), 0, "1")], false],
+      ["false empty with actual", [set(empty, 5, "1")], false],
+      ["missing empty field", [empty.slice(0, 9)], false],
+      ["extra empty rows", [empty, empty], false],
+      ["extra sample", [sample(), sample("b")], false],
+      ["wrong low ratio", [set(set(set(sample("a", 1, 101, 0), 7, "5"), 8, "0"), 9, 0)], false],
+      ["wrong high ratio", [set(set(set(sample("a", 1, 101, 0), 7, "7"), 8, "7"), 9, 1)], false],
+      ["oversized id", [sample("a".repeat(257))], false],
+      ["wrong diff", [set(sample(), 6, "7")], false],
+      ["unsafe count", [set(sample(), 1, "9007199254740992")], false],
+      ["zero plus sample", [sample("a", 0)], false],
+    ];
+    for (const [label, arrays, accepted] of cases) {
+      for (const objectRows of [false, true]) {
+        const rows = objectRows ? arrays.map(row => Object.fromEntries(row.map((value, i) => [keys[i], value]))) : arrays;
+        let calls = 0;
+        const db = { all: async () => { calls++; return rows; } };
+        if (accepted) {
+          const result = await runAuthLikeCountDriftCandidate(db);
+          assert.equal(result.count, Number(arrays[0][1]), label);
+          assert.equal(result.samples.length, Math.min(result.count, 5), label);
+          assert.equal(result.status, result.count === 0 ? "ok" : "warn", label);
+        } else {
+          await assert.rejects(() => runAuthLikeCountDriftCandidate(db), /diagnostic/, label);
+        }
+        assert.equal(calls, 1, label);
+      }
+    }
+  });
+
   test("MIG-0626 U06: retention diagnosis bounds the entire UTF-8 JSON response without changing samples or count", async () => {
     const path = "/api/admin-read/ops/health/checks/audit_logs_retention_candidates";
     const prefix = "retention-byte-bound-";

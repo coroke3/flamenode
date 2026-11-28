@@ -490,15 +490,27 @@ export async function runAuthLikeCountDriftCandidate(db: AnyDb): Promise<HealthC
   if (invalidCount !== 0) throw new Error("invalid like-count diagnostic input");
   const driftCount = diagnosticNonNegativeSafeInteger(readDiagnosticRowField(first, 1, "drift_count"));
   const samples: string[] = [];
+  if (rows.length !== Math.max(1, Math.min(driftCount, 5))) {
+    throw new Error("invalid like-count diagnostic sample count");
+  }
 
   for (const row of rows) {
+    if (diagnosticNonNegativeSafeInteger(readDiagnosticRowField(row, 0, "invalid_count")) !== 0 ||
+        diagnosticNonNegativeSafeInteger(readDiagnosticRowField(row, 1, "drift_count")) !== driftCount) {
+      throw new Error("inconsistent like-count diagnostic summary");
+    }
     const idValue = readDiagnosticRowField(row, 2, "id");
     const idBytesValue = readDiagnosticRowField(row, 3, "id_bytes");
-    if (idValue === null || idValue === undefined) {
-      if (idBytesValue !== null && idBytesValue !== undefined) {
-        throw new Error("invalid diagnostic sample identifier");
+    if (driftCount === 0) {
+      // LEFT JOIN emits exactly one summary-only row, with every sample field NULL.
+      const sampleFields = ["id", "id_bytes", "stored", "actual", "diff", "threshold", "ratio_threshold", "ratio_triggered"];
+      if (sampleFields.some((name, index) => readDiagnosticRowField(row, index + 2, name) !== null)) {
+        throw new Error("invalid empty like-count diagnostic sample");
       }
       continue;
+    }
+    if (idValue === null || idValue === undefined) {
+      throw new Error("invalid diagnostic sample identifier");
     }
     if (typeof idValue !== "string") throw new Error("invalid diagnostic sample identifier");
     const idBytes = diagnosticNonNegativeSafeInteger(idBytesValue);
@@ -520,6 +532,7 @@ export async function runAuthLikeCountDriftCandidate(db: AnyDb): Promise<HealthC
     const ratioTriggered = diagnosticNonNegativeSafeInteger(readDiagnosticRowField(row, 9, "ratio_triggered"));
     if (
       diff !== Math.abs(stored - actual) ||
+      ratioThreshold !== Math.floor(actual / 20) + (actual % 20 === 0 ? 0 : 1) ||
       threshold !== Math.max(LIKE_COUNT_DRIFT_ABS, ratioThreshold) ||
       diff < threshold ||
       ratioTriggered > 1 ||
@@ -537,7 +550,7 @@ export async function runAuthLikeCountDriftCandidate(db: AnyDb): Promise<HealthC
     );
   }
 
-  if (samples.length > 5 || driftCount < samples.length || (driftCount === 0 && samples.length !== 0)) {
+  if (samples.length !== Math.min(driftCount, 5)) {
     throw new Error("invalid like-count diagnostic sample count");
   }
   return {
