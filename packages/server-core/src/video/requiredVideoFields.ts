@@ -757,6 +757,10 @@ export async function readSlotSubmissionVideoEventReceipt(
       ${anchor.video_id || null} AS video_id,
       ${submittedYoutubeId || null} AS youtube_id,
       ${eventIdsJson} AS event_ids_json
+  ),
+  requested_event_ids AS (
+    SELECT CAST(value AS TEXT) AS id, CAST(key AS INTEGER) AS ordinal
+    FROM json_each((SELECT event_ids_json FROM submission_input))
   )
   SELECT ${videoColumns},
     (SELECT json_group_array(json_array(
@@ -766,9 +770,9 @@ export async function readSlotSubmissionVideoEventReceipt(
       SELECT events.id, events.title, events.parts_json,
              events.slot_part_gap_minutes, events.required_video_fields_json
       FROM events
-      INNER JOIN json_each(input.event_ids_json) requested
-        ON events.id = CAST(requested.value AS TEXT)
-      ORDER BY CAST(requested.key AS INTEGER)
+      INNER JOIN requested_event_ids requested
+        ON events.id = requested.id
+      ORDER BY requested.ordinal
     )) AS receipt_events_json,
     (SELECT json_group_array(json_array(
       id, event_id, question_key, label, type, required, options_json,
@@ -782,11 +786,11 @@ export async function readSlotSubmissionVideoEventReceipt(
              event_custom_questions.sort_order, event_custom_questions.visibility,
              event_custom_questions.updated_at
       FROM event_custom_questions
-      INNER JOIN json_each(input.event_ids_json) event_order
-        ON event_custom_questions.event_id = CAST(event_order.value AS TEXT)
+      INNER JOIN requested_event_ids event_order
+        ON event_custom_questions.event_id = event_order.id
       WHERE event_custom_questions.is_active = 1
         AND NOT (${stagePermissionQuestionKeyCondition()})
-      ORDER BY CAST(event_order.key AS INTEGER) / ${GENERAL_QUESTION_EVENT_CHUNK_SIZE},
+      ORDER BY event_order.ordinal / ${GENERAL_QUESTION_EVENT_CHUNK_SIZE},
                event_custom_questions.event_id ASC,
                event_custom_questions.sort_order ASC,
                event_custom_questions.id ASC
@@ -800,9 +804,7 @@ export async function readSlotSubmissionVideoEventReceipt(
       SELECT id, event_id, question_key, label, description, placeholder,
              required, is_active, sort_order, updated_at
       FROM event_custom_questions
-      WHERE event_id IN (
-        SELECT CAST(value AS TEXT) FROM json_each(input.event_ids_json)
-      )
+      WHERE event_id IN (SELECT id FROM requested_event_ids)
         AND ${stagePermissionQuestionKeyCondition()}
       ORDER BY event_id ASC, sort_order ASC
     )) AS receipt_stage_questions_json,
