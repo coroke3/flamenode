@@ -740,3 +740,89 @@ test("SEC-800: SA-031 blank public role labels preserve CURRENT storage and audi
     s.sqlite.close();
   }
 });
+
+test("SEC-800: shared ownership-core provider reads cannot impersonate allowlisted domain conflicts", async () => {
+  const ownerRowsRead = (sql) => /FROM "event_staff"/i.test(sql) && /permission_preset/i.test(sql);
+  const uniquenessRead = (sql) => /FROM "event_staff"/i.test(sql) && !/permission_preset/i.test(sql);
+  const operableOwnerLinkRead = (sql) =>
+    /FROM "x_user_account_links"/i.test(sql) && /link_role/i.test(sql) && /approval_status/i.test(sql);
+  const cases = [
+    {
+      name: "non-admin owner eligibility read",
+      user: MEMBER,
+      method: "POST",
+      path: "/",
+      body: { ...upsert, permission_preset: "owner" },
+      match: ownerRowsRead,
+      error: new Error("代表権限を付与できるのはイベント代表者または管理者だけです。"),
+      diagnostic: "[MIG-0654] staff upsert unavailable",
+    },
+    {
+      name: "create uniqueness read",
+      user: ADMIN,
+      method: "POST",
+      path: "/",
+      body: upsert,
+      match: uniquenessRead,
+      error: new Error(LAST_OWNER_ERROR),
+      diagnostic: "[MIG-0654] staff upsert unavailable",
+    },
+    {
+      name: "owner operability read",
+      user: ADMIN,
+      method: "POST",
+      path: "/",
+      body: { ...upsert, permission_preset: "owner" },
+      match: operableOwnerLinkRead,
+      error: new Error("イベント代表者には、承認済みX IDとowner roleのaccount linkが必要です。"),
+      diagnostic: "[MIG-0654] staff upsert unavailable",
+    },
+    {
+      name: "delete owner-retention read",
+      user: ADMIN,
+      method: "DELETE",
+      path: "/s-owner",
+      body: { reason: "remove" },
+      match: ownerRowsRead,
+      error: new Error(LAST_OWNER_ERROR),
+      diagnostic: "[MIG-0654] staff delete unavailable",
+    },
+    {
+      name: "CSV bulk existing-row read",
+      user: ADMIN,
+      method: "POST",
+      path: "/csv",
+      body: csv(),
+      match: uniquenessRead,
+      error: new Error(LAST_OWNER_ERROR),
+      diagnostic: "[MIG-0654] CSV staff mutation unavailable",
+    },
+    {
+      name: "owner transfer target read",
+      user: ADMIN,
+      method: "POST",
+      path: "/owner-transfer",
+      body: transfer,
+      match: uniquenessRead,
+      error: new Error(LAST_OWNER_ERROR),
+      diagnostic: "[MIG-0654] owner transfer unavailable",
+    },
+  ];
+  for (const item of cases) {
+    const s = setup({ user: item.user, fault: { match: item.match, error: item.error } });
+    try {
+      await withThrowingDiagnostics(async ({ errors }) => {
+        const result = await s.send(item.method, item.path, item.body);
+        assert.equal(result.status, 503, item.name + ": " + await result.clone().text());
+        assert.equal(result.headers.get("cache-control"), "private, no-store", item.name);
+        assert.deepEqual(await result.json(), { ok: false, message: GENERIC }, item.name);
+        assert.deepEqual(errors, [[item.diagnostic]], item.name);
+      });
+      assert.equal(s.receipt.readFaults, 1, item.name + " injects one shared-core read fault");
+      assert.equal(s.stats.batches, 0, item.name + " fails before mutation/audit batch");
+      assert.deepEqual(s.before(), s.initial, item.name + " leaves all rows and queues unchanged");
+    } finally {
+      s.sqlite.close();
+    }
+  }
+});
