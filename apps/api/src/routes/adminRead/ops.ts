@@ -58,45 +58,65 @@ function utf8Size(value: unknown): number {
   return utf8Encoder.encode(JSON.stringify(value)).length;
 }
 
-/** Diagnostic samples may contain large persisted identifiers. Check the
- * exact escaped UTF-8 envelope without first serializing a potentially
- * oversized response. Never truncate identifiers or misstate counts. */
-function diagnosticResponseFits(body: { results: readonly { samples: readonly string[] }[] }): boolean {
+/** Exact UTF-8 JSON envelope budget for fixed-shape diagnostic DTOs.
+ * The shell contains the original metadata/structure, with the measured
+ * string values replaced by empty strings. Do not stringify large bodies
+ * merely to reject them, and never truncate a persisted identifier.
+ */
+function boundedDiagnosticStringsFit(shell: unknown, strings: readonly string[]): boolean {
   let textUnits = 0;
-  for (const result of body.results) {
-    for (const sample of result.samples) {
-      textUnits += sample.length;
-      if (textUnits > MAX_OPS_HTTP_BYTES) return false;
-    }
+  for (const value of strings) {
+    textUnits += value.length;
+    if (textUnits > MAX_OPS_HTTP_BYTES) return false;
   }
-  // IDs, labels, status and notes in these health/security DTOs are fixed
-  // server metadata. Preserve all envelope fields and sample separators.
-  let remaining = MAX_OPS_HTTP_BYTES - utf8Size({
-    ...body,
-    results: body.results.map((result) => ({ ...result, samples: result.samples.map(() => "") })),
-  });
+  let remaining = MAX_OPS_HTTP_BYTES - utf8Size(shell);
   if (remaining < textUnits) return false;
   // Each UTF-16 unit occupies at most six escaped JSON bytes.
   if (textUnits * 6 <= remaining) return true;
-  for (const result of body.results) {
-    for (const sample of result.samples) {
-      for (let offset = 0; offset < sample.length;) {
-        let end = Math.min(offset + 4096, sample.length);
-        // Keep a UTF-16 surrogate pair together; lone surrogates must still
-        // receive JSON.stringify's well-formed six-byte escaped encoding.
-        if (end < sample.length) {
-          const high = sample.charCodeAt(end - 1), low = sample.charCodeAt(end);
-          if (high >= 0xd800 && high <= 0xdbff && low >= 0xdc00 && low <= 0xdfff) end--;
-        }
-        // Quotes already counted by the empty-string envelope. Each temporary
-        // JSON string is at most 4096 code units (24 KiB escaped, plus quotes).
-        remaining -= utf8Size(sample.slice(offset, end)) - 2;
-        if (remaining < 0) return false;
-        offset = end;
+  for (const value of strings) {
+    for (let offset = 0; offset < value.length;) {
+      let end = Math.min(offset + 4096, value.length);
+      // Keep surrogate pairs together; JSON.stringify escapes lone surrogates.
+      if (end < value.length) {
+        const high = value.charCodeAt(end - 1), low = value.charCodeAt(end);
+        if (high >= 0xd800 && high <= 0xdbff && low >= 0xdc00 && low <= 0xdfff) end--;
       }
+      // Empty-string quotes are already in the shell. Each temporary
+      // serialized slice is at most 24 KiB plus its two quotes.
+      remaining -= utf8Size(value.slice(offset, end)) - 2;
+      if (remaining < 0) return false;
+      offset = end;
     }
   }
   return true;
+}
+
+function diagnosticResponseFits(body: { results: readonly { samples: readonly string[] }[] }): boolean {
+  return boundedDiagnosticStringsFit({
+    ...body,
+    results: body.results.map((result) => ({ ...result, samples: result.samples.map(() => "") })),
+  }, body.results.flatMap((result) => result.samples));
+}
+
+/** Integrity result and issue records contain scalar DTO fields only.
+ * Replace every string (including optional links/SQL previews) in the
+ * shell; undefined properties retain JSON.stringify's omission semantics.
+ */
+function integrityResponseFits(body: AdminIntegrityResponse): boolean {
+  const strings: string[] = [];
+  const blank = (record: object) => Object.fromEntries(Object.entries(record).map(([key, value]) => {
+    if (typeof value !== "string") return [key, value];
+    strings.push(value);
+    return [key, ""];
+  }));
+  const shell = {
+    ...body,
+    results: body.results.map(({ issues, ...result }) => ({
+      ...blank(result),
+      issues: issues.map(blank),
+    })),
+  };
+  return boundedDiagnosticStringsFit(shell, strings);
 }
 
 const TERMINAL_FAILURE_STATUSES = ["failed", "dead_letter"];
@@ -410,23 +430,10 @@ adminOpsRoutes.get("/integrity/:checkId", dbMiddleware, async (c) => {
     return c.json({ error: "not_found" }, 404);
   }
   const result = await runIntegrityCheckById(c.get("db"), id);
-  // The row-count limit is not a wire-size limit: issue descriptions, titles
-  // and navigation targets can contain oversized persisted values.
-  if (result) {
-    let textUnits = 0;
-    for (const issue of result.issues) {
-      for (const value of Object.values(issue)) {
-        if (typeof value === "string") textUnits += value.length;
-      }
-      if (textUnits > MAX_OPS_HTTP_BYTES) {
-        return c.json({ error: "unavailable" }, 503);
-      }
-    }
-  }
   const body: AdminIntegrityResponse = { ran: true, results: result ? [result] : [] };
-  // Account for UTF-8, JSON escaping and the entire response envelope.
+  // Bound the exact escaped UTF-8 envelope before serializing it as a whole.
   // Do not truncate identifiers, action links or integrity counts.
-  if (utf8Size(body) > MAX_OPS_HTTP_BYTES) {
+  if (!integrityResponseFits(body)) {
     return c.json({ error: "unavailable" }, 503);
   }
   return c.json(body);

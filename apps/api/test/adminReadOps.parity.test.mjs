@@ -2449,9 +2449,21 @@ if (runUnderRootTsx(import.meta.url)) {
       assert.ok(ids.every((id) => baseline.body.results[0].issues.some((issue) => issue.id === id)),
         "all five fixture issues must be present before testing byte limits");
       const exact = "a".repeat(limit - size(baseline) + seedTarget.length);
+      const exactWith = (unit) => {
+        const bytes = Buffer.byteLength(JSON.stringify(unit)) - 2;
+        return unit.repeat(Math.floor(exact.length / bytes)) + "a".repeat(exact.length % bytes);
+      };
+      const boundaries = ["é", "あ", "🚀", "\u0001", '"', "\\"].flatMap((unit, index) => {
+        const value = exactWith(unit);
+        return [
+          ["exact escaped boundary " + index, [value], true],
+          ["one byte over escaped boundary " + index, [value + "a"], false],
+        ];
+      });
       for (const [label, values, accepted] of [
         ["exact limit", [exact], true],
         ["one byte over", [exact + "a"], false],
+        ...boundaries,
         ["oversized ASCII", ["private-integrity-" + "a".repeat(70_000)], false],
         ["multibyte", ["private-integrity-" + "あ".repeat(22_000)], false],
         ["escaped controls", ["private-integrity-" + "\u0001".repeat(11_000)], false],
@@ -2459,7 +2471,23 @@ if (runUnderRootTsx(import.meta.url)) {
         ["valid multibyte", ["あ".repeat(10_000)], true],
       ]) {
         for (let i = 0; i < ids.length; i++) update.run(values[i] ?? seedTarget, ids[i]);
-        const receipt = await call(path, ADMIN);
+        // Test-only spy: detect the old preflight's oversized whole-body
+        // serialization even when the eventual HTTP response was a small 503.
+        const stringify = JSON.stringify;
+        let oversizedWholeBodies = 0;
+        let receipt;
+        JSON.stringify = function (value, ...args) {
+          const wire = stringify(value, ...args);
+          if (value?.ran === true && Array.isArray(value.results) &&
+              typeof wire === "string" && Buffer.byteLength(wire) > limit) oversizedWholeBodies++;
+          return wire;
+        };
+        try {
+          receipt = await call(path, ADMIN);
+        } finally {
+          JSON.stringify = stringify;
+        }
+        assert.equal(oversizedWholeBodies, 0, label + ": no oversized whole-DTO stringify");
         assert.equal(receipt.status, accepted ? 200 : 503, label);
         assert.ok(size(receipt) <= limit, label);
         assert.equal(receipt.headers.get("cache-control"), "private, no-store", label);
@@ -2470,7 +2498,9 @@ if (runUnderRootTsx(import.meta.url)) {
           assert.deepEqual(receipt.body, canon({ ran: true, results: [expected] }), label);
           assert.equal(receipt.body.results[0].count, baseline.body.results[0].count, label);
           assert.equal(receipt.body.results[0].moreCount, baseline.body.results[0].moreCount, label);
-          if (label === "exact limit") assert.equal(size(receipt), limit);
+          if (label === "exact limit" || label.startsWith("exact escaped boundary")) {
+            assert.equal(size(receipt), limit, label);
+          }
         } else {
           assert.deepEqual(receipt.body, { error: "unavailable" }, label);
           assert.doesNotMatch(receipt.text, /private-integrity-|integrity-byte-bound-/);
