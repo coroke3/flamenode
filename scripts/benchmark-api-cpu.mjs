@@ -175,6 +175,21 @@ export function createOperationModeKvProbe(resetCaches, digestText) {
   };
 }
 
+export function operationModeScannerBlobSha(content) {
+  const bytes = Buffer.isBuffer(content) ? content : Buffer.from(content, "utf8");
+  return createHash("sha1").update(Buffer.from("blob " + bytes.length + "\0", "ascii")).update(bytes).digest("hex");
+}
+
+export function assertOperationModeScannerSource(content, expectedSha = "0c03d46d469a8b585e20b6e6875f7aec27bdc845") {
+  const actualSha = operationModeScannerBlobSha(content);
+  if (actualSha !== expectedSha) {
+    throw new Error("operation-mode KV diagnostic requires the pinned #918 scanner source; expected " + expectedSha + ", got " + actualSha);
+  }
+  return actualSha;
+}
+
+export const EXPECTED_OPERATION_MODE_SCANNER_BLOB_SHA = "0c03d46d469a8b585e20b6e6875f7aec27bdc845";
+
 export function operationModeKvEvidenceMismatch(fixture, seed, evidence, ordinal, phase) {
   if (!["miss", "hit", "expiry"].includes(phase)) return true;
   const gets = phase === "hit" ? 0 : 1;
@@ -2897,10 +2912,12 @@ async function runOperationModeKvCli(plan, opts) {
   const label = "LOCAL NATIVE KV DIAGNOSTIC ONLY — NOT MIG-0639 / PRODUCTION ACCEPTANCE";
   const workload = { id: fixture.id, bytes: fixture.bytes, sha256: createHash("sha256").update(fixture.raw, "utf8").digest("hex") };
   if (opts.dryRun) {
-    console.log(JSON.stringify({ label, dryRun: true, workload, samplesPerPhase: opts.samples, warmups: opts.warmup,
+    console.log(JSON.stringify({ label, dryRun: true, workload, expectedOperationModeScannerBlobSha: EXPECTED_OPERATION_MODE_SCANNER_BLOB_SHA, samplesPerPhase: opts.samples, warmups: opts.warmup,
       coldSamples: opts.skipCold ? 0 : opts.coldSamples, expiryWaitMs: 31000 }, null, 2));
     return;
   }
+  const scannerPath = path.join(REPO_ROOT, "apps/api/src/routes/live/operationMode.ts");
+  const scannerBlobSha = assertOperationModeScannerSource(fs.readFileSync(scannerPath));
   const target = await createWranglerTarget(plan, opts);
   const baseline = buildScenarios(plan).find(s => s.id === "BASELINE");
   const state = { tagSeq: 0 };
@@ -2920,7 +2937,7 @@ async function runOperationModeKvCli(plan, opts) {
     }
   } finally { await target.close(); }
   const summary = summarizeOperationModeKvDiagnostic(collected, pre, post, opts, target.resolutionMs, process.platform);
-  const report = { meta: { label, workload, commit: spawnSync("git", ["rev-parse", "HEAD"], { cwd: REPO_ROOT, encoding: "utf8" }).stdout.trim(),
+  const report = { meta: { label, workload, operationModeScannerBlobSha: scannerBlobSha, commit: spawnSync("git", ["rev-parse", "HEAD"], { cwd: REPO_ROOT, encoding: "utf8" }).stdout.trim(),
     platform: process.platform, node: process.version, wrangler: target.toolVersions?.() ?? null, cpuSource: target.cpuSource,
     resolutionMs: target.resolutionMs, calibration: target.calibration, samplesPerPhase: opts.samples,
     warmupDiscarded: opts.warmup, coldSamplesRequested: opts.skipCold ? 0 : opts.coldSamples,
