@@ -287,6 +287,9 @@ if (runTestWithTsx(import.meta.url)) {
     for (const level of ["warn", "info", "log", "error"]) {
       console[level] = (...args) => {
         log.push({ op: `console.${level}`, args: args.map(printable) });
+        if (level === "warn" && postCommitFailure?.throwWarn) {
+          throw new Error("SEC718_WARNING_SINK_CANARY");
+        }
       };
     }
     const realCaches = globalThis.caches;
@@ -1416,6 +1419,47 @@ if (runTestWithTsx(import.meta.url)) {
       entity + ": provider details cannot reach application logs");
       assert.equal(actual.log.filter((entry) => entry.op === "cache.delete").length, 0,
         "the rejecting provider did not pretend a cache entry was deleted");
+    }
+  });
+
+  test("SEC-718: throwing warning sink cannot interrupt post-commit invalidation fan-out", async () => {
+    const canary = "SEC718_THROWING_SINK_PROVIDER_CANARY";
+    const sinkCanary = "SEC718_WARNING_SINK_CANARY";
+    const scenarios = [
+      ["event", {
+        arrange: arrangeEvent("evt-1", { beforePatch: { visibility_status: "private" } }),
+      }, ["publicJson", "eventExport"]],
+      ["video", {
+        setup: seedVideoWithEvents(),
+        arrange: arrangeVideo(videoPublicToPrivate),
+      }, ["eventExport", "eventExport", "publicJson"]],
+    ];
+    for (const [entity, spec, expectedOrder] of scenarios) {
+      const [, actual] = await runScenario("postcommit_throwing_warning_" + entity, {
+        ...spec,
+        postCommitFailure: { publicJson: true, eventExport: true, throwWarn: true, canary },
+      });
+      assert.equal(actual.outcome.returned?.ok, true,
+        entity + ": a committed restore must remain successful when diagnostics throw");
+      assert.equal(actual.audit_restore_runs.filter((row) => row.status === "success").length, 1);
+      assert.equal(actual.audit_restore_runs.filter((row) => row.status === "failed").length, 0);
+      assert.equal(actual.log.filter((entry) => entry.op === "batch").length, 1,
+        "only the original audited D1 batch may execute");
+      const hostCalls = actual.log.filter((entry) => entry.op.startsWith("postcommit."));
+      assert.deepEqual(hostCalls.map((entry) =>
+        entry.op === "postcommit.publicJson" ? "publicJson" : "eventExport"
+      ), expectedOrder, entity + ": every independent invalidation is attempted in order");
+      const warnings = actual.log.filter((entry) => entry.op === "console.warn" &&
+        (entry.args[0] === "[audit-restore] public cache invalidation failed" ||
+          entry.args[0] === "[audit-restore] event export invalidation failed"));
+      assert.deepEqual(warnings.map((entry) => entry.args), expectedOrder.map((kind) => [
+        kind === "publicJson"
+          ? "[audit-restore] public cache invalidation failed"
+          : "[audit-restore] event export invalidation failed",
+        "provider_error",
+      ]), entity + ": fixed warnings are attempted even when the sink throws");
+      assert.ok(!JSON.stringify(actual).includes(canary));
+      assert.ok(!JSON.stringify(actual).includes(sinkCanary));
     }
   });
 

@@ -39,6 +39,17 @@ export type AuditRestoreHost = VisibilityFenceHost & {
   loadQueueWakeHost: QueueWakeHostLoader;
 };
 
+function warnPostCommitRestoreFailure(kind: "event_export" | "public_json"): void {
+  const message = kind === "public_json"
+    ? "[audit-restore] public cache invalidation failed"
+    : "[audit-restore] event export invalidation failed";
+  try {
+    console.warn(message, "provider_error");
+  } catch {
+    // D1 has committed. A broken diagnostic sink must not skip later invalidations.
+  }
+}
+
 function parseSnapshot(json: string | null): Record<string, unknown> | null {
   if (!json) return null;
   try {
@@ -792,7 +803,7 @@ export async function restoreAuditLog(
       } catch {
         // Match normal video transition fail-soft behavior without leaking
         // provider errors, identifiers or cached response contents.
-        console.warn("[audit-restore] event export invalidation failed", "provider_error");
+        warnPostCommitRestoreFailure("event_export");
       }
     }
   }
@@ -803,7 +814,7 @@ export async function restoreAuditLog(
       // The D1 transaction already succeeded. A Cache API/provider failure
       // must neither turn the committed restore into a false HTTP failure nor
       // serialize potentially sensitive provider errors into application logs.
-      console.warn("[audit-restore] public cache invalidation failed", "provider_error");
+      warnPostCommitRestoreFailure("public_json");
     }
   }
   if (log.table_name === "events") {
@@ -812,7 +823,7 @@ export async function restoreAuditLog(
     } catch {
       // Keep parity with video post-commit export invalidation: report the
       // committed result, and emit only a fixed, credential-free diagnostic.
-      console.warn("[audit-restore] event export invalidation failed", "provider_error");
+      warnPostCommitRestoreFailure("event_export");
     }
   }
 
