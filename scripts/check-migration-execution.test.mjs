@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { expandDependencies, parseDecisionRows, parseTaskRows, validateMigrationExecution, validateCheckpointPolicy, validateStatusTableStructure, hasValidSkipApprovalRecord } from "./check-migration-execution.mjs";
 
 const status = `Current Task: MIG-0301
@@ -497,4 +499,52 @@ test("SKIP_APPROVAL structure rejects placeholder, fenced and commented approval
    good.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=MIG-9999"),
    "MIG-0105"),false, "fenced examples cannot extend the canonical table");
   assert.equal(hasValidSkipApprovalRecord("SKIP_APPROVAL: MIG-0105 | PR#404 | APPROVAL=https://github.com/coroke3/flamenode/pull/404#issuecomment-123 | ALTERNATIVE=Legacy route retired with migration owner signoff","MIG-0105"),true);
+});
+
+test("benchmark dispatch validates exact scenario IDs before measurement", { skip: process.platform !== "linux" }, () => {
+  const workflow = readFileSync(new URL("../.github/workflows/migration-docs-check.yml", import.meta.url), "utf8");
+  const step = workflow.split("      - name: Local-only Linux workerd API CPU benchmark を実行\n")[1];
+  const run = step?.split("        run: |\n")[1]?.split("\n      - name:")[0];
+  assert.ok(run, "benchmark dispatch run block must exist");
+  // Execute the actual workflow shell without starting Workerd. The stub emits
+  // the registry's padded ID / runtime class / title format for selected IDs.
+  const stub = `node() {
+    if [[ " $* " == *" --dry-run "* ]]; then
+      local requested="\${!#}"
+      case ",$requested," in *,RH-018,*) printf '%s\\n' '  RH-018   S2  GET /api/health';; esac
+      case ",$requested," in *,RH-017,*) printf '%s\\n' '  RH-017   S2  GET /api/health/deep';; esac
+      printf '%s\\n' '  BASELINE S2  no-op worker route (harness/runtime floor, not a budget item)'
+    else
+      printf '%s\\n' BENCHMARK_INVOKED
+    fi
+  }`;
+  for (const [only, samples, error] of [
+    ["no-op", "50", /unknown scenario ID: no-op/],
+    ["RH-018,S2", "50", /unknown scenario ID: S2/],
+    ["RH-018,unknown", "50", /unknown scenario ID: unknown/],
+    ["RH-018,RH-018", "50", /duplicate scenario ID: RH-018/],
+    ["BASELINE", "50", /at least one known non-BASELINE scenario/],
+    ["RH-018,,RH-017", "50", /comma-separated scenario IDs/],
+    ["RH-018", "49", /Invalid benchmark_samples/],
+    ["RH-018", "101", /Invalid benchmark_samples/],
+    ["RH-018", "50", null],
+    ["BASELINE,RH-018", "100", null],
+    ["RH-018, RH-017", "75", null],
+    ["", "50", null],
+  ]) {
+    const result = spawnSync("bash", ["-c", `${stub}\n${run}`], {
+      encoding: "utf8",
+      env: { ...process.env, BENCHMARK_ONLY: only, BENCHMARK_SAMPLES: samples,
+        BENCHMARK_SKIP_COLD: "false", RUNNER_TEMP: "/tmp" },
+    });
+    const label = `only=${JSON.stringify(only)} samples=${samples}`;
+    assert.ifError(result.error);
+    assert.equal(result.status, error ? 1 : 0, `${label}: ${result.stderr}`);
+    if (error) {
+      assert.match(result.stderr, error, label);
+      assert.doesNotMatch(result.stdout, /BENCHMARK_INVOKED/, label);
+    } else {
+      assert.match(result.stdout, /BENCHMARK_INVOKED/, label);
+    }
+  }
 });
