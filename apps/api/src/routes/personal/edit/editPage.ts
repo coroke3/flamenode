@@ -4,7 +4,7 @@ import type { EditMember, EditPageResponse } from "@flamenode/contracts";
 import type { AppEnv } from "../../../env.ts";
 import { approvedXIdsOf, loadPersonalContext } from "../context.ts";
 import { assertResponseBytes, jsonBytes, MAX_RESPONSE_BYTES, takeWithinBytes } from "../entry/rows.ts";
-import { buildAccessContext, collabSubjectsOf, decideEditPage, editPermissionSummary, normalizePrivilegeMode, pageEventIds } from "./access.ts";
+import { buildAccessContext, collabSubjectsOf, decideEditPage, editPermissionSummary, editReadScopeOf, normalizePrivilegeMode, pageEventIds } from "./access.ts";
 import { loadEditData, MAX_EDIT_COLLAB_SUBJECTS, MAX_EDIT_MEMBERS } from "./data.ts";
 
 // CURRENT: app/(auth)/dashboard/edit/[id]/page.tsx (loader part). GET only: nothing is written.
@@ -54,6 +54,14 @@ export const personalEditPageRoutes = new Hono<AppEnv>().get("/:id", async (c) =
     return c.json(body);
   }
 
+  const eventIds = pageEventIds(video, data.videoEventIds);
+  const readScope = await editReadScopeOf({
+    userId: user.id,
+    activeXId: user.active_x_user_id,
+    video,
+    access,
+    eventIds,
+  });
   const s = access.sections;
   const disabledSections = [
     !s.identity ? "submitter" : null,
@@ -98,6 +106,7 @@ export const personalEditPageRoutes = new Hono<AppEnv>().get("/:id", async (c) =
   const base: Extract<EditPageResponse, { kind: "edit" }> = {
     kind: "edit",
     user,
+    readScope,
     video: {
       ...header,
       updated_at: video.updated_at,
@@ -135,7 +144,7 @@ export const personalEditPageRoutes = new Hono<AppEnv>().get("/:id", async (c) =
       : null,
     softwareLabel: data.softwareLabels.length > 0 ? data.softwareLabels.join(", ") : null,
     isCollab: video.collaboration_type === "collab" || data.members.length > 0,
-    eventIds: pageEventIds(video, data.videoEventIds),
+    eventIds,
     events,
     members: [],
     membersTruncated: false,
