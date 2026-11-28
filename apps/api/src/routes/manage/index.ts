@@ -25,9 +25,9 @@ import { manageStaffRoutes } from "./staff.ts";
 import { registerStaffWriteRoutes } from "./staffWrite.ts";
 import { manageXLinkRequestRoutes } from "./xlink.ts";
 
-// MIG-0624: authenticated, read-only Manage screens API. Every response (success, 401, 403, 404, 503)
-// is `Cache-Control: private, no-store`. GET does not write; writes (MIG-0655 playlist and MIG-0654 staff mutations)
-// go through the onlyMutating Origin -> session -> writeGuard -> db stack below (D-15-10).
+// MIG-0624: authenticated Manage API. Existing read-only screens remain GET-only; every response
+// (success, 401, 403, 404, 503) is `Cache-Control: private, no-store`. Mutating playlist (MIG-0655),
+// staff (MIG-0654), and slot (MIG-0656) routes use the scoped Origin -> session -> writeGuard -> db stack below (D-15-10).
 // Status mapping of CURRENT redirects/notFound: not logged in -> 401, banned -> 403 (requireAuth),
 // neither admin nor event staff (layout redirect to /dashboard) -> 403 { reason: "manage_access_required" },
 // notFound() -> 404.
@@ -74,9 +74,9 @@ manageRoutes.use(singleSlotDeletePath, (c, next) =>
   c.req.method === "DELETE" ? originGuardMiddleware(originOptions(c))(c, next) : next());
 manageRoutes.use("*", sessionMiddleware());
 manageRoutes.use("*", requireAuth());
-// The existing read-only /manage API remains unchanged. Every mutating
-// playlist AND staff path must receive writeGuard(identity/TOS) -> DB before
-// the handlers; onlyMutating keeps the GET staff endpoint read-only.
+// Existing GET /manage handlers remain read-only. Every mutating playlist, staff,
+// and slot path receives writeGuard(identity/TOS) -> DB before its handler;
+// onlyMutating keeps the GET staff endpoint read-only.
 for (const path of scopedWritePaths) {
   manageRoutes.use(path, onlyMutating((c, next) =>
     writeGuardMiddleware({ ...originOptions(c), requiredRole: null })(c, next)));

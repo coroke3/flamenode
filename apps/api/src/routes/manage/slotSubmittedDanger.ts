@@ -1,7 +1,7 @@
 /**
- * MIG-0656 U03f: SA-056 and SA-057 Hono mutation candidates.
+ * MIG-0656 U03f/U04: SA-056 and SA-057 Hono mutation handlers.
  *
- * UNMOUNTED: this file is deliberately NOT imported in manage/index.ts.
+ * Mounted by manage/index.ts under /api/manage/events/:id/slots.
  * D-15-10 parent must guarantee Origin BEFORE Auth.js session, requireAuth,
  * TOS/writeGuard, DB/audit preloads and event.slots-scoped staff permission.
  *
