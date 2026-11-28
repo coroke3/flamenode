@@ -2,7 +2,7 @@ import {
   appUrl,
   type DiscordNotificationPayload,
   type NotificationUrlEnv,
-} from "../format";
+} from "../format.ts";
 import type { OpsWebhookTarget } from "../forum";
 import type { DiscordBlock } from "@flamenode/server-core/notifications/discordText";
 

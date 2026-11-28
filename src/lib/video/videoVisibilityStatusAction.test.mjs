@@ -73,8 +73,12 @@ test("shared mutation helper performs CAS re-read once", async () => {
     new URL("./videoVisibilityStatusAction.ts", import.meta.url),
     "utf8",
   );
+  const core = await readFile(
+    new URL("../../../packages/server-core/src/video/visibilityStatusMutation.ts", import.meta.url),
+    "utf8",
+  );
   assert.match(source, /AuditMutationError/);
-  assert.match(source, /reread\?\.visibility_status === requestedStatus/);
-  assert.match(source, /visibility_precommit_failed/);
+  assert.match(core, /currentStatus === requestedStatus/);
+  assert.match(core, /visibility_precommit_failed/);
   assert.match(source, /mutateWithAudit\(/);
 });

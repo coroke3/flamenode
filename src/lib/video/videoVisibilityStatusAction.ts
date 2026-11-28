@@ -1,12 +1,10 @@
 import { unstable_rethrow } from "next/navigation";
 import { eq } from "drizzle-orm";
-import type { BatchItem } from "drizzle-orm/batch";
 import { AuditMutationError, mutateWithAudit } from "@/lib/audit/mutate";
-import type { WriteAuditLogInput } from "@/lib/audit/types";
 import type { DB } from "@/lib/db/client";
 import { videos } from "@/lib/db/schema";
 import { createTraceId } from "@/lib/observability/flowTrace";
-import type { QueueWakeSource } from "@/lib/queues/wakeBudget";
+import { nextVisibilityManifestHost } from "@/lib/publicData/visibilityManifestHost";
 import { markPendingPublicReflection } from "@/lib/staticRebuild/publicReflectionNotice";
 import type { PendingPublicReflection } from "@/lib/staticRebuild/publicReflectionNotice";
 import {
@@ -14,7 +12,12 @@ import {
   preCommitVideoVisibilityDepublicization,
   type VideoVisibilityTransitionPlan,
 } from "@/lib/video/videoVisibilityTransition";
-import { SAME_VIDEO_STATUS_MESSAGE } from "@/lib/video/videoVisibilityStatusCore";
+import {
+  executeVideoVisibilityStatusMutation as executeVideoVisibilityStatusMutationCore,
+  type ExecuteVideoVisibilityStatusMutationInput,
+  type VideoVisibilityStatusMutationHost,
+  type VideoStatusActionResult,
+} from "@flamenode/server-core/video/visibilityStatusMutation";
 
 const VISIBILITY_PRECOMMIT_ERROR_MARKERS = [
   "public_visibility_fence",
@@ -28,14 +31,78 @@ function isVisibilityPrecommitFailure(error: unknown): boolean {
   );
 }
 
-export type VideoStatusActionResult = PendingPublicReflection & {
-  ok: boolean;
-  message?: string;
-  errorCode?: string;
-  traceId?: string;
-  retryable?: boolean;
-  nextHref?: string;
+// Pinned Next 15.5.x recognizes digest, message and $$typeof, and follows
+// Error.cause. Inspect descriptors rather than invoking provider getters.
+const MAX_FRAMEWORK_CAUSE_DEPTH = 64;
+const MAX_FRAMEWORK_PROTOTYPE_DEPTH = 16;
+
+function readFrameworkData(error: object, key: string): unknown {
+  if (!Reflect.has(error, key)) return undefined;
+  let cursor: object | null = error;
+  for (let depth = 0; cursor !== null && depth < MAX_FRAMEWORK_PROTOTYPE_DEPTH; depth += 1) {
+    const descriptor = Object.getOwnPropertyDescriptor(cursor, key);
+    if (descriptor) {
+      if (!Object.hasOwn(descriptor, "value")) throw new Error("framework_metadata_unavailable");
+      return descriptor.value;
+    }
+    cursor = Object.getPrototypeOf(cursor);
+  }
+  throw new Error("framework_metadata_unavailable");
+}
+
+function hasErrorPrototype(error: object): boolean {
+  let cursor: object | null = error;
+  for (let depth = 0; depth < MAX_FRAMEWORK_PROTOTYPE_DEPTH; depth += 1) {
+    cursor = Object.getPrototypeOf(cursor);
+    if (cursor === null) return false;
+    if (cursor === Error.prototype) return true;
+  }
+  throw new Error("framework_metadata_unavailable");
+}
+
+function rethrowVideoStatusFrameworkControl(error: unknown): void | "unavailable" {
+  const seen = new Set<object>();
+  for (let depth = 0; typeof error === "object" && error !== null; depth += 1) {
+    if (depth >= MAX_FRAMEWORK_CAUSE_DEPTH || seen.has(error)) return "unavailable";
+    seen.add(error);
+
+    let metadata: { digest: unknown; message: unknown; $$typeof: unknown };
+    try {
+      const digest = readFrameworkData(error, "digest");
+      const message = readFrameworkData(error, "message");
+      const marker = readFrameworkData(error, "$$typeof");
+      metadata = {
+        digest: typeof digest === "string" ? digest : undefined,
+        message: typeof message === "string" ? message : undefined,
+        $$typeof: typeof marker === "symbol" ? marker : undefined,
+      };
+    } catch {
+      return "unavailable";
+    }
+
+    try {
+      unstable_rethrow(metadata);
+    } catch (controlFlow) {
+      // Next throws the object it recognizes. Only that exact projection
+      // certifies a signal; propagate the original direct/nested identity.
+      if (controlFlow === metadata) throw error;
+      return "unavailable";
+    }
+
+    try {
+      if (!hasErrorPrototype(error)) return;
+      error = readFrameworkData(error, "cause");
+    } catch {
+      return "unavailable";
+    }
+  }
+}
+
+export type { VideoStatusActionResult };
+export type ExecuteMutationInput = ExecuteVideoVisibilityStatusMutationInput<DB> & {
+  transition: VideoVisibilityTransitionPlan;
 };
+export type { PendingPublicReflection };
 
 export {
   SAME_VIDEO_STATUS_MESSAGE,
@@ -44,121 +111,38 @@ export {
   monotonicVideoUpdatedAt,
 } from "@/lib/video/videoVisibilityStatusCore";
 
-type ExecuteMutationInput = {
-  db: DB;
-  videoId: string;
-  requestedStatus: string;
-  transition: VideoVisibilityTransitionPlan;
-  reason: string | null;
-  logTag: string;
-  extraStatements?: BatchItem<"sqlite">[];
-  extraExpected?: (number | null)[];
-  extraAudits?: WriteAuditLogInput[];
-  notificationWakeSource?: QueueWakeSource;
-  staticRebuildWakeSource?: QueueWakeSource;
+const mutationHost: VideoVisibilityStatusMutationHost<DB> = {
+  createTraceId,
+  preCommit: preCommitVideoVisibilityDepublicization,
+  mutate: (db, mutation) => mutateWithAudit(db, mutation),
+  compensate: compensateDepublicizationFenceOnD1Failure,
+  confirmCompensation: async (videoId) => {
+    // CURRENT must enforce the same readback as TARGET: an exhausted R2 CAS
+    // compensator can report only a warning and resolve without throwing.
+    const { manifest, etag } = await nextVisibilityManifestHost.read();
+    return typeof etag === "string" && etag.length > 0 &&
+      !manifest.entities.some((entry) =>
+        entry.entity_type === "video" && entry.entity_id === videoId);
+  },
+  rethrowFrameworkControl: rethrowVideoStatusFrameworkControl,
+  isAuditMutationError: (error) => error instanceof AuditMutationError,
+  rereadStatus: async (db, videoId) => {
+    const row = (
+      await db
+        .select({ visibility_status: videos.visibility_status })
+        .from(videos)
+        .where(eq(videos.id, videoId))
+        .limit(1)
+    )[0];
+    return row?.visibility_status;
+  },
+  isVisibilityPrecommitFailure,
+  markPendingPublicReflection,
+  log: (level, tag, details) => console[level](tag, details),
 };
 
-export async function executeVideoVisibilityStatusMutation(
+export function executeVideoVisibilityStatusMutation(
   input: ExecuteMutationInput,
 ): Promise<VideoStatusActionResult> {
-  const traceId = createTraceId();
-  const {
-    db,
-    videoId,
-    requestedStatus,
-    transition,
-    reason,
-    logTag,
-  } = input;
-
-  if (transition.validationError) {
-    return { ok: false, message: transition.validationError };
-  }
-
-  const statements = [
-    ...transition.mutationStatements,
-    ...(input.extraStatements ?? []),
-  ];
-  const expected = [
-    ...transition.expectedMutationChanges,
-    ...(input.extraExpected ?? []),
-  ];
-  const audits = [...transition.audits, ...(input.extraAudits ?? [])];
-
-  try {
-    if (transition.fenceToken) {
-      await preCommitVideoVisibilityDepublicization({
-        videoId,
-        fenceToken: transition.fenceToken,
-        reason,
-      });
-    }
-
-    await mutateWithAudit(db, {
-      mutationStatements: statements,
-      expectedMutationChanges: expected,
-      audits,
-      notificationWakeSource: input.notificationWakeSource,
-      staticRebuildWakeSource: input.staticRebuildWakeSource,
-    });
-  } catch (error) {
-    unstable_rethrow(error);
-    if (transition.fenceToken) {
-      try {
-        await compensateDepublicizationFenceOnD1Failure(db, {
-          videoId,
-          fenceToken: transition.fenceToken,
-          traceId,
-          allowNonPublicRollback: !transition.depublicizedFromPublic,
-        });
-      } catch (compensationError) {
-        console.warn(`[${logTag}] visibility compensation failed`, {
-          traceId,
-          error: compensationError,
-        });
-      }
-    }
-    if (error instanceof AuditMutationError) {
-      const reread = (
-        await db.select().from(videos).where(eq(videos.id, videoId)).limit(1)
-      )[0];
-      if (reread?.visibility_status === requestedStatus) {
-        return markPendingPublicReflection(
-          { ok: true, message: SAME_VIDEO_STATUS_MESSAGE },
-          false,
-        );
-      }
-      return {
-        ok: false,
-        message:
-          "別の担当者が状態を変更しました。状態を再取得してもう一度お試しください。",
-        errorCode: "concurrent_update",
-        traceId,
-        retryable: true,
-      };
-    }
-    if (isVisibilityPrecommitFailure(error)) {
-      console.error(`[${logTag}] visibility precommit failed`, { traceId, error });
-      return {
-        ok: false,
-        message: "公開ブロックの記録に失敗しました。",
-        errorCode: "visibility_precommit_failed",
-        traceId,
-        retryable: false,
-      };
-    }
-    console.error(`[${logTag}] mutation failed`, { traceId, error });
-    return {
-      ok: false,
-      message: `承認処理に失敗しました。状態を再取得してもう一度お試しください。エラーID: ${traceId}`,
-      errorCode: "mutation_failed",
-      traceId,
-      retryable: true,
-    };
-  }
-
-  return markPendingPublicReflection(
-    { ok: true, message: "ステータスを更新しました。" },
-    transition.queueBatch.statements.length > 0,
-  );
+  return executeVideoVisibilityStatusMutationCore(input, mutationHost);
 }
