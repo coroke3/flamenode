@@ -727,7 +727,9 @@ test("SEC-800: SA-031 canonical lookup blocks ambiguous legacy aliases and adopt
       assert.equal(warnings(), 0);
     });
     const row = legacy.sqlite.prepare("SELECT id, x_user_id, display_name FROM event_staff WHERE id = 's-legacy'").get();
-    assert.deepEqual(row, { id: "s-legacy", x_user_id: "csv_staff", display_name: "Added" });
+    assert.equal(row?.id, "s-legacy");
+    assert.equal(row?.x_user_id, "csv_staff");
+    assert.equal(row?.display_name, "Added");
     assert.equal(legacy.count("event_staff"), 2);
     assert.equal(legacy.count("x_users"), 2);
     assert.equal(legacy.count("audit_logs"), before[2].length + 1);
