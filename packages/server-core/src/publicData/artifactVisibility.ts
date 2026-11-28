@@ -1,5 +1,6 @@
 import type { StaticRebuildTargetType } from "../staticRebuild/types.ts";
 import { PUBLIC_LISTABLE_X_APPROVAL_STATUSES } from "./publicXUser.ts";
+import { normalizeStaticEventPlaylist } from "./eventPlaylistCore.ts";
 import type {
   PublicVisibilityBlockedEntitiesManifest,
 } from "../visibility/manifestCore.ts";
@@ -263,6 +264,22 @@ export function filterPublicArtifactPayload<T>(
         isPublicXReferenceRow(row, context),
       );
       return next as T;
+    }
+    case "event_slots": {
+      // event_slots usually serves events/<id>/slots.json (slots array),
+      // but the viewer reuses this target type for playlist.v1.json.
+      // Only the playlist has items containing video DTOs. An older,
+      // complete playlist must not re-expose a separately fenced video.
+      if (!Array.isArray(root.items)) return payload;
+      // Validate the original projection before removing rows. Filtering must
+      // not conceal an oversized list, malformed row or duplicate video ID.
+      // Keep the raw rows below: normalization drops optional visibility flags.
+      if (!normalizeStaticEventPlaylist(root)) return null;
+      const eventId = typeof root.event_id === "string" ? root.event_id.trim() : "";
+      if (eventId && context?.blockedEventIds.has(eventId)) return null;
+      return withFilteredRows(root, ["items"], (row) =>
+        isPublicVideoRow(row, context),
+      ) as T;
     }
     case "event_release": {
       const event = root.event;
