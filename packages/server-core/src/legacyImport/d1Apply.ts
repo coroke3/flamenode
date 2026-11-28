@@ -6,6 +6,7 @@ import {
 } from "../audit/logger.ts";
 import { mutateWithAudit } from "../audit/mutate.ts";
 import type { ServerCoreDb } from "../db.ts";
+import type { QueueWakeHostLoader } from "../ports.ts";
 import type { CanonicalLegacyPlan, LegacyImportStrategy } from "./normalize.ts";
 import type { LegacyImportApplyProgress } from "./previewStore.ts";
 import {
@@ -28,6 +29,7 @@ type ApplyInput = {
   planHash: string;
   actorAuthUserId: string;
   progress: LegacyImportApplyProgress;
+  loadWakeHost: QueueWakeHostLoader;
 };
 type ReadRow = { kind: string; payload: string | null };
 type StepIdentity = {
@@ -831,7 +833,8 @@ export async function legacyImportD1ApplyStep(
       ],
       callerQueryCount: 3,
       preloaded: input.preloaded,
-    });
+      staticRebuildWakeSource: "import",
+    }, input.loadWakeHost);
     return { progress: nextProgress, complete: false };
   }
 
@@ -1070,9 +1073,10 @@ export async function legacyImportD1ApplyStep(
       ],
       callerQueryCount: 3,
       preloaded: input.preloaded,
-    });
-    // Queue rows are persisted atomically. Hono wake=0 is an explicit, still-unaccepted
-    // parity gap; this apply route remains unmounted until the wake contract is resolved.
+      staticRebuildWakeSource: "import",
+    }, input.loadWakeHost);
+    // The audited D1 batch commits queue rows first; mutateWithAudit then sends one
+    // best-effort wake. Receipt replay never re-sends after an R2 progress CAS failure.
     return { progress: nextProgress, complete: false };
   }
 

@@ -14,6 +14,7 @@ import {
 } from "@flamenode/server-core/legacyImport/previewStore";
 import type { AppEnv } from "../../env.ts";
 import type { PreloadedAuditContext } from "@flamenode/server-core/audit/logger";
+import type { EnvValues, QueueWakeHostLoader } from "@flamenode/server-core/ports";
 import { costGuardMiddleware } from "../../middleware/costGuard.ts";
 import { onlyMutating } from "../../middleware/writeOrigin.ts";
 import { runLegacyImportApplyPipeline } from "./legacyImportApplyPipeline.ts";
@@ -23,6 +24,7 @@ type PipelineStep = Parameters<typeof runLegacyImportApplyPipeline<LegacyImportA
 type AtomicD1Step = (input: Parameters<PipelineStep>[0] & {
   db: AppEnv["Variables"]["db"];
   preloaded: PreloadedAuditContext;
+  loadWakeHost: QueueWakeHostLoader;
 }) => ReturnType<PipelineStep>;
 
 /**
@@ -60,6 +62,21 @@ export function createLegacyImportApplyRoutes(applyStep: AtomicD1Step) {
           settings: c.get("auditSettings"),
           actorSnapshotJsonById: c.get("actorSnapshotJsonById"),
         },
+        loadWakeHost: async () => ({
+          readEnv: () => c.env as unknown as EnvValues,
+          readWaitUntil: () => {
+            try {
+              const executionCtx = (c as unknown as {
+                executionCtx?: { waitUntil?: (promise: Promise<unknown>) => void };
+              }).executionCtx;
+              const waitUntil = executionCtx?.waitUntil;
+              return typeof waitUntil === "function" ? waitUntil.bind(executionCtx) : null;
+            } catch {
+              return null;
+            }
+          },
+          readKv: () => c.env.KV ?? null,
+        }),
       }),
       mapPreviewError: r2.mapPreviewError,
       isTransientApplyFailure: (cause) =>

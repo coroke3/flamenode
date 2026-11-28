@@ -58,7 +58,7 @@ function legacySoftwareId(normalizedName) {
 const ADMIN = { id: "admin-1", name: "Admin", email: null, image: null,
   role: "admin", is_banned: 0, active_x_user_id: null };
 
-function setup({ user = ADMIN, role = "admin", settings = "normal", bucket, applyStep } = {}) {
+function setup({ user = ADMIN, role = "admin", settings = "normal", bucket, applyStep, bindings = {} } = {}) {
   const { db, sqlite, stats } = createAdminD1();
   seedBase(sqlite, { role, settings });
   let d1ApplyCalls = 0;
@@ -79,7 +79,7 @@ function setup({ user = ADMIN, role = "admin", settings = "normal", bucket, appl
   const request = (data, origin = SITE) =>
     app.request("/api/admin/import/legacy/apply", {
       method: "POST", headers: { Origin: origin }, body: data,
-    }, { DB: db, BUCKET: bucket, NEXT_PUBLIC_SITE_URL: SITE });
+    }, { DB: db, BUCKET: bucket, NEXT_PUBLIC_SITE_URL: SITE, ...bindings });
   return { request, sqlite, stats, getD1ApplyCalls: () => d1ApplyCalls };
 }
 
@@ -797,7 +797,17 @@ test("MIG-0645 U02ad Hono: event, owner staff, rebuild targets and audit receipt
     public_role_label: null,
   });
   const { credential, form } = await createApplyCredential(bucket, ADMIN.id, plan);
-  const { request, sqlite, stats, getD1ApplyCalls } = setup({ bucket, applyStep: legacyImportD1ApplyStep });
+  const wakeMessages = [];
+  const { request, sqlite, stats, getD1ApplyCalls } = setup({
+    bucket,
+    applyStep: legacyImportD1ApplyStep,
+    bindings: {
+      QUEUE_DISPATCH_ENABLED: "1",
+      STATIC_REBUILD_WAKE_QUEUE: {
+        send: async (message) => { wakeMessages.push(message); },
+      },
+    },
+  });
   extendLegacyImportUserSchema(sqlite);
   extendLegacyImportSoftwareSchema(sqlite);
   extendLegacyImportEventSchema(sqlite);
@@ -810,6 +820,11 @@ test("MIG-0645 U02ad Hono: event, owner staff, rebuild targets and audit receipt
     const xUsers = await request(form());
     assert.equal(xUsers.status, 200, JSON.stringify(await xUsers.clone().json()));
     assert.equal((await xUsers.json()).progress.stage, "softwares");
+    assert.equal(wakeMessages.length, 1, "X-user D1 commit sends one static rebuild wake");
+    assert.deepEqual(
+      { kind: wakeMessages[0].kind, source: wakeMessages[0].source },
+      { kind: "static_rebuild_available", source: "import" },
+    );
 
     const emptySoftwares = await request(form());
     assert.equal(emptySoftwares.status, 200, JSON.stringify(await emptySoftwares.clone().json()));
@@ -823,6 +838,11 @@ test("MIG-0645 U02ad Hono: event, owner staff, rebuild targets and audit receipt
     assert.equal(pending.requires_repreview, false);
     assert.equal(pending.progress.stage, "custom_questions");
     assert.equal(pending.result.created.events, 1);
+    assert.equal(wakeMessages.length, 2, "event D1 commit sends one additional wake before the R2 progress CAS");
+    assert.deepEqual(wakeMessages.map(({ kind, source }) => ({ kind, source })), [
+      { kind: "static_rebuild_available", source: "import" },
+      { kind: "static_rebuild_available", source: "import" },
+    ]);
     assert.equal(record().status, "ready");
     assert.equal(record().progress.stage, "events");
     assert.equal(stats.reads, 12, "four requests use three pre-reads each, including the combined event snapshot");
@@ -882,6 +902,7 @@ test("MIG-0645 U02ad Hono: event, owner staff, rebuild targets and audit receipt
     assert.equal(recovered.progress.stage, "custom_questions");
     assert.equal(recovered.result.created.events, 1);
     assert.equal(record().progress.stage, "custom_questions");
+    assert.equal(wakeMessages.length, 2, "durable receipt replay does not send a duplicate wake");
     assert.equal(stats.reads, 15, "durable receipt replay adds one combined event snapshot read");
     assert.equal(stats.batches, 4, "receipt replay never duplicates event, staff, queue or audit writes");
     assert.equal(getD1ApplyCalls(), 5);
