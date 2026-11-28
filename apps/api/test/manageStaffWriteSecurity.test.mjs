@@ -131,13 +131,12 @@ async function withThrowingDiagnostics(run) {
   const originalError = console.error;
   const originalWarn = console.warn;
   const errors = [];
-  let warnings = 0;
+  const warningArgs = [];
   try {
     console.error = (...args) => { errors.push(args); throw new Error("diagnostic sink failed"); };
-    // The shared enqueue warning may escape on current main or be swallowed
-    // by SEC-782. Both outcomes must preserve the committed request.
-    console.warn = () => { warnings++; throw new Error("warning sink failed"); };
-    await run({ errors, warnings: () => warnings });
+    // SEC-782 is now merged: retain the exact warning payload as well as count.
+    console.warn = (...args) => { warningArgs.push(args); throw new Error("warning sink failed"); };
+    await run({ errors, warnings: () => warningArgs.length, warningArgs });
   } finally {
     console.error = originalError;
     console.warn = originalWarn;
@@ -391,7 +390,7 @@ test("SEC-800: owner transfer rejects stale CAS and revoked eligibility without 
     ["target deleted", "DELETE FROM event_staff WHERE id='s-target'"],
   ];
   const snapshot = (sqlite) => [
-    ...["event_staff", "x_users", "audit_logs", "static_rebuild_queue"]
+    ...["event_staff", "x_users", "audit_logs", "static_rebuild_queue", "public_build_state"]
       .map((table) => sqlite.prepare('SELECT * FROM "' + table + '" ORDER BY id').all()),
     sqlite.prepare("SELECT * FROM x_user_account_links ORDER BY auth_user_id, x_user_id, link_role").all(),
   ];
@@ -437,16 +436,18 @@ test("SEC-800: projection and diagnostic failure after strict audit preserves or
   for (const mode of ["queue", "route"]) {
     const s = setup({ failQueue: mode === "queue", failRouteDb: mode === "route" });
     try {
-      await withThrowingDiagnostics(async ({ errors, warnings }) => {
+      const markerBefore = s.sqlite.prepare("SELECT * FROM public_build_state WHERE id=1").get();
+      assert.ok(markerBefore, "MIG-0516 marker fixture exists");
+      await withThrowingDiagnostics(async ({ errors, warnings, warningArgs }) => {
         const result = await s.send("POST", "/", upsert);
         assert.equal(result.status, 200, await result.clone().text());
         assert.deepEqual(await result.json(), { ok: true, pendingPublicReflection: true });
         if (mode === "queue") {
           assert.equal(warnings(), 1);
-          // Current main lets the failed shared warning escape to the route.
-          // SEC-782 (#436) contains it. No duplicate/raw route logs in either
-          // order; the independent route fault below always covers its catch.
-          assert.deepEqual(errors, errors.length === 0 ? [] : expectedRouteLog);
+          // After #436, a throwing shared warning sink is contained there:
+          // one fixed warning, no private provider detail or duplicate route log.
+          assert.deepEqual(warningArgs, [["[static-rebuild]", "bulk_enqueue_failed"]]);
+          assert.deepEqual(errors, []);
         } else {
           assert.equal(warnings(), 0);
           assert.deepEqual(errors, expectedRouteLog);
@@ -460,6 +461,8 @@ test("SEC-800: projection and diagnostic failure after strict audit preserves or
         s.initial[0] + 1, s.initial[1] + 1, s.initial[2] + 2, s.initial[3],
       ]);
       assert.deepEqual(s.before(), committed);
+      assert.deepEqual(s.sqlite.prepare("SELECT * FROM public_build_state WHERE id=1").get(), markerBefore,
+        "failed post-commit projection does not advance the build marker");
       assert.equal(s.sqlite.prepare("SELECT COUNT(*) AS n FROM event_staff WHERE x_user_id='added_user'").get().n, 1);
       assert.equal(s.sqlite.prepare("SELECT COUNT(*) AS n FROM x_users WHERE id='added_user'").get().n, 1);
     } finally {
