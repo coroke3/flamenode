@@ -652,6 +652,7 @@ test("U04a-U04e: local workerd/D1 actor history, bounded reader, lease retention
     assert.equal(late.seqAfter, late.seqBefore);
     assert.equal(late.liveName, "X before");
     const metrics = body.metrics;
+    console.log('U04E_D1_METRICS ' + JSON.stringify(metrics));
     assert.equal(metrics.metadataAvailable, true, "Workerd D1 metadata must expose rows_written and duration");
     assert.ok(metrics.single.user.triggered.rowsWritten > metrics.single.user.baseline.rowsWritten, "user history trigger must add D1 row writes");
     assert.ok(metrics.single.x.triggered.rowsWritten > metrics.single.x.baseline.rowsWritten, "X history trigger must add D1 row writes");
