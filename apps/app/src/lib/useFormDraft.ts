@@ -1,4 +1,5 @@
 // Port of CURRENT src/lib/interactions/useFormDraft.ts (MIG-0738). Same output.
+// MIG-0714 B04 synchronizes CURRENT #889; explicit flush/restore and storage contracts remain unchanged.
 import * as React from "react";
 
 const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
@@ -176,6 +177,19 @@ export function useFormDraft<T>({
     return writeDraft(nextValue === undefined ? valueRef.current : nextValue);
   }, [cancelPendingSave, writeDraft]);
 
+  const prepareAutomaticSave = React.useCallback((nextValue: T): boolean => {
+    if (staleKeyRef.current !== storageKey) return true;
+    try {
+      if (JSON.stringify(nextValue) === staleValueFingerprintRef.current) return false;
+    } catch {
+      return false;
+    }
+    staleKeyRef.current = null;
+    staleValueFingerprintRef.current = null;
+    staleValueRef.current = null;
+    return true;
+  }, [storageKey]);
+
   React.useEffect(() => {
     setRestored(false);
     setLastSavedAt(null);
@@ -242,18 +256,7 @@ export function useFormDraft<T>({
       skipNextSave.current = false;
       return;
     }
-    if (staleKeyRef.current === storageKey) {
-      let fingerprint = "";
-      try {
-        fingerprint = JSON.stringify(value);
-      } catch {
-        return;
-      }
-      if (fingerprint === staleValueFingerprintRef.current) return;
-      staleKeyRef.current = null;
-      staleValueFingerprintRef.current = null;
-      staleValueRef.current = null;
-    }
+    if (!prepareAutomaticSave(value)) return;
 
     cancelPendingSave();
     const generation = generationRef.current;
@@ -268,8 +271,8 @@ export function useFormDraft<T>({
     cancelPendingSave,
     debounceMs,
     enabled,
+    prepareAutomaticSave,
     shouldSave,
-    storageKey,
     value,
     writeDraft,
   ]);
@@ -277,7 +280,7 @@ export function useFormDraft<T>({
   React.useEffect(() => {
     if (!enabled || typeof window === "undefined") return;
     const flushOnPageHide = () => {
-      if (shouldSave !== false) flushDraft();
+      if (shouldSave !== false && prepareAutomaticSave(valueRef.current)) flushDraft();
     };
     const flushOnVisibilityChange = () => {
       if (document.visibilityState === "hidden") flushOnPageHide();
@@ -288,7 +291,7 @@ export function useFormDraft<T>({
       window.removeEventListener("pagehide", flushOnPageHide);
       document.removeEventListener("visibilitychange", flushOnVisibilityChange);
     };
-  }, [enabled, flushDraft, shouldSave]);
+  }, [enabled, flushDraft, prepareAutomaticSave, shouldSave]);
 
   const clearDraft = React.useCallback(() => {
     cancelPendingSave();

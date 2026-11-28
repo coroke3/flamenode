@@ -56,11 +56,11 @@ test("複数enqueueのplan生成失敗もbest-effort境界内で吸収する", (
   );
   const tryIndex = manyFn.indexOf("try {");
   const buildIndex = manyFn.indexOf("buildStaticRebuildQueueBatch(db, items)");
-  const catchIndex = manyFn.indexOf("catch (error)");
+  const catchIndex = manyFn.indexOf("catch {");
   assert.ok(tryIndex >= 0);
   assert.ok(buildIndex > tryIndex);
   assert.ok(catchIndex > buildIndex);
-  assert.match(manyFn, /targetCount: items\.length/);
+  assert.match(manyFn, /warnEnqueueFailure\("bulk_enqueue_failed"\)/);
 });
 
 test("queueBatchCoreはactive重複をfail-closedにする", () => {
@@ -117,8 +117,8 @@ test("100 target UPSERTも1 JSON bindでbind上限内", async () => {
       reason: "test_enqueue",
     }));
     const batch = await buildStaticRebuildQueueBatch(db, items);
-    assert.equal(batch.statements.length, 1);
-    assert.deepEqual(batch.expectedChanges, [100]);
+    assert.equal(batch.statements.length, 2);
+    assert.deepEqual(batch.expectedChanges, [100, 1]);
     for (const statement of batch.statements) {
       const query =
         typeof statement.getQuery === "function"

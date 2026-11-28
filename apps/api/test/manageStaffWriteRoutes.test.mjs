@@ -69,7 +69,7 @@ function setup(user = ADMIN) {
   }
   const row = (id) => sqlite.prepare("SELECT * FROM event_staff WHERE id = ?").get(id);
   const count = (table) => sqlite.prepare(`SELECT COUNT(*) AS n FROM "${table}"`).get().n;
-  return { sqlite, stats, send, row, count };
+  return { db, sqlite, stats, send, row, count };
 }
 
 test("U02: POST creates pending X + staff and strict audits; PUT updates same staff", async () => {
@@ -324,4 +324,136 @@ test("U02: GET staff reader is unaffected by the write-only CostGuard", async ()
   const result = await app.request("https://example.test/events/ev-1/staff", { method: "GET" });
   assert.equal(result.status, 200);
   assert.deepEqual(await result.json(), { ok: true, id: "ev-1" });
+});
+
+
+// MIG-0516: count actual logical D1 executions through the parent Manage
+// router, including standalone run() and all submitted batch members.
+function traceStaffCsvD1(db) {
+  const calls = [];
+  return {
+    calls,
+    binding: {
+      prepare(sql) {
+        const statement = db.prepare(sql);
+        return {
+          bind(...params) {
+            const bound = statement.bind(...params);
+            const wrapped = { ...bound };
+            for (const method of ["first", "all", "raw", "run"]) {
+              wrapped[method] = async (...args) => {
+                calls.push({ kind: "statement", method, sql, binds: params.length });
+                return bound[method](...args);
+              };
+            }
+            return wrapped;
+          },
+        };
+      },
+      async batch(statements) {
+        calls.push({ kind: "batch", statements: statements.map((s) => ({
+          sql: s._sql, binds: s._params.length,
+        })) });
+        return db.batch(statements);
+      },
+    },
+  };
+}
+
+test("MIG-0516: parent SA-032 CSV maximum audit + projection budget, cookie and failure boundaries", async (t) => {
+  const { manageRoutes } = await import("../src/routes/manage/index.ts");
+  const cases = [
+    { name: "12 known X", known: 12, pending: 0 },
+    { name: "6 new X", known: 0, pending: 6 },
+    { name: "mixed 12 mutation units", known: 8, pending: 2 },
+    { name: "13 mutation units rejected", known: 13, pending: 0, rejected: true },
+    { name: "missing singleton after successful staff commit", known: 12, pending: 0, missingMarker: true },
+  ];
+  for (const user of [ADMIN, VIEWER]) {
+    for (const scenario of cases) {
+      const s = setup(user);
+      const label = user.role + ": " + scenario.name;
+      try {
+        s.sqlite.exec('CREATE TABLE "session" ("sessionToken" TEXT PRIMARY KEY, "userId" TEXT, expires INTEGER)');
+        s.sqlite.prepare('INSERT INTO "session" VALUES (?, ?, ?)').run("csv-test-session", user.id, Date.now() + 60000);
+        if (user === VIEWER) {
+          s.sqlite.prepare("INSERT INTO x_users (id, x_name, approval_status) VALUES ('delegate_x', 'Delegate', 'approved')").run();
+          s.sqlite.prepare("INSERT INTO x_user_account_links (auth_user_id, x_user_id, link_role) VALUES (?, 'delegate_x', 'owner')").run(user.id);
+          s.sqlite.prepare("INSERT INTO event_staff (id, event_id, x_user_id, display_name, permission_preset, custom_permission_keys_json, is_public, created_at, updated_at) VALUES ('s-delegate','ev-1','delegate_x','Delegate','custom',?,0,1,1)").run('["event.members"]');
+        }
+        const rows = Array.from({ length: scenario.known + scenario.pending }, (_, i) => ({
+          lineNumber: i + 2, display_name: "Boundary " + i, x_user_id: "budget_csv_" + i,
+          permission_preset: "public_staff", permission_keys: [], is_public_staff: "1", public_role_label: "",
+        }));
+        for (const row of rows.slice(0, scenario.known)) {
+          s.sqlite.prepare("INSERT INTO x_users (id, x_name, approval_status) VALUES (?, ?, 'approved')").run(row.x_user_id, row.display_name);
+        }
+        if (scenario.missingMarker) s.sqlite.exec("DELETE FROM public_build_state WHERE id=1");
+        const beforeStaff = s.count("event_staff");
+        const beforeX = s.count("x_users");
+        const { calls, binding } = traceStaffCsvD1(s.db);
+        const result = await manageRoutes.request("https://example.test/events/ev-1/staff/csv", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            origin: "https://example.test",
+            cookie: "__Secure-authjs.session-token=csv-test-session",
+          },
+          body: JSON.stringify({ reason: "CSV budget boundary", rows }),
+        }, { DB: binding, NEXT_PUBLIC_SITE_URL: "https://example.test" });
+        const body = await result.json();
+        assert.equal(result.headers.get("Cache-Control"), "private, no-store", label);
+        const batches = calls.filter((x) => x.kind === "batch");
+        const direct = calls.filter((x) => x.kind === "statement");
+        const firstBatch = calls.findIndex((x) => x.kind === "batch");
+        const beforeMutation = firstBatch < 0 ? direct : calls.slice(0, firstBatch);
+        assert.ok(beforeMutation.some((x) => x.kind === "statement" && x.sql.includes('FROM "session"')), label + ": session before batch");
+        assert.ok(beforeMutation.some((x) => x.kind === "statement" && x.sql.includes("terms_reaccept_required")), label + ": write admission before batch");
+        const total = direct.length + batches.reduce((n, b) => n + b.statements.length, 0);
+        const standaloneRuns = direct.filter((x) => x.method === "run").length;
+        assert.equal(direct.length, s.stats.reads + standaloneRuns, label + ": standalone trace agrees with adapter");
+        assert.equal(batches.length, s.stats.batches, label + ": batch count agrees with adapter");
+        assert.equal(total, s.stats.reads + standaloneRuns + s.stats.batchStatements, label + ": logical trace agrees with adapter");
+        t.diagnostic(`${label}: status=${result.status}, standalone=${direct.length}, batch=${batches.map((x) => x.statements.length).join("+") || "none"}, total=${total}`);
+        assert.ok(total <= 50, label + ": logical D1 statements = " + total);
+        assert.ok(direct.some((x) => x.sql.includes('FROM "session"')), label + ": real session query");
+        assert.ok(direct.some((x) => x.sql.includes("terms_reaccept_required")), label + ": real write admission");
+        assert.ok(direct.some((x) => x.sql.includes("operation_mode")), label + ": real CostGuard query");
+        for (const statement of [...direct, ...batches.flatMap((x) => x.statements)]) {
+          assert.ok(statement.binds <= 100, label + ": D1 bind ceiling");
+        }
+        if (scenario.rejected) {
+          assert.equal(result.status, 400, label + ": " + JSON.stringify(body));
+          assert.match(body.message, /54\/50 query/, label);
+          assert.deepEqual(batches, [], label + ": no mutation or projection");
+          assert.equal(s.count("event_staff"), beforeStaff, label);
+          assert.equal(s.count("x_users"), beforeX, label);
+          assert.equal(s.count("audit_logs"), 0, label);
+          assert.equal(s.count("static_rebuild_queue"), 0, label);
+          assert.equal(s.sqlite.prepare("SELECT requested_at FROM public_build_state WHERE id=1").get().requested_at, 0, label);
+        } else {
+          assert.equal(result.status, 200, label + ": " + JSON.stringify(body));
+          assert.deepEqual(body, { ok: true, pendingPublicReflection: true }, label);
+          assert.deepEqual(batches.map((x) => x.statements.length), [30, 3], label);
+          const [mutation, projection] = batches;
+          assert.ok(mutation.statements.some((x) => /INSERT INTO\s+"?audit_logs/i.test(x.sql)), label + ": audited batch");
+          assert.match(projection.statements[0].sql, /INSERT INTO static_rebuild_queue/, label);
+          assert.match(projection.statements[1].sql, /UPDATE public_build_state/, label);
+          assert.match(projection.statements[2].sql, /WHEN changes\(\) = \? THEN 1/, label);
+          assert.equal(s.count("event_staff"), beforeStaff + rows.length, label);
+          assert.equal(s.count("x_users"), beforeX + scenario.pending, label);
+          assert.equal(s.count("audit_logs"), 12, label);
+          if (scenario.missingMarker) {
+            assert.equal(s.count("public_build_state"), 0, label);
+            assert.equal(s.count("static_rebuild_queue"), 0, label + ": projection batch rolled back");
+          } else {
+            assert.equal(s.count("static_rebuild_queue"), scenario.pending > 0 ? 5 : 4, label);
+            assert.ok(s.sqlite.prepare("SELECT requested_at FROM public_build_state WHERE id=1").get().requested_at > 0, label);
+          }
+        }
+      } finally {
+        s.sqlite.close();
+      }
+    }
+  }
 });
