@@ -676,8 +676,21 @@ const VIDEO_REPLACEMENT_SNAPSHOT_SETS = [
  * CURRENT's managed projection and ordered related-row JSON objects. All
  * identifiers below are static schema metadata. No caller-controlled SQL.
  */
-export async function readLegacyVideoReplacementSnapshot(db: ServerCoreDb, videoId: string) {
+export async function readLegacyVideoReplacementSnapshot(
+  db: ServerCoreDb,
+  videoId: string,
+  answerTargetIds: readonly string[] = [],
+) {
   const targetId = entitySnapshotTargetId("video", videoId);
+  const error = "旧形式インポートの作品置換snapshotを確認できません。";
+  if (!Array.isArray(answerTargetIds) ||
+      answerTargetIds.length > MAX_LEGACY_CUSTOM_ANSWERS_PER_VIDEO ||
+      answerTargetIds.some((id) => typeof id !== "string" || id.length === 0) ||
+      new Set(answerTargetIds).size !== answerTargetIds.length ||
+      new TextEncoder().encode(JSON.stringify(answerTargetIds)).byteLength > MAX_LEGACY_IMPORT_STEP_BYTES) {
+    return fixedFailure(error);
+  }
+  const answerTargetsPayload = JSON.stringify(answerTargetIds);
   const sets = VIDEO_REPLACEMENT_SNAPSHOT_SETS;
   // ORDER BY uses SQLite BINARY ordering, the same as CURRENT's support read.
   // Every table has its own cap+1 sentinel. The global byte cap also covers
@@ -714,9 +727,26 @@ export async function readLegacyVideoReplacementSnapshot(db: ServerCoreDb, video
       LIMIT 2
     )
   `;
+  const answerProofSource = answerTargetIds.length === 0 ? null : sql`
+    SELECT * FROM (
+      SELECT 'answer_proof' AS kind,
+        json_object('id', a.id, 'target_id', a.target_id, 'context', a.context,
+          'after_json', a.after_json, 'created_at', a.created_at) AS payload,
+        a.target_id AS sort1, a.id AS sort2
+      FROM audit_logs AS a
+      WHERE a.table_name = 'video_custom_answers'
+        AND a.target_id IN (SELECT value FROM json_each(${answerTargetsPayload}))
+        AND a.created_at = (
+          SELECT MAX(b.created_at) FROM audit_logs AS b
+          WHERE b.table_name = a.table_name AND b.target_id = a.target_id
+        )
+      ORDER BY sort1, sort2
+      LIMIT ${MAX_LEGACY_CUSTOM_ANSWERS_PER_VIDEO * 2 + 1}
+    )
+  `;
   const readRows = await db.all(sql`
     WITH snapshot AS (
-      ${sql.join([...sources, proofSource], sql` UNION ALL `)}
+      ${sql.join([...sources, proofSource, ...(answerProofSource ? [answerProofSource] : [])], sql` UNION ALL `)}
     )
     SELECT kind,
       CASE WHEN SUM(length(CAST(payload AS BLOB))) OVER () <= ${MAX_LEGACY_IMPORT_STEP_BYTES}
@@ -725,11 +755,13 @@ export async function readLegacyVideoReplacementSnapshot(db: ServerCoreDb, video
     ORDER BY kind, sort1, sort2
   `) as unknown as ReadRow[];
 
-  const error = "旧形式インポートの作品置換snapshotを確認できません。";
   const proofRows = readRows.filter((row) => row.kind === "proof");
-  const knownKinds = new Set<string>(["proof", ...sets.map((set) => set.kind)]);
+  const answerProofRows = readRows.filter((row) => row.kind === "answer_proof");
+  const knownKinds = new Set<string>(["proof", ...sets.map((set) => set.kind),
+    ...(answerTargetIds.length > 0 ? ["answer_proof"] : [])]);
   if (readRows.some((row) => !knownKinds.has(row.kind) || typeof row.payload !== "string") ||
       proofRows.length !== 1 ||
+      answerProofRows.length > answerTargetIds.length * 2 ||
       sets.some((set) => readRows.filter((row) => row.kind === set.kind).length > set.cap)) {
     return fixedFailure(error);
   }
@@ -797,6 +829,7 @@ export async function readLegacyVideoReplacementSnapshot(db: ServerCoreDb, video
   return {
     video, beforeEvents, beforeMembers, beforeChapters, beforeSoftwares, beforeMetadata, beforeAnswers,
     audit, proof: expected,
+    answerProofs: records("answer_proof"),
     // Preserve unmodified payloads for a later transaction-time CAS.
     raw: Object.fromEntries([...sets.map((set) => set.kind), "proof"].map((kind) => [kind, payloads(kind)])),
   };
@@ -915,17 +948,17 @@ function parseExistingVideoAnswer(row: Record<string, unknown>, videoId: string)
 /**
  * U02ao: prepare answer changes only, without executing any writes.
  * CURRENT retains omitted/identical answers and their timestamps. Only
- * a changed existing answer needs a separate, unique latest import audit.
+ * a changed existing answer needs a unique latest import audit.
+ * Proof candidates are loaded with the full video snapshot in one D1 read.
  * The caller must use the full video CAS and the proof assertion in the
  * same audited D1 batch before applying any returned writes.
  */
 export async function prepareLegacyVideoReplacementAnswers(input: {
-  db: ServerCoreDb;
   snapshot: Awaited<ReturnType<typeof readLegacyVideoReplacementSnapshot>>;
   projection: Awaited<ReturnType<typeof projectLegacyVideoCreate>>;
   now: number;
 }) {
-  const { db, snapshot, projection, now } = input;
+  const { snapshot, projection, now } = input;
   const videoId = projection.managed.id;
   const error = "旧形式インポートのカスタム質問回答の置換snapshotを確認できません。";
   if (snapshot.video.id !== videoId || !Number.isSafeInteger(now) || now < 0 ||
@@ -965,43 +998,18 @@ export async function prepareLegacyVideoReplacementAnswers(input: {
   const proofs: AnswerReplacementProof[] = [];
   if (replaced.length > 0) {
     const expected = new Map(replaced.map(({ before: row }) => [answerAuditTarget(row), row]));
-    const targets = JSON.stringify([...expected.keys()]);
-    // Latest means latest across ALL audit contexts, not only import.
-    // A later manual audit or a tie must refuse replacement.
-    const rows = await db.all(sql`
-      WITH latest_rows AS (
-        SELECT json_object('id', a.id, 'target_id', a.target_id,
-          'context', a.context, 'after_json', a.after_json, 'created_at', a.created_at) AS payload
-        FROM audit_logs AS a
-        WHERE a.table_name = 'video_custom_answers'
-          AND a.target_id IN (SELECT value FROM json_each(${targets}))
-          AND a.created_at = (
-            SELECT MAX(b.created_at) FROM audit_logs AS b
-            WHERE b.table_name = a.table_name AND b.target_id = a.target_id
-          )
-        ORDER BY a.target_id, a.id
-        LIMIT ${replaced.length * 2 + 1}
-      )
-      SELECT 'answer_proof' AS kind,
-        CASE WHEN SUM(length(CAST(payload AS BLOB))) OVER () <= ${MAX_LEGACY_IMPORT_STEP_BYTES}
-          THEN payload ELSE NULL END AS payload
-      FROM latest_rows
-    `) as unknown as ReadRow[];
-    if (rows.length !== expected.size || rows.some((row) => row.kind !== "answer_proof" || typeof row.payload !== "string") ||
-        new TextEncoder().encode(JSON.stringify(rows)).byteLength > MAX_LEGACY_IMPORT_STEP_BYTES) {
-      return fixedFailure(error);
-    }
     const seen = new Set<string>();
-    for (const row of rows) {
-      const proof = parseJsonRecord(row.payload, error);
-      if (typeof proof.target_id !== "string" || seen.has(proof.target_id) ||
+    for (const proof of snapshot.answerProofs) {
+      if (typeof proof.target_id !== "string") return fixedFailure(error);
+      const current = expected.get(proof.target_id);
+      if (!current) continue;
+      if (seen.has(proof.target_id) ||
           typeof proof.id !== "string" || proof.context !== CUSTOM_ANSWER_AUDIT_CONTEXT ||
           typeof proof.after_json !== "string" || !Number.isSafeInteger(proof.created_at)) {
         return fixedFailure(error);
       }
-      const current = expected.get(proof.target_id);
       const after = parseJsonRecord(proof.after_json, error);
-      if (!current || ANSWER_SNAPSHOT_KEYS.some((key) => after[key] !== current[key])) {
+      if (ANSWER_SNAPSHOT_KEYS.some((key) => after[key] !== current[key])) {
         return fixedFailure(error);
       }
       seen.add(proof.target_id);
@@ -1010,6 +1018,7 @@ export async function prepareLegacyVideoReplacementAnswers(input: {
         after_json: proof.after_json, created_at: proof.created_at as number,
       });
     }
+    if (seen.size !== expected.size) return fixedFailure(error);
   }
   return { replaced, created, nextAnswers, proofs, custom_answers_digest: await snapshotDigest(nextAnswers) };
 }
@@ -2411,7 +2420,10 @@ export async function legacyImportD1ApplyStep(
           if (input.strategy !== "replace_imported" || video.visibility_status !== "private") {
             return fixedFailure("既存作品の置換条件を満たしていません。");
           }
-          replacement = await readLegacyVideoReplacementSnapshot(input.db, video.id);
+          const answerTargetIds = input.plan.videoCustomAnswers
+            .filter((row) => row.video_id === video.id)
+            .map(answerAuditTarget);
+          replacement = await readLegacyVideoReplacementSnapshot(input.db, video.id, answerTargetIds);
           if (replacement.video.visibility_status !== "private") {
             return fixedFailure("公開状態を変更する作品置換はHono側でまだ利用できません。");
           }
@@ -2458,7 +2470,7 @@ export async function legacyImportD1ApplyStep(
           plannedQuestions, rebuildTargets, youtubeWakeRequired,
         } = projection;
         const answerChanges = replacement
-          ? await prepareLegacyVideoReplacementAnswers({ db: input.db, snapshot: replacement, projection, now })
+          ? await prepareLegacyVideoReplacementAnswers({ snapshot: replacement, projection, now })
           : null;
         const managed = replacement
           ? { ...projection.managed, created_at: replacement.video.created_at as number }

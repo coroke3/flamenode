@@ -1746,7 +1746,9 @@ test("MIG-0645 U02al Hono: new video rows, provenance, queue and receipt are ato
     assert.ok(serverDb);
     const snapshotReads = stats.reads;
     const snapshotBatches = stats.batches;
-    const snapshot = await readLegacyVideoReplacementSnapshot(serverDb, video.id);
+    const snapshot = await readLegacyVideoReplacementSnapshot(
+      serverDb, video.id, ["created-video:ev-1:question-0"],
+    );
     assert.equal(stats.reads - snapshotReads, 1);
     assert.equal(stats.batches, snapshotBatches);
     assert.deepEqual(snapshot.proof, proof);
@@ -1754,6 +1756,7 @@ test("MIG-0645 U02al Hono: new video rows, provenance, queue and receipt are ato
     assert.equal(snapshot.raw.proof.length, 1);
     assert.equal(snapshot.beforeAnswers.length, 1);
     assert.equal(snapshot.beforeMetadata.length, 1);
+    assert.equal(snapshot.answerProofs.length, 1);
     await assert.rejects(readLegacyVideoReplacementSnapshot(serverDb, "missing-video"));
 
     // Change one field in each of the seven independently hashed projections.
@@ -1848,13 +1851,13 @@ test("MIG-0645 U02al Hono: new video rows, provenance, queue and receipt are ato
     // Changed answers require a separate unique latest legacy audit, even
     // though the seven-digest entity proof is still valid.
     const now = saved.updated_at + 10;
-    const answerInput = { db: serverDb, snapshot, projection: projected, now };
+    const answerInput = { snapshot, projection: projected, now };
     const beforeUnchangedReads = stats.reads;
     const unchanged = await prepareLegacyVideoReplacementAnswers(answerInput);
     assert.deepEqual(unchanged.nextAnswers, snapshot.beforeAnswers);
     assert.equal(unchanged.replaced.length, 0);
     assert.equal(unchanged.created.length, 0);
-    assert.equal(stats.reads, beforeUnchangedReads, "no extra proof read for unchanged answers");
+    assert.equal(stats.reads, beforeUnchangedReads, "unchanged answers use the combined snapshot read");
     const omitted = await prepareLegacyVideoReplacementAnswers({
       ...answerInput, projection: { ...projected, nextAnswers: [] },
     });
@@ -1870,7 +1873,7 @@ test("MIG-0645 U02al Hono: new video rows, provenance, queue and receipt are ato
     const changedInput = { ...answerInput, projection: { ...projected, nextAnswers: incoming } };
     const proofReads = stats.reads;
     const prepared = await prepareLegacyVideoReplacementAnswers(changedInput);
-    assert.equal(stats.reads - proofReads, 1);
+    assert.equal(stats.reads - proofReads, 0, "answer proofs were preloaded with the video snapshot");
     assert.equal(prepared.replaced.length, 1);
     assert.equal(prepared.created.length, 1);
     assert.equal(prepared.replaced[0].after.created_at, snapshot.beforeAnswers[0].created_at);
@@ -1886,7 +1889,8 @@ test("MIG-0645 U02al Hono: new video rows, provenance, queue and receipt are ato
       auditColumns.map((column) => column === "id" ? "?" : quote(column)).join(", ") +
       " FROM audit_logs WHERE id = ?");
     cloneAnswerProof.run("competing-answer-proof", answerProofId);
-    await assert.rejects(prepareLegacyVideoReplacementAnswers(changedInput), "tied answer proofs are ambiguous");
+    const tiedPrepared = await prepareLegacyVideoReplacementAnswers(changedInput);
+    assert.deepEqual(tiedPrepared.proofs, prepared.proofs, "preloaded proof is checked by the atomic assertion after read-time races");
     const answerGuardedBatch = async () => runBoundTestBatch(serverDb, [
       buildLegacyVideoReplacementAssertion(serverDb, snapshot),
       buildLegacyAnswerReplacementAssertion(serverDb, prepared),
@@ -1895,7 +1899,8 @@ test("MIG-0645 U02al Hono: new video rows, provenance, queue and receipt are ato
     await assert.rejects(answerGuardedBatch(), /malformed JSON/i, "a tied answer audit appearing after read must abort");
     sqlite.prepare("UPDATE audit_logs SET created_at = created_at + 1, context = ? WHERE id = ?")
       .run("manual-edit", "competing-answer-proof");
-    await assert.rejects(prepareLegacyVideoReplacementAnswers(changedInput), "later non-import audit blocks replacement");
+    assert.deepEqual((await prepareLegacyVideoReplacementAnswers(changedInput)).proofs, prepared.proofs,
+      "the atomic assertion, not a second read, catches a later manual audit");
     await assert.rejects(answerGuardedBatch(), /malformed JSON/i, "newer non-import audit appearing after read must abort");
     assert.equal(sqlite.prepare("SELECT score FROM videos WHERE id = ?").get(video.id).score, 0);
     sqlite.prepare("DELETE FROM audit_logs WHERE id = ?").run("competing-answer-proof");
@@ -1904,7 +1909,8 @@ test("MIG-0645 U02al Hono: new video rows, provenance, queue and receipt are ato
     const originalAfterJson = prepared.proofs[0].after_json;
     sqlite.prepare("UPDATE audit_logs SET after_json = ? WHERE id = ?")
       .run(JSON.stringify({ ...snapshot.beforeAnswers[0], updated_at: now }), answerProofId);
-    await assert.rejects(prepareLegacyVideoReplacementAnswers(changedInput), "mismatched answer snapshot blocks replacement");
+    assert.deepEqual((await prepareLegacyVideoReplacementAnswers(changedInput)).proofs, prepared.proofs,
+      "the atomic assertion catches a changed proof payload after the snapshot");
     await assert.rejects(answerGuardedBatch(), /malformed JSON/i, "changed proof payload must abort");
     sqlite.prepare("UPDATE audit_logs SET after_json = ? WHERE id = ?").run(originalAfterJson, answerProofId);
     await assert.rejects(prepareLegacyVideoReplacementAnswers({
@@ -2017,7 +2023,7 @@ test("MIG-0645 U02al Hono: new video rows, provenance, queue and receipt are ato
     assert.equal(result.result.replaced.videos, 1);
     assert.equal(result.result.complete, true);
     assert.equal(stats.batches - beforeReplace, 1);
-    assert.equal(stats.reads - beforeReplaceReads, 5, "replacement adds only entity and changed-answer proof reads");
+    assert.equal(stats.reads - beforeReplaceReads, 4, "video and answer proofs share one bounded snapshot read");
     const replacedVideo = sqlite.prepare("SELECT * FROM videos WHERE id = ?").get(video.id);
     assert.equal(replacedVideo.title, "Replaced video");
     assert.equal(replacedVideo.created_at, saved.created_at);
