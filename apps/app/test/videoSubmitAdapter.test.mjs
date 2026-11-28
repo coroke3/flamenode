@@ -2,18 +2,18 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { canRestoreDraftField, isSectionDisabled, isFieldDisabled, restoreVideoDraftControls, buildVideoDraftControlledState } from "../.test-dist/apps/app/src/components/forms/videoFormDraftFields.js";
-import {
-  mapVideoSubmitMode,
-  submitVideoForm,
-  videoMemberAdapterProps,
-} from "../.test-dist/apps/app/src/components/forms/videoSubmitAdapter.js";
+import { isSectionDisabled, isFieldDisabled, restoreVideoDraftControls, buildVideoDraftControlledState } from "../.test-dist/apps/app/src/components/forms/videoFormDraftFields.js";
+import { submitVideoForm } from "../.test-dist/apps/app/src/components/forms/videoSubmitAdapter.js";
 
-test("U02a: CURRENT free/slot/edit maps exactly to injected free/slot/update", () => {
-  assert.deepEqual(
-    ["free", "slot", "edit"].map((mode) => mapVideoSubmitMode(mode)),
-    ["free", "slot", "update"],
-  );
+test("U02a: CURRENT free/slot/edit maps exactly to injected free/slot/update", async () => {
+  const actual = [];
+  for (const mode of ["free", "slot", "edit"]) {
+    await submitVideoForm(mode, new FormData(), async (wireMode) => {
+      actual.push(wireMode);
+      return { ok: true };
+    });
+  }
+  assert.deepEqual(actual, ["free", "slot", "update"]);
   const legacy = readFileSync(new URL("../../../src/components/forms/VideoForm.tsx", import.meta.url), "utf8");
   assert.match(legacy, /mode === "slot"\s*\? submitSlotVideo/);
   assert.match(legacy, /mode === "edit"\s*\? updateVideo/);
@@ -34,10 +34,10 @@ test("U02a: preserves FormData identity, repeated entries, ordering and File dat
   let calls = 0;
   const sent = [...data.entries()];
   const response = { ok: true, message: "投稿完了", videoId: "v-1" };
-  for (const mode of ["free", "slot", "edit"]) {
+  for (const [mode, expectedMode] of [["free", "free"], ["slot", "slot"], ["edit", "update"]]) {
     const returned = await submitVideoForm(mode, data, async (actualMode, actualData) => {
       calls++;
-      assert.equal(actualMode, mapVideoSubmitMode(mode));
+      assert.equal(actualMode, expectedMode);
       assert.strictEqual(actualData, data, "must not rebuild FormData and drop repeated fields");
       assert.deepEqual([...actualData.entries()], sent);
       assert.strictEqual(actualData.get("icon_file"), file);
@@ -89,75 +89,7 @@ test("U02a: submission adapter contains no network, Next Server Action or direct
   assert.doesNotMatch(source, /\bfetch\s*\(|localStorage|indexedDB|navigator\./);
 });
 
-test("U02b: mandatory member adapters are exact callable references, including AbortSignal", async () => {
-  const controller = new AbortController();
-  const seen = [];
-  const searchOutput = {
-    items: [{ id: "x_A", x_name: "Alice", score: 0.8, matchedBy: "name" }],
-    hasMore: true,
-    nextOffset: 20,
-    hint: null,
-  };
-  const ports = {
-    submit: async () => ({ ok: true }),
-    searchXUsers: async (q, offset, signal) => {
-      seen.push({ q, offset, signal });
-      return searchOutput;
-    },
-    applyPermissionBatch: async () => ({ ok: true }),
-  };
-  const member = videoMemberAdapterProps(ports);
-  assert.deepEqual(Object.keys(member), ["searchXUsers", "applyPermissionBatch"]);
-  assert.strictEqual(member.searchXUsers, ports.searchXUsers);
-  assert.strictEqual(member.applyPermissionBatch, ports.applyPermissionBatch);
-  assert.ok(!("submit" in member), "member component cannot invoke the VideoForm submit port");
-  assert.strictEqual(await member.searchXUsers("@Alice", 20, controller.signal), searchOutput);
-  assert.deepEqual(seen, [{ q: "@Alice", offset: 20, signal: controller.signal }]);
-  controller.abort();
-  assert.equal(seen[0].signal.aborted, true, "no AbortSignal replacement");
-});
-
-test("U02b: member permission batch forwards all intents and privilege mode unchanged", async () => {
-  const input = {
-    videoId: "v-17",
-    edit_privilege_mode: "event",
-    notify: true,
-    intents: [
-      { x_user_id: "x_A", display_name: "Alice", intent: "on" },
-      { x_user_id: "x_B", display_name: "Bob", intent: "off" },
-    ],
-  };
-  const denied = { ok: false, message: "forbidden" };
-  let calls = 0;
-  const ports = {
-    submit: async () => ({ ok: true }),
-    searchXUsers: async () => ({ items: [] }),
-    applyPermissionBatch: async (actual) => {
-      calls += 1;
-      assert.strictEqual(actual, input, "do not clone or strip permission intents");
-      return denied;
-    },
-  };
-  const member = videoMemberAdapterProps(ports);
-  const outcome = await member.applyPermissionBatch(input);
-  assert.strictEqual(outcome, denied, "do not turn permission failure into success");
-  assert.equal(calls, 1);
-  assert.equal(input.intents[1].intent, "off");
-});
-
-test("U02b: member adapter exceptions are not swallowed by the port forwarder", async () => {
-  const sentinel = new Error("synthetic backend failure");
-  const ports = {
-    submit: async () => ({ ok: true }),
-    searchXUsers: async () => { throw sentinel; },
-    applyPermissionBatch: async () => { throw sentinel; },
-  };
-  const member = videoMemberAdapterProps(ports);
-  await assert.rejects(member.searchXUsers("x", 0, new AbortController().signal), (e) => e === sentinel);
-  await assert.rejects(member.applyPermissionBatch({ videoId: "v1", notify: true, intents: [] }), (e) => e === sentinel);
-});
-
-test("MIG-0714 part A: draft restoration respects every CURRENT section and field lock", () => {
+test("MIG-0714 part A: public native restoration respects every CURRENT section and field lock", async () => {
   const groups = {
     submitter: ["display_name", "profile_text", "icon_url", "youtube_channel_url", "other_social_links"],
     video: ["title", "scheduled_time", "music", "music_reference_url", "credit", "youtube_url", "part"],
@@ -168,31 +100,46 @@ test("MIG-0714 part A: draft restoration respects every CURRENT section and fiel
     name, section, name === "members" || name === "chapters" ? name : `${section}.${name}`,
   ]));
   entries.push(["event_ids", null, "event_ids"]);
+  const cases = [];
   for (const [name, section, field] of entries) {
-    assert.equal(canRestoreDraftField(name, undefined, undefined), true, name);
-    for (const disabled of Object.keys(groups)) {
-      assert.equal(canRestoreDraftField(name, [disabled], []), section !== disabled, `${name}: ${disabled}`);
-    }
-    for (const [, , disabled] of entries) {
-      assert.equal(canRestoreDraftField(name, [], [disabled]), field !== disabled, `${name}: ${disabled}`);
-    }
-    assert.equal(canRestoreDraftField(name, Object.keys(groups), [field]), false, name);
+    cases.push([name, undefined, undefined, true]);
+    for (const disabled of Object.keys(groups)) cases.push([name, [disabled], [], section !== disabled]);
+    for (const [, , disabled] of entries) cases.push([name, [], [disabled], field !== disabled]);
+    cases.push([name, Object.keys(groups), [field], false]);
   }
-  // Chapters and membership have separate field locks in CURRENT.
-  assert.equal(canRestoreDraftField("chapters", [], ["members"]), true);
-  assert.equal(canRestoreDraftField("members", [], ["chapters"]), true);
+  cases.push(["chapters", [], ["members"], true], ["members", [], ["chapters"], true]);
+  const { JSDOM } = await import("jsdom");
+  const dom = new JSDOM("<form><input></form>");
+  try {
+    const form = dom.window.document.querySelector("form"), control = form.querySelector("input");
+    // Named controls probe public field filtering; structured patch observations follow below.
+    for (const [name, sections, fields, restored] of cases) {
+      control.name = name;
+      control.value = "current value";
+      restoreVideoDraftControls(form, { [name]: "draft value" }, sections, fields);
+      assert.equal(control.value, restored ? "draft value" : "current value", `${name}: ${sections} / ${fields}`);
+    }
+  } finally { dom.window.close(); }
 });
 
-test("MIG-0714 part A: omitted, unrelated and exact lock names keep CURRENT semantics", () => {
+test("MIG-0714 part A: omitted, unrelated and exact lock names keep CURRENT semantics", async () => {
   assert.equal(isSectionDisabled(undefined, "video"), false);
   assert.equal(isFieldDisabled(undefined, "video.title"), false);
   assert.equal(isSectionDisabled(["video"], "video"), true);
   assert.equal(isFieldDisabled(["video.title"], "video.title"), true);
   assert.equal(isFieldDisabled(["VIDEO.TITLE", "video"], "video.title"), false);
-  assert.equal(canRestoreDraftField("title", ["VIDEO"], ["title"]), true);
-  assert.equal(canRestoreDraftField("event_ids", ["video", "members"], []), true);
-  // The draft parser/caller limits actual restored fields; this helper is not authorization.
-  assert.equal(canRestoreDraftField("unknown_field", ["video"], ["unknown_field"]), true);
+  const { JSDOM } = await import("jsdom");
+  const dom = new JSDOM('<form><input name="title"><input name="event_ids"><input name="unknown_field"></form>');
+  try {
+    const form = dom.window.document.querySelector("form");
+    restoreVideoDraftControls(form, { title: "draft title" }, ["VIDEO"], ["title"]);
+    assert.equal(form.elements.namedItem("title").value, "draft title");
+    restoreVideoDraftControls(form, { event_ids: "draft event" }, ["video", "members"], []);
+    assert.equal(form.elements.namedItem("event_ids").value, "draft event");
+    // The caller/parser limits actual fields; public restoration is not authorization.
+    restoreVideoDraftControls(form, { unknown_field: "draft unknown" }, ["video"], ["unknown_field"]);
+    assert.equal(form.elements.namedItem("unknown_field").value, "draft unknown");
+  } finally { dom.window.close(); }
 });
 
 test("MIG-0714 part A: restore native controls with CURRENT locks and repeated-value semantics", async () => {
@@ -839,7 +786,27 @@ test("MIG-0714 B03: controlled edits, event selection and real member notificati
       }
       assert.deepEqual(changes, [["jump", "submitter"], ["jump", "work"], ["jump", "youtube"]]);
     });
-    const props = videoSectionDefaults();
+    const signalController = new AbortController(), searchCalls = [];
+    const searchOutput = { items: [{ id: "x_A", x_name: "Alice", score: 0.8, matchedBy: "name" }], hasMore: true, nextOffset: 20, hint: null };
+    const permissionInput = { videoId: "v-17", edit_privilege_mode: "event", notify: true, intents: [
+      { x_user_id: "x_A", display_name: "Alice", intent: "on" },
+      { x_user_id: "x_B", display_name: "Bob", intent: "off" },
+    ] };
+    const denied = { ok: false, message: "forbidden" }, sentinel = new Error("synthetic backend failure");
+    let permissionCalls = 0, rejectPorts = false;
+    const props = { ...videoSectionDefaults(), submit: async () => ({ ok: true }),
+      searchXUsers: async (q, offset, signal) => {
+        if (rejectPorts) throw sentinel;
+        searchCalls.push({ q, offset, signal });
+        return searchOutput;
+      },
+      applyPermissionBatch: async (actual) => {
+        if (rejectPorts) throw sentinel;
+        permissionCalls++;
+        assert.strictEqual(actual, permissionInput, "do not clone or strip permission intents");
+        return denied;
+      },
+    };
     let memberElement;
     function findMember(node) {
       if (!React.isValidElement(node)) return;
@@ -852,6 +819,19 @@ test("MIG-0714 B03: controlled edits, event selection and real member notificati
     assert.strictEqual(memberElement.props.searchXUsers, props.searchXUsers);
     assert.strictEqual(memberElement.props.applyPermissionBatch, props.applyPermissionBatch);
     assert.equal(memberElement.props.permissionTargetVideoId, "video-a");
+    assert.ok(!("submit" in memberElement.props), "member component cannot invoke the form submit port");
+    assert.strictEqual(await memberElement.props.searchXUsers("@Alice", 20, signalController.signal), searchOutput);
+    assert.deepEqual(searchCalls, [{ q: "@Alice", offset: 20, signal: signalController.signal }]);
+    signalController.abort();
+    assert.equal(searchCalls[0].signal.aborted, true, "no AbortSignal replacement");
+    assert.strictEqual(await memberElement.props.applyPermissionBatch(permissionInput), denied);
+    assert.equal(permissionCalls, 1);
+    assert.deepEqual(permissionInput, { videoId: "v-17", edit_privilege_mode: "event", notify: true, intents: [
+      { x_user_id: "x_A", display_name: "Alice", intent: "on" }, { x_user_id: "x_B", display_name: "Bob", intent: "off" },
+    ] });
+    rejectPorts = true;
+    await assert.rejects(memberElement.props.searchXUsers("x", 0, new AbortController().signal), (error) => error === sentinel);
+    await assert.rejects(memberElement.props.applyPermissionBatch(permissionInput), (error) => error === sentinel);
   } finally {
     dom.window.close();
     for (const [key, descriptor] of previous) {
@@ -910,4 +890,38 @@ test("MIG-0714 B03R: confirmation and side preview preserve CURRENT summaries, c
   }
   const source = readFileSync(new URL("../src/components/forms/VideoFormReviewPanels.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(source, /\bfetch\s*\(|localStorage|indexedDB|from\s+["']next(?:\/|["'])|@\/lib\/actions/);
+});
+
+test("MIG-0714 B04: complete form preserves all-mode native controls, hidden wizard fields and repeated event answers", async () => {
+  const React = await import("react"), { renderToStaticMarkup } = await import("react-dom/server");
+  const { MemoryRouter } = await import("react-router-dom"), { JSDOM } = await import("jsdom");
+  const { VideoForm } = await import("../.test-dist/apps/app/src/components/forms/VideoForm.js");
+  const members = videoSectionDefaults().members;
+  const question = { id: "choice", question_key: "choice", label: "Choice", type: "checkbox", options: ["A", "B"], required: false };
+  const events = ["event-a", "event-b"].map(id => ({ id, title: id, parts_json: '["Part A"]', custom_questions: [question], video_form_settings_json: '{"stage_permission_fields":[{"id":"rights","label":"Rights","required":false}]}' }));
+  for (const mode of ["free", "slot", "edit"]) {
+    const initial = { display_name: "Alice", creator_x_user_id: "alice", title: "Native title", youtube_url: "https://youtu.be/dQw4w9WgXcQ", updated_at: 42,
+      intro_comment: "Native introduction", is_collab: true, members, event_ids: events.map(event => event.id), part: "Part A",
+      custom_answers: { "event-a:choice": ["A", "B", "orphan"], "event-b:choice": ["B"] } };
+    const markup = renderToStaticMarkup(React.createElement(MemoryRouter, null, React.createElement(VideoForm, {
+      mode, initial, activeXId: "@ALICE", activeXSnapshot: "@Snapshot", eventOptions: events,
+      slotId: mode === "slot" ? "slot-1" : undefined, videoId: mode === "edit" ? "video-1" : undefined, editPrivilegeMode: "admin",
+      submit: async () => assert.fail("render does not submit"), onRefresh: () => assert.fail("render does not refresh"),
+      searchXUsers: async () => assert.fail("render does not search"), applyPermissionBatch: async () => assert.fail("render does not change permissions"),
+    })));
+    const dom = new JSDOM(markup);
+    try {
+      const form = dom.window.document.querySelector("form"), data = new dom.window.FormData(form);
+      assert.equal(dom.window.document.querySelectorAll("form").length, 1);
+      assert.equal(form.noValidate, mode !== "edit"); assert.equal(form.querySelectorAll("[hidden].vform-stepPanel").length, mode === "edit" ? 0 : 3);
+      assert.equal(data.get("title"), initial.title); assert.equal(data.get("intro_comment"), initial.intro_comment);
+      assert.equal(data.get("event_ids"), "event-a,event-b"); assert.equal(data.get("part"), "Part A");
+      assert.deepEqual(JSON.parse(data.get("members_json")), members); assert.deepEqual(data.getAll("is_collab"), ["false", "true"]);
+      assert.deepEqual(data.getAll("custom_answer:event-a:choice"), ["A", "B"]); assert.deepEqual(data.getAll("custom_answer:event-b:choice"), ["B"]);
+      assert.equal(data.get("active_x_snapshot"), mode === "edit" ? null : "snapshot");
+      assert.equal(data.get("revision"), mode === "edit" ? "42" : null);
+      assert.equal(data.get("edit_privilege_mode"), mode === "edit" ? "admin" : null);
+      assert.equal(data.get("slot_id"), mode === "slot" ? "slot-1" : null); assert.equal(data.get("video_id"), mode === "edit" ? "video-1" : null);
+    } finally { dom.window.close(); }
+  }
 });

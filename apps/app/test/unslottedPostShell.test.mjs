@@ -6,7 +6,7 @@ import test from "node:test";
 import { JSDOM } from "jsdom";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://flamenode.test/" });
-for (const key of ["window", "document", "navigator", "HTMLElement", "Node"]) {
+for (const key of ["window", "document", "navigator", "HTMLElement", "Node", "HTMLInputElement", "HTMLSelectElement", "HTMLTextAreaElement", "FormData", "File", "Blob"]) {
   Object.defineProperty(globalThis, key, {
     configurable: true,
     value: key === "window" ? dom.window : dom.window[key],
@@ -1661,3 +1661,345 @@ for (const interveningOwners of [63, 64]) {
     }
   });
 }
+
+// B04 uses the actual full form, actual member editor and shell, with only the
+// external submit port deferred. Browser evidence separately exercises multipart HTTP.
+const { VideoForm } = await import("../.test-dist/apps/app/src/components/forms/VideoForm.js");
+const { UnslottedPostForm } = await import("../.test-dist/apps/app/src/components/forms/UnslottedPostForm.js");
+const { MemoryRouter, useLocation } = await import("react-router-dom");
+dom.window.requestAnimationFrame = callback => dom.window.setTimeout(callback, 0);
+dom.window.cancelAnimationFrame = id => dom.window.clearTimeout(id);
+dom.window.HTMLElement.prototype.scrollIntoView = () => {};
+const fullInitial = {
+  title: "Before", display_name: "Alice", creator_x_user_id: "alice", youtube_url: "https://youtu.be/dQw4w9WgXcQ",
+  intro_comment: "Introduction", other_social_links: '[{"type":"X","url":"https://x.com/alice"}]', updated_at: 42,
+  is_collab: true, members: [
+    { name: "Alice", x_user_id: "alice", role: "映像", comment: "", chapters: [] },
+    { name: "Bob", x_user_id: "bob", role: "作画", comment: "", chapters: [] },
+  ], event_ids: [],
+};
+const fullKeys = (x = "alice", mode = "free") => [
+  `fn:draft:u1:${mode === "edit" ? "video-edit:v1:normal" : `video-free:${x}`}:video-form-v1`,
+  `fn:draft:u1:unslotted-shell:${x}:unslotted-shell-v1`,
+];
+const formButton = (container, label) => [...container.querySelectorAll("button")].find(node => node.textContent.trim() === label);
+const inputValue = (node, value) => {
+  Object.getOwnPropertyDescriptor(node.tagName === "TEXTAREA" ? dom.window.HTMLTextAreaElement.prototype : dom.window.HTMLInputElement.prototype, "value").set.call(node, value);
+  node.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+};
+async function withFullForm(options, check) {
+  dom.window.localStorage.clear();
+  const container = dom.window.document.createElement("div"); dom.window.document.body.append(container);
+  const root = createRoot(container), requests = [], removed = [];
+  const originalRemove = dom.window.Storage.prototype.removeItem;
+  dom.window.Storage.prototype.removeItem = function (key) { removed.push(key); return originalRemove.call(this, key); };
+  let refreshes = 0, notifications = 0, successes = 0;
+  let config = { initial: structuredClone(fullInitial), mode: "free", activeXId: "alice", draftAuthUserId: "u1", videoId: "v1",
+    eventOptions: [], disabledSections: [], disabledFields: [], xIdOptions: [],
+    submit: (mode, data) => new Promise((resolve, reject) => requests.push({ mode, data, resolve, reject })),
+    searchXUsers: async () => ({ items: [], hasMore: false }), applyPermissionBatch: async () => ({ ok: false }),
+    onRefresh: () => refreshes++, onFormStateChanged: () => notifications++, onSubmitSuccess: () => successes++, ...options };
+  function Location() { return React.createElement("output", { "data-location": true }, useLocation().pathname + useLocation().search); }
+  const render = async (patch = {}, transition = false) => {
+    config = { ...config, ...patch };
+    const update = () => root.render(React.createElement(MemoryRouter, null,
+      React.createElement(config.Component ?? (config.shell ? UnslottedPostForm : VideoForm), config), React.createElement(Location)));
+    await act(async () => { if (transition) React.startTransition(update); else update(); });
+  };
+  const h = { container, requests, removed, root, render, config: () => config,
+    counters: () => ({ refreshes, notifications, successes }),
+    data: () => new dom.window.FormData(container.querySelector("form")),
+    change: (selector, value) => act(async () => inputValue(container.querySelector(selector), value)),
+    click: selector => act(async () => container.querySelector(selector).click()),
+    button: label => act(async () => { const button = formButton(container, label); assert.ok(button, label); button.click(); }),
+    pagehide: () => act(async () => dom.window.dispatchEvent(new dom.window.Event("pagehide"))),
+    wait: (ms = 550) => act(async () => new Promise(resolve => setTimeout(resolve, ms))),
+    submit: () => act(async () => container.querySelector("form").dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }))),
+    confirm: async () => {
+      for (let i = 0; i < 3; i++) await h.submit();
+      assert.equal(requests.length, 0, "implicit Enter only advances the hidden-but-mounted wizard");
+      await h.submit(); assert.equal(requests.length, 0, "confirmation still requires its explicit button");
+      await h.button("提出する");
+    },
+  };
+  try { await render(); await check(h); }
+  finally {
+    await act(async () => { root.unmount(); for (const request of requests) request.resolve({ ok: false }); });
+    dom.window.Storage.prototype.removeItem = originalRemove; container.remove(); dom.window.localStorage.clear();
+  }
+}
+
+test("B04 #703: real native/member edits preserve both drafts continuously after old success; current success stays clear", async () => {
+  await withFullForm({ shell: true }, async h => {
+    await act(async () => selected(h.container, "none").click());
+    await h.change("#title", "Submitted title"); await h.pagehide(); await h.confirm();
+    assert.equal(h.requests.length, 1); assert.equal(h.requests[0].mode, "free");
+    assert.deepEqual(JSON.parse(h.requests[0].data.get("members_json")).map(x => x.x_user_id), ["alice", "bob"]);
+    await h.click('[aria-label="2人目を上へ移動"]');
+    await h.click('[aria-label="2人目を削除"]'); await h.button("行を追加");
+    await act(async () => inputValue(h.container.querySelectorAll('input[placeholder="表示名"]')[1], "Cara"));
+    await h.change("#title", "New title"); await h.change("#intro_comment", "New introduction"); await h.pagehide();
+    const keys = fullKeys(); for (const key of keys) assert.ok(dom.window.localStorage.getItem(key));
+    h.removed.length = 0;
+    await act(async () => h.requests[0].resolve({ ok: true, videoId: "saved" }));
+    assert.deepEqual(h.removed, [], "no remove/recreate gap is allowed for either newer draft");
+    await h.wait(); assert.deepEqual(h.removed, []);
+    const saved = JSON.parse(dom.window.localStorage.getItem(keys[0])).value;
+    assert.equal(saved.fields.title, "New title"); assert.equal(saved.fields.intro_comment, "New introduction");
+    assert.deepEqual(saved.members.map(x => x.name), ["Bob", "Cara"]);
+    assert.ok(dom.window.localStorage.getItem(keys[1]));
+    await h.button("提出する"); assert.equal(h.requests.length, 2);
+    assert.equal(h.requests[1].data.get("title"), "New title");
+    await act(async () => h.requests[1].resolve({ ok: true }));
+    await h.pagehide(); await h.wait();
+    for (const key of keys) assert.equal(dom.window.localStorage.getItem(key), null, "current success must stay cleared after lifecycle/debounce");
+    assert.deepEqual(h.removed.sort(), keys.sort());
+  });
+});
+
+test("B04: equivalent fresh props do not replay older drafts or turn passive initial echoes into edits", async () => {
+  await withFullForm({ mode: "edit" }, async h => {
+    await h.change("#title", "Stored title"); await h.pagehide();
+    await h.change("#title", "Unsaved latest"); await h.click('[aria-label="2人目を上へ移動"]');
+    const count = h.counters().notifications;
+    const fresh = () => ({ initial: structuredClone(fullInitial), eventOptions: [], disabledSections: [], disabledFields: [], xIdOptions: [] });
+    await h.render(fresh()); assert.equal(h.data().get("title"), "Unsaved latest");
+    assert.deepEqual(JSON.parse(h.data().get("members_json")).map(x => x.x_user_id), ["bob", "alice"]);
+    assert.equal(h.counters().notifications, count);
+    await act(async () => { for (let i = 0; i < 2; i++) h.container.querySelector("form").dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true })); });
+    assert.equal(h.requests.length, 1, "same-turn submits are rejected before pending can commit");
+    let replacementCalls = 0;
+    await h.render({ ...fresh(), onSubmitSuccess: () => replacementCalls++ });
+    assert.equal(h.counters().notifications, count, "nonempty social links and members must not emit passive edits");
+    await act(async () => h.requests[0].resolve({ ok: true })); await h.pagehide(); await h.wait();
+    assert.equal(h.counters().successes, 1, "use the request-start callback, not a later ref");
+    assert.equal(replacementCalls, 0); assert.equal(h.counters().refreshes, 1);
+    assert.equal(dom.window.localStorage.getItem(fullKeys("alice", "edit")[0]), null);
+  });
+});
+
+for (const change of ["permission", "selection", "withdrawal", "identity", "returning identity"]) {
+  test(`B04: pending response cannot clear newer ${change} ownership/authority`, async () => {
+    const shell = change === "selection" || change === "withdrawal";
+    await withFullForm({ shell, eventOptions: shell ? [eventA] : [] }, async h => {
+      if (shell) {
+        await act(async () => selected(h.container, change === "withdrawal" ? "event" : "none").click());
+        if (change === "withdrawal") await act(async () => setSelect(h.container.querySelector("#unslotted_event_choice"), eventA.id));
+      }
+      await h.change("#title", "Draft before response"); await h.confirm();
+      if (change === "permission") await h.render({ disabledFields: ["video.title"] });
+      if (change === "selection") {
+        await act(async () => selected(h.container, "event").click());
+        await act(async () => setSelect(h.container.querySelector("#unslotted_event_choice"), eventA.id));
+      }
+      if (change === "withdrawal") await h.render({ eventOptions: [] });
+      if (change.includes("identity")) {
+        await h.render({ activeXId: "bob" });
+        await h.change("#title", "Bob current draft"); await h.pagehide();
+        if (change === "returning identity") { await h.render({ activeXId: "alice" }); await h.change("#title", "Returned Alice"); await h.pagehide(); }
+      }
+      await h.pagehide(); h.removed.length = 0;
+      const keys = Object.keys(dom.window.localStorage);
+      await act(async () => h.requests[0].resolve({ ok: true })); await h.wait();
+      assert.deepEqual(h.removed, [], "an old response must never temporarily remove a retained draft");
+      for (const key of keys) assert.ok(dom.window.localStorage.getItem(key));
+      assert.equal(h.counters().refreshes, 0);
+    });
+  });
+}
+
+test("B04: optional slot validates nonempty URL, optional edit delegates it; failures retain text and current guard redirects", async () => {
+  for (const [mode, url, sends] of [["slot", "", true], ["slot", "invalid", false], ["free", "invalid", false], ["edit", "invalid", true]]) {
+    await withFullForm({ mode, slotId: "s1", initial: { ...fullInitial, youtube_url: mode === "edit" ? "" : url } }, async h => {
+      if (mode === "edit") await h.change("#youtube_url", url);
+      await h.change("#title", "Keep on failure");
+      if (mode === "edit") await h.submit();
+      else { for (let i = 0; i < 3; i++) await h.submit(); if (sends) await h.button("提出する"); }
+      assert.equal(h.requests.length, sends ? 1 : 0, `${mode}/${url}`);
+      if (!sends) { assert.match(h.container.textContent, /YouTube/); return; }
+      assert.equal(h.requests[0].mode, mode === "edit" ? "update" : "slot");
+      assert.equal(h.requests[0].data.get("youtube_url"), url);
+      await act(async () => h.requests[0].resolve({ ok: false, reason: "duplicate_youtube_id", message: "Already registered" }));
+      assert.match(h.container.textContent, /Already registered/); assert.equal(h.counters().refreshes, 0);
+      assert.ok(Object.values(dom.window.localStorage).some(raw => raw.includes("Keep on failure")));
+      if (mode === "edit") {
+        await h.submit(); const log = console.error; console.error = () => {};
+        try { await act(async () => h.requests[1].reject(new Error("transport down"))); } finally { console.error = log; }
+        assert.match(h.container.textContent, /予期しないエラー/);
+        await h.submit(); await act(async () => h.requests[2].resolve({ ok: false, reason: "tos_required" }));
+        assert.equal(h.container.querySelector("[data-location]").textContent, "/onboarding?next=%2F");
+      }
+    });
+  }
+});
+
+async function fileQueueController() {
+  const moduleUrl = new URL("../.test-dist/apps/app/src/components/forms/VideoForm.js", import.meta.url);
+  let source = readFileSync(moduleUrl, "utf8").replace(/from "([^"]+)"/g, (_, path) => `from ${JSON.stringify(path.startsWith(".") ? new URL(path, moduleUrl).href : import.meta.resolve(path))}`);
+  // Exercise the real controller and sections. Observe the existing crop-output
+  // callback only; deferred file-store I/O replaces IndexedDB scheduling here.
+  // The probe suppresses crop UI replay of that confirmed File; real crop,
+  // native file input and IndexedDB are separate Chromium acceptance evidence.
+  source = source.replace(/import \{ VideoFormSubmitterSection \} from ([^;]+);/, `import { VideoFormSubmitterSection as ActualSubmitterSection } from $1;
+function VideoFormSubmitterSection(props) { globalThis.__videoFileProbe.section = props; return React.createElement(ActualSubmitterSection, { ...props, restoredUploadFile: null }); }`);
+  source = source.replace(/import \{[^\n]+\} from "[^\n]+\/draftFileStore.js";/,
+    `const DRAFT_FILE_TTL_MS = 604800000;
+const cleanupExpiredDraftFiles = async () => 0;
+const loadDraftFile = key => globalThis.__videoFileProbe.load(key);
+const saveDraftFile = (key, file) => globalThis.__videoFileProbe.save(key, file);
+const deleteDraftFile = key => globalThis.__videoFileProbe.delete(key);`);
+  return (await import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`)).VideoForm;
+}
+
+test("B04: icon I/O orders same-key owners, drains accepted cleanup, and retains a queued upload across unrelated edits/failure", async () => {
+  const Component = await fileQueueController();
+  for (const scenario of ["success-remount", "success-unmount", "text-edit", "failed-tail", "metadata-refresh", "restore-waits", "queued-upload-remount", "cancel-remount", "invalidated-success-delete"]) {
+    const files = new Map(), operations = []; let release, delayed = true, loads = 0;
+    globalThis.__videoFileProbe = {
+      load: async key => { loads++; return scenario === "cancel-remount" ? files.get(key) ?? null : null; },
+      save: async (key, file) => {
+        operations.push(`start:${file.name}`);
+        if (delayed) { delayed = false; await new Promise((resolve, reject) => { release = failure => failure ? reject(new Error("blocked transaction failed")) : resolve(); }); }
+        files.set(key, file); operations.push(`saved:${file.name}`); return true;
+      },
+      delete: async key => { operations.push("delete"); files.delete(key); return true; },
+    };
+    try {
+      await withFullForm({ Component, mode: "edit" }, async h => {
+        const key = fullKeys("alice", "edit")[0] + ":icon";
+        await act(async () => globalThis.__videoFileProbe.section.handleUploadFileChange(new dom.window.File(["old"], "old.png")));
+        assert.equal(operations[0], "start:old.png");
+        if (scenario === "invalidated-success-delete") {
+          await act(async () => globalThis.__videoFileProbe.section.handleUploadFileChange(new dom.window.File(["new"], "new.png")));
+          await h.submit(); await act(async () => h.requests[0].resolve({ ok: true }));
+          await h.change("#title", "Edit after accepted success");
+        }
+        if (scenario.startsWith("success")) {
+          if (scenario === "success-unmount") await h.render({ onSubmitSuccess: () => h.root.render(null) });
+          await h.change("#title", "Submitted with icon"); await h.submit();
+          await h.render({ onSubmitSuccess: () => assert.fail("must use request-start callback") });
+          // Replacement callbacks cannot change this accepted request. In the
+          // unmount case, the captured callback departs before the queue drains.
+          await act(async () => h.requests[0].resolve({ ok: true }));
+          await act(async () => h.root.render(null));
+          if (scenario === "success-remount") await h.render({ onSubmitSuccess: () => {}, initial: { ...fullInitial, title: "New owner" } });
+        }
+        if (["restore-waits", "queued-upload-remount", "cancel-remount"].includes(scenario)) {
+          if (scenario === "cancel-remount") await act(async () => globalThis.__videoFileProbe.section.handleUploadFileChange(null));
+          if (scenario === "queued-upload-remount") await act(async () => globalThis.__videoFileProbe.section.handleUploadFileChange(new dom.window.File(["new"], "new.png")));
+          await h.pagehide(); await act(async () => h.root.render(null));
+          await h.render(); assert.equal(loads, 0, "restoration waits behind the unavoidable earlier write");
+        } else if (scenario !== "success-unmount" && scenario !== "invalidated-success-delete") {
+          await act(async () => globalThis.__videoFileProbe.section.handleUploadFileChange(new dom.window.File(["new"], "new.png")));
+          await h.change("#title", "Edit after icon selection");
+          if (scenario === "metadata-refresh") await h.render({ initial: { ...fullInitial, updated_at: 43 } });
+        }
+        assert.deepEqual(operations, ["start:old.png"], "no newer mutation may overtake active same-key I/O");
+        await act(async () => release(scenario === "failed-tail"));
+        if (scenario === "success-unmount") {
+          assert.equal(files.has(key), false); assert.equal(operations.at(-1), "delete", "accepted cleanup drains after departure with no successor");
+        } else if (scenario === "cancel-remount") {
+          assert.equal(globalThis.__videoFileProbe.section.restoredUploadFile, null, "a canceled old image must not return after same-key remount");
+          assert.equal(files.has(key), false, "the latest admitted cancellation drains before successor restoration");
+        } else if (scenario === "restore-waits") {
+          assert.equal(loads, 1); assert.equal(files.get(key).name, "old.png");
+        } else {
+          assert.equal(files.get(key).name, "new.png", scenario); assert.equal(operations.at(-1), "saved:new.png");
+          const deletion = operations.indexOf("delete");
+          assert.ok(deletion < operations.indexOf("start:new.png"), "an admitted earlier delete can only precede the successor save, never erase it afterward");
+          if (scenario === "invalidated-success-delete") assert.equal(deletion, -1, "later text invalidates accepted cleanup without discarding the earlier queued upload");
+        }
+      });
+    } finally { release?.(); delete globalThis.__videoFileProbe; }
+  }
+});
+
+test("B04: accepted edit success synchronously unmounts without refresh or draft resurrection", async () => {
+  await withFullForm({ mode: "edit" }, async h => {
+    await h.render({ onSubmitSuccess: () => { h.root.render(null); } });
+    await h.change("#title", "Saved edit"); await h.submit();
+    await act(async () => h.requests[0].resolve({ ok: true }));
+    await h.pagehide(); await h.wait();
+    assert.equal(h.container.querySelector("form"), null);
+    assert.equal(h.counters().refreshes, 0, "refresh belongs to the still-mounted editor only");
+    assert.equal(dom.window.localStorage.getItem(fullKeys("alice", "edit")[0]), null);
+  });
+});
+
+test("B04: actual first channel apply and profile reapply invalidate pending success without initial echo notifications", async () => {
+  for (const operation of ["channel", "profile"]) {
+    await withFullForm({ mode: "edit", defaultProfile: { display_name: "Default name", youtube_channel_url: "https://www.youtube.com/@default" } }, async h => {
+      assert.equal(h.counters().notifications, 0);
+      await h.change("#title", "Pending title"); await h.submit();
+      if (operation === "profile") await h.button("現在の既定プロフィールを再適用");
+      else {
+        await act(async () => formButton(h.container.querySelector(".ychan-root"), "設定").click());
+        await h.change(".ychan-root input:not([type=hidden])", "https://www.youtube.com/@newchannel");
+        await h.button("適用");
+      }
+      assert.ok(h.counters().notifications > 0);
+      await h.pagehide(); h.removed.length = 0;
+      await act(async () => h.requests[0].resolve({ ok: true }));
+      assert.deepEqual(h.removed, []); assert.equal(h.counters().refreshes, 0);
+      assert.equal(h.data().get("youtube_channel_url"), operation === "profile" ? "https://www.youtube.com/@default" : "https://www.youtube.com/@newchannel");
+    });
+  }
+});
+
+test("B04: exact free-key exception preserves nullish/fallback/slot/edit rules and never adopts ambiguous legacy text", async () => {
+  for (const [activeXId, creator, mode, privilege, formId] of [
+    [undefined, "", "free", undefined, "video-free:unassigned"], [null, "fallback", "free", undefined, "video-free:fallback"],
+    ["", "fallback", "free", undefined, "video-free:unassigned"], [null, "unassigned", "free", undefined, "video-free:unassigned"],
+    ["unassigned", "", "free", undefined, "video-free:xid:unassigned"], ["@UNASSIGNED", "", "free", undefined, "video-free:xid:unassigned"],
+    ["@ALICE", "", "free", undefined, "video-free:alice"], ["unassigned", "", "slot", undefined, "video-slot:s1"],
+    ["unassigned", "", "edit", "admin", "video-edit:v1:admin"],
+  ]) await withFullForm({ activeXId, mode, slotId: "s1", editPrivilegeMode: privilege, initial: { ...fullInitial, creator_x_user_id: creator } }, async h => {
+    await h.change("#title", "Exact key draft"); await h.pagehide();
+    assert.ok(dom.window.localStorage.getItem(`fn:draft:u1:${formId}:video-form-v1`), `${mode}/${String(activeXId)}/${creator}`);
+  });
+  await withFullForm({ activeXId: null, initial: { ...fullInitial, creator_x_user_id: "" } }, async h => {
+    await h.change("#title", "Ambiguous old draft"); await h.pagehide();
+    const legacyKey = fullKeys("unassigned")[0];
+    await act(async () => h.root.render(null)); h.removed.length = 0;
+    const legacy = dom.window.localStorage.getItem(legacyKey);
+    await h.render({ activeXId: "@UNASSIGNED" }); await h.wait();
+    assert.equal(h.data().get("title"), fullInitial.title, "do not adopt old missing-X text for a real literal handle");
+    assert.equal(dom.window.localStorage.getItem(legacyKey), legacy); assert.deepEqual(h.removed, []);
+    await h.change("#title", "Literal handle draft"); await h.pagehide();
+    assert.ok(dom.window.localStorage.getItem(fullKeys("xid:unassigned")[0]));
+    assert.equal(dom.window.localStorage.getItem(legacyKey), legacy);
+  });
+});
+
+test("B04: full native/controlled restore respects current locks and preserves the live chapter baseline", async () => {
+  const initial = { ...fullInitial, profile_text: "DB profile", members: fullInitial.members.map((member, i) => ({ ...member, chapters: [{ time: `${i + 1}:00`, label: member.role, note: "DB" }] })) };
+  await withFullForm({ mode: "edit", initial }, async h => {
+    await h.change("#title", "Draft title"); await h.change("#profile_text", "Draft profile"); await h.change("#intro_comment", "Draft introduction");
+    await h.click('[aria-label="2人目を上へ移動"]'); await h.pagehide();
+    await act(async () => h.root.render(null));
+    await h.render({ disabledFields: ["video.title", "submitter.profile_text", "chapters"] });
+    assert.equal(h.data().get("title"), "Before"); assert.equal(h.data().get("profile_text"), "DB profile");
+    assert.equal(h.data().get("intro_comment"), "Draft introduction");
+    const members = JSON.parse(h.data().get("members_json"));
+    assert.deepEqual(members.map(x => x.x_user_id), ["bob", "alice"]);
+    assert.deepEqual(members.map(x => x.chapters[0].time), ["1:00", "2:00"], "CURRENT locked chapters retain the current positional baseline");
+    assert.equal(h.container.querySelector("#title").readOnly, true);
+  });
+});
+
+test("B04: an abandoned authority render cannot revoke the committed full-form request", async () => {
+  const never = new Promise(() => {});
+  function Suspender({ blocked }) { if (blocked) throw never; return null; }
+  function ConcurrentHost(props) {
+    return React.createElement(React.Suspense, { fallback: React.createElement("p", null, "Uncommitted") },
+      React.createElement(VideoForm, props), React.createElement(Suspender, { blocked: props.blocked }));
+  }
+  await withFullForm({ Component: ConcurrentHost, mode: "edit" }, async h => {
+    await h.change("#title", "Committed draft"); await h.submit();
+    await h.render({ blocked: true, disabledFields: ["video.title"] }, true);
+    assert.equal(h.container.querySelector("#title").readOnly, false, "the previous authoritative tree remains visible");
+    await act(async () => h.requests[0].resolve({ ok: true }));
+    assert.equal(h.counters().successes, 1); assert.equal(h.counters().refreshes, 1);
+    assert.equal(dom.window.localStorage.getItem(fullKeys("alice", "edit")[0]), null);
+  });
+});
