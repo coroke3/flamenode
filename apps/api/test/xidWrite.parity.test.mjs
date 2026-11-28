@@ -34,6 +34,7 @@ if (runUnderRootTsx(import.meta.url)) {
   const { QUEUE_BINDING_NAMES, QUEUE_FEATURE_FLAG_NAMES } = await import(
     "../../../packages/server-core/src/queues/wakeBudget.ts"
   );
+  const { WRITE_FEATURE_KEYS } = await import("@flamenode/domain/admin");
   const { XIdWriteResultSchema } = await import("@flamenode/contracts");
   process.env.NEXT_PUBLIC_SITE_URL = SITE;
 
@@ -206,6 +207,533 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(XIdWriteResultSchema.safeParse(json).success, true);
     return { status: res.status, result: json };
   }
+
+
+  test("SEC-726: SA-098 valid 128-codepoint legacy IDs survive the next Auth.js session", async () => {
+    const { resolveSessionUser } = await import("../src/auth/session.ts");
+    for (const [label, id] of [
+      ["Japanese128", "あ".repeat(128)],
+      ["Emoji128", "🌀".repeat(128)],
+    ]) {
+      const w = world();
+      insert(w.sqlite, "x_users", { id, x_name: label, approval_status: "approved" });
+      insert(w.sqlite, "x_user_account_links", {
+        x_user_id: id, auth_user_id: "u_multi", link_role: "manager",
+      });
+      const beforeReads = w.d1.stats.reads;
+      const beforeBatches = w.d1.stats.batches;
+      const thaw = freeze(800);
+      let response;
+      try {
+        response = await runHono(w, "u_multi", "POST", "/api/xid/active", { x_user_id: id });
+      } finally {
+        thaw();
+      }
+      assert.equal(response.status, 200, label);
+      assert.equal(response.result.ok, true, label);
+      assert.equal(w.d1.stats.reads - beforeReads, 3, "S3 auth + selected identity + guard");
+      assert.equal(w.d1.stats.batches - beforeBatches, 1, "one atomic user+audit batch");
+      assert.equal(w.sqlite.prepare('SELECT active_x_user_id FROM "user" WHERE id = ?')
+        .get("u_multi").active_x_user_id, id, label);
+      const session = await resolveSessionUser(w.d1, "tok_u_multi", { now: 1_800_000_000_000 });
+      assert.equal(session?.active_x_user_id, id, "next valid cookie sees the selected Unicode identity");
+      assert.equal(w.bucket.ops.puts.length + w.bucket.ops.deletes.length, 0);
+    }
+  });
+
+  test("SEC-726: unsafe normalized-equal Active X arriving after session read never reports idempotent success", async () => {
+    for (const [label, id, raw] of [
+      ["prefix over 128 codepoints", "a".repeat(128), "@" + "a".repeat(128)],
+      ["trim over 128 codepoints", "b".repeat(128), " " + "b".repeat(128)],
+      ["prefix over 512 UTF8 bytes", "🌀".repeat(128), "@" + "🌀".repeat(128)],
+    ]) {
+      const w = world();
+      try {
+        insert(w.sqlite, "x_users", { id, x_name: label, approval_status: "approved" });
+        insert(w.sqlite, "x_user_account_links", {
+          x_user_id: id, auth_user_id: "u_multi", link_role: "manager",
+        });
+        // Inject a concurrent legacy writer AFTER the actual session SELECT.
+        // This isolates SA-098's own boundary even after SEC-713 lands.
+        const initial = snapshot(w);
+        let afterConcurrentWrite;
+        let injected = 0;
+        w.d1 = atomicD1(w.sqlite, {
+          beforeRead(sql, sqlite) {
+            if (!sql.includes('FROM "session" s')) return;
+            assert.equal(++injected, 1, "one real session read");
+            assert.equal(sqlite.prepare('SELECT active_x_user_id FROM "user" WHERE id = ?')
+              .get("u_multi").active_x_user_id, "x_m1", "session starts valid");
+            sqlite.prepare('UPDATE "user" SET active_x_user_id = ? WHERE id = ?')
+              .run(raw, "u_multi");
+            afterConcurrentWrite = snapshot(w);
+          },
+        });
+        const reads = w.d1.stats.reads;
+        const batches = w.d1.stats.batches;
+        const response = await runHono(w, "u_multi", "POST", "/api/xid/active", { x_user_id: id });
+        assert.equal(response.status, 503, label);
+        assert.equal(response.result.ok, false, label);
+        assert.equal(response.result.reason, "db_unavailable", label);
+        assert.equal(w.d1.stats.reads - reads, 2, "session + selected identity only: " + label);
+        assert.equal(w.d1.stats.batches - batches, 0, "no user/audit batch: " + label);
+        assert.equal(injected, 1, label);
+        assert.ok(afterConcurrentWrite, "external race was exercised");
+        const expected = { ...initial, users: initial.users.map((row) =>
+          row.id === "u_multi" ? { ...row, active_x_user_id: raw } : row) };
+        assert.deepEqual(snapshot(w), afterConcurrentWrite, "no implicit repair, audit or queue: " + label);
+        assert.deepEqual(JSON.parse(JSON.stringify(afterConcurrentWrite)), JSON.parse(JSON.stringify(expected)),
+          "only the injected external write changed the fixture: " + label);
+        assert.equal(w.bucket.ops.puts.length + w.bucket.ops.deletes.length, 0, label);
+      } finally {
+        w.sqlite.close();
+      }
+    }
+  });
+
+  test("SEC-726 / SEC-713: preexisting unsafe Active X is denied at the applicable reader or writer boundary", async () => {
+    // Auth changes cannot be stacked (GIT_WORKFLOW §11). Before #714 is
+    // merged, this tests the SA-098 fallback; once its explicit bounded
+    // reader contract is present, the SAME mounted test must prove the
+    // one-read initial-session denial. Never select expectations from the
+    // returned response or silently skip the scenario.
+    const session = await import("../src/auth/session.ts");
+    const boundedReader = Object.hasOwn(session, "MAX_LEGACY_SESSION_ACTIVE_X_ID_CODEPOINTS");
+    if (boundedReader) {
+      assert.equal(session.MAX_LEGACY_SESSION_ACTIVE_X_ID_CODEPOINTS, 128);
+      assert.equal(session.MAX_LEGACY_SESSION_ACTIVE_X_ID_BYTES, 512);
+    }
+    for (const [label, id, raw] of [
+      ["prefix over 128 codepoints", "a".repeat(128), "@" + "a".repeat(128)],
+      ["trim over 128 codepoints", "b".repeat(128), " " + "b".repeat(128)],
+      ["prefix over 512 UTF8 bytes", "🌀".repeat(128), "@" + "🌀".repeat(128)],
+    ]) {
+      const w = world();
+      try {
+        insert(w.sqlite, "x_users", { id, x_name: label, approval_status: "approved" });
+        insert(w.sqlite, "x_user_account_links", {
+          x_user_id: id, auth_user_id: "u_multi", link_role: "manager",
+        });
+        w.sqlite.prepare('UPDATE "user" SET active_x_user_id = ? WHERE id = ?')
+          .run(raw, "u_multi");
+        const before = snapshot(w);
+        const reads = w.d1.stats.reads;
+        const batches = w.d1.stats.batches;
+        const response = await runHono(w, "u_multi", "POST", "/api/xid/active", { x_user_id: id });
+        assert.equal(response.status, 503, label);
+        assert.equal(response.result.ok, false, label);
+        assert.equal(response.result.reason, boundedReader ? "database_unavailable" : "db_unavailable", label);
+        assert.equal(w.d1.stats.reads - reads, boundedReader ? 1 : 2, "reader or writer boundary: " + label);
+        if (boundedReader) assert.ok(w.d1.stats.readSql.every((sql) => sql.includes('FROM "session" s')), "no selected-identity read");
+        assert.equal(w.d1.stats.batches - batches, 0, "no user/audit batch: " + label);
+        assert.deepEqual(snapshot(w), before, "no implicit repair, audit or queue: " + label);
+        assert.equal(w.bucket.ops.puts.length + w.bucket.ops.deletes.length, 0, label);
+      } finally {
+        w.sqlite.close();
+      }
+    }
+  });
+
+  test("SEC-726: session-safe persisted Active X remains idempotent, including exact 512 UTF8 bytes", async () => {
+    for (const [label, id, raw] of [
+      ["exact 128 ASCII", "a".repeat(128), "a".repeat(128)],
+      ["exact 512 UTF8 bytes", "🌀".repeat(128), "🌀".repeat(128)],
+      ["safe legacy spelling", "c".repeat(127), "@" + "C".repeat(127)],
+    ]) {
+      const w = world();
+      try {
+        insert(w.sqlite, "x_users", { id, x_name: label, approval_status: "approved" });
+        insert(w.sqlite, "x_user_account_links", {
+          x_user_id: id, auth_user_id: "u_multi", link_role: "manager",
+        });
+        w.sqlite.prepare('UPDATE "user" SET active_x_user_id = ? WHERE id = ?')
+          .run(raw, "u_multi");
+        const before = snapshot(w);
+        const reads = w.d1.stats.reads;
+        const batches = w.d1.stats.batches;
+        const response = await runHono(w, "u_multi", "POST", "/api/xid/active", { x_user_id: id });
+        assert.equal(response.status, 200, label);
+        assert.deepEqual(response.result, { ok: true, message: "すでにこの X ID がアクティブです。" }, label);
+        const { resolveSessionUser } = await import("../src/auth/session.ts");
+        const readsAfterNoOp = w.d1.stats.reads;
+        assert.equal(w.d1.stats.reads - reads, 2, "session + selected identity only: " + label);
+        assert.equal(w.d1.stats.batches - batches, 0, label);
+        assert.deepEqual(snapshot(w), before, "CURRENT safe no-op is unchanged: " + label);
+        const nextSession = await resolveSessionUser(w.d1, "tok_u_multi", { now: 1_800_000_000_000 });
+        assert.equal(nextSession?.active_x_user_id, raw, "next real session preserves valid legacy spelling: " + label);
+        assert.equal(w.d1.stats.reads - readsAfterNoOp, 1, label);
+        assert.equal(w.bucket.ops.puts.length + w.bucket.ops.deletes.length, 0, label);
+      } finally {
+        w.sqlite.close();
+      }
+    }
+  });
+
+  test("SEC-726: oversized, embedded-NUL and normalized-invalid selected X IDs fail before mutation", async () => {
+    for (const [label, id] of [
+      ["ASCII129", "x".repeat(129)],
+      ["Japanese129", "あ".repeat(129)],
+      ["Emoji129", "🌀".repeat(129)],
+      ["LeadingNul", "\0" + "x".repeat(20)],
+      ["EmbeddedNul", "valid\0invalid"],
+      ["UnpairedSurrogateAndOverCap", "x".repeat(129) + "\uD800"],
+      ["LoneHighSurrogate", "\uD800"],
+      ["LoneLowSurrogate", "\uDC00"],
+    ]) {
+      const w = world();
+      insert(w.sqlite, "x_users", { id, x_name: label, approval_status: "approved" });
+      insert(w.sqlite, "x_user_account_links", {
+        x_user_id: id, auth_user_id: "u_multi", link_role: "owner",
+      });
+      const before = snapshot(w);
+      const beforeBatches = w.d1.stats.batches;
+      const response = await runHono(w, "u_multi", "POST", "/api/xid/active", { x_user_id: id });
+      assert.equal(response.status, 403, label);
+      assert.equal(response.result.ok, false, label);
+      assert.equal(w.d1.stats.batches - beforeBatches, 0, "zero mutation/audit batches: " + label);
+      assert.deepEqual(snapshot(w), before, "preserve linked identity, audit and queues: " + label);
+    }
+  });
+
+  test("SEC-726: a short approved alias to an oversized target is bounded in the SQL D1 row", async () => {
+    const w = world();
+    const unsafe = "🌀".repeat(129);
+    insert(w.sqlite, "x_users", { id: unsafe, x_name: "Legacy", approval_status: "approved" });
+    insert(w.sqlite, "x_user_account_links", {
+      x_user_id: unsafe, auth_user_id: "u_multi", link_role: "manager",
+    });
+    insert(w.sqlite, "x_user_aliases", { alias_x_id: "safe_short_alias", x_user_id: unsafe });
+    let boundedRead = 0;
+    const prepare = w.d1.prepare.bind(w.d1);
+    w.d1.prepare = (sql) => {
+      const stmt = prepare(sql);
+      if (!sql.includes("AS resolved_x_user_id")) return stmt;
+      assert.match(sql, /bounded_resolved AS/);
+      const bind = stmt.bind.bind(stmt);
+      stmt.bind = (...values) => {
+        const bound = bind(...values);
+        const first = bound.first.bind(bound);
+        bound.first = async () => {
+          const row = await first();
+          boundedRead++;
+          assert.equal(row?.resolved_x_user_id, null,
+            "D1 must not project an oversized alias target to JS");
+          assert.equal(row?.linked_approval_status, null,
+            "unsafe target cannot be authorized through its short alias");
+          assert.ok(Buffer.byteLength(JSON.stringify(row)) < 64 * 1024);
+          assert.ok(!JSON.stringify(row).includes(unsafe));
+          return row;
+        };
+        return bound;
+      };
+      return stmt;
+    };
+    const before = snapshot(w);
+    const beforeBatches = w.d1.stats.batches;
+    const response = await runHono(w, "u_multi", "POST", "/api/xid/active", {
+      x_user_id: "safe_short_alias",
+    });
+    assert.equal(boundedRead, 1, "exactly one inspected identity SELECT");
+    assert.equal(response.status, 403);
+    assert.equal(w.d1.stats.batches - beforeBatches, 0);
+    assert.deepEqual(snapshot(w), before, "no user, audit, queue or X-link mutation");
+  });
+
+  test("SEC-726: valid short alias remains authorized; TOS and origin failures do not mutate", async () => {
+    const valid = "🌀".repeat(128);
+    const w = world();
+    insert(w.sqlite, "x_users", { id: valid, x_name: "Legacy valid", approval_status: "approved" });
+    insert(w.sqlite, "x_user_account_links", {
+      x_user_id: valid, auth_user_id: "u_multi", link_role: "manager",
+    });
+    insert(w.sqlite, "x_user_aliases", { alias_x_id: "legacy_alias", x_user_id: valid });
+
+    const before = snapshot(w);
+    w.sqlite.prepare('UPDATE "user" SET is_tos_accepted = 0 WHERE id = ?').run("u_multi");
+    const noTos = snapshot(w);
+    const deniedTos = await runHono(w, "u_multi", "POST", "/api/xid/active", { x_user_id: "legacy_alias" });
+    assert.equal(deniedTos.result.ok, false);
+    assert.deepEqual(snapshot(w), noTos, "ToS denial must not mutate");
+    w.sqlite.prepare('UPDATE "user" SET is_tos_accepted = 1 WHERE id = ?').run("u_multi");
+    assert.deepEqual(snapshot(w), before);
+
+    // A valid alias must not bypass the existing CostGuard release gate.
+    w.sqlite.prepare("UPDATE system_settings SET operation_mode = ? WHERE id = 'default'")
+      .run("maintenance");
+    const deniedCost = await runHono(w, "u_multi", "POST", "/api/xid/active", {
+      x_user_id: "legacy_alias",
+    });
+    assert.equal(deniedCost.status, 503, "maintenance mode must block SA-098");
+    assert.equal(deniedCost.result.ok, false);
+    assert.deepEqual(snapshot(w), before, "CostGuard denial has no user/audit/queue mutation");
+    w.sqlite.prepare("UPDATE system_settings SET operation_mode = ? WHERE id = 'default'")
+      .run("normal");
+
+    const crossOrigin = await mountedApp.request(
+      SITE + "/api/xid/active",
+      { method: "POST", headers: {
+        Origin: "https://attacker.example",
+        Cookie: "__Secure-authjs.session-token=tok_u_multi",
+        "Content-Type": "application/json",
+      }, body: JSON.stringify({ x_user_id: "legacy_alias" }) },
+      { DB: w.d1, BUCKET: w.bucket, NEXT_PUBLIC_SITE_URL: SITE },
+    );
+    assert.equal(crossOrigin.status, 403);
+    assert.deepEqual(snapshot(w), before, "origin denial must not mutate");
+
+    const batchBefore = w.d1.stats.batches;
+    const thaw = freeze(1000);
+    let result;
+    try {
+      result = await runHono(w, "u_multi", "POST", "/api/xid/active", { x_user_id: "legacy_alias" });
+    } finally {
+      thaw();
+    }
+    assert.equal(result.status, 200, "valid alias preserves CURRENT linked approval");
+    assert.equal(w.d1.stats.batches - batchBefore, 1);
+    assert.equal(w.sqlite.prepare('SELECT active_x_user_id FROM "user" WHERE id = ?')
+      .get("u_multi").active_x_user_id, valid);
+  });
+
+  test("SEC-726 / S3: selected identity read preserves the full canonical user row field order", async () => {
+    const w = world();
+    const expected = w.sqlite.prepare('PRAGMA table_info("user")').all().map((r) => r.name);
+    let observed = 0;
+    const oldPrepare = w.d1.prepare.bind(w.d1);
+    w.d1.prepare = (sql) => {
+      const stmt = oldPrepare(sql);
+      if (!sql.includes("AS invalid_gate_snapshot") ||
+          !sql.includes("AS linked_approval_status")) return stmt;
+      const oldBind = stmt.bind.bind(stmt);
+      stmt.bind = (...args) => {
+        const bound = oldBind(...args);
+        const oldFirst = bound.first.bind(bound);
+        bound.first = async () => {
+          const row = await oldFirst();
+          observed++;
+          assert.equal(row?.invalid_gate_snapshot, 0);
+          assert.deepEqual(Object.keys(row).filter((k) => expected.includes(k)), expected,
+            "audit before_json must retain all canonical user columns in the original order");
+          assert.equal(row?.id, "u_owner");
+          return row;
+        };
+        return bound;
+      };
+      return stmt;
+    };
+    const response = await runHono(w, "u_owner", "POST", "/api/xid/active", {
+      x_user_id: "x_owner",
+    });
+    assert.equal(response.status, 200);
+    assert.equal(observed, 1);
+  });
+
+  test("SEC-726 / S3: oversized or wrong-type actor and CostGuard fields fail before the D1 wire and mutation", async () => {
+    const huge = "\u0001".repeat(180_000);
+    for (const [label, mutate, nullColumn] of [
+      ["active x icon", (w) => w.sqlite.prepare(
+        'UPDATE x_users SET icon_url = ? WHERE id = ?').run(huge, "x_owner"),
+        "actor_x_icon_url"],
+      ["CostGuard flags JSON", (w) => w.sqlite.prepare(
+        'UPDATE system_settings SET disabled_features_json = ? WHERE id = ?')
+        .run(huge, "default"), "cg_disabled_features_json"],
+      ["invalid numeric audit config", (w) => w.sqlite.prepare(
+        'UPDATE system_settings SET audit_normal_retention_days = ? WHERE id = ?')
+        .run("not-an-integer", "default"), "cg_audit_normal_retention_days"],
+    ]) {
+      const w = world();
+      mutate(w);
+      // Keep the oversized actor rejection on an actual mutation, where the
+      // complete audit snapshot is required. Other invalid fields are still
+      // rejected even for an exact no-op.
+      let requested = "x_owner";
+      if (label === "active x icon") {
+        requested = "x_new_owner_target";
+        insert(w.sqlite, "x_users", { id: requested, x_name: "New target", approval_status: "approved" });
+        insert(w.sqlite, "x_user_account_links", { auth_user_id: "u_owner", x_user_id: requested, link_role: "manager" });
+      }
+      const before = snapshot(w);
+      const beforeBatches = w.d1.stats.batches;
+      const beforeReads = w.d1.stats.reads;
+      let inspected = 0;
+      const prepare = w.d1.prepare.bind(w.d1);
+      w.d1.prepare = (sql) => {
+        const stmt = prepare(sql);
+        if (!sql.includes("AS invalid_gate_snapshot") ||
+            !sql.includes("AS linked_approval_status")) return stmt;
+        const bind = stmt.bind.bind(stmt);
+        stmt.bind = (...args) => {
+          const bound = bind(...args);
+          const first = bound.first.bind(bound);
+          bound.first = async () => {
+            const row = await first();
+            inspected++;
+            assert.equal(row?.invalid_gate_snapshot, 1, label);
+            assert.equal(row?.[nullColumn], null,
+              label + " must be NULL before D1 materializes the first row");
+            const json = JSON.stringify(row);
+            assert.ok(Buffer.byteLength(json) < 64 * 1024,
+              label + " stays below first-row D1 response limit");
+            assert.ok(!json.includes(huge.slice(0, 256)),
+              label + " cannot leak the unbounded raw value to JS");
+            return row;
+          };
+          return bound;
+        };
+        return stmt;
+      };
+      const response = await runHono(w, "u_owner", "POST", "/api/xid/active", {
+        x_user_id: requested,
+      });
+      assert.equal(inspected, 1, label);
+      assert.equal(response.status, 503, label);
+      assert.equal(response.result.ok, false, label);
+      assert.equal(w.d1.stats.reads - beforeReads, 2,
+        label + " session + one bounded identity first row, no extra reads");
+      assert.equal(w.d1.stats.batches, beforeBatches, label + " no update/audit batch");
+      assert.deepEqual(snapshot(w), before, label + " no stored state change");
+    }
+  });
+
+  test("SEC-726: direct no-op can omit only the oversized TEXT audit icon, never authorization or mutation data", async () => {
+    const longUrl = "https://cdn.example/" + "x".repeat(2100);
+    const hugeControls = "\u0001".repeat(180_000);
+    const cases = [
+      { label: "ordinary exact", icon: "https://cdn.example/icon", omitted: 0, invalid: 0, status: 200, current: true },
+      { label: "valid long exact", icon: longUrl, omitted: 1, invalid: 0, status: 200, current: true },
+      { label: "oversized controls exact no-op", icon: hugeControls, omitted: 1, invalid: 0, status: 200, current: true },
+      { label: "BLOB still invalid", icon: Buffer.alloc(8, 120), omitted: 0, invalid: 1, status: 503, reason: "db_unavailable" },
+      { label: "TOS still denied", icon: longUrl, omitted: 1, invalid: 0, status: 403, reason: "tos_required",
+        change: w => w.sqlite.exec('UPDATE "user" SET is_tos_accepted = 0 WHERE id = \'u_owner\'') },
+      { label: "CostGuard still denied", icon: longUrl, omitted: 1, invalid: 0, status: 503, reason: "cost_guard_blocked",
+        change: w => w.sqlite.prepare("UPDATE system_settings SET disabled_features_json = ? WHERE id = 'default'").run(JSON.stringify(["xid_links"])) },
+      { label: "link still required", icon: longUrl, omitted: 1, invalid: 0, status: 403,
+        change: w => w.sqlite.exec("DELETE FROM x_user_account_links WHERE auth_user_id = 'u_owner' AND x_user_id = 'x_owner'") },
+      { label: "approval still required", icon: longUrl, omitted: 1, invalid: 0, status: 403,
+        change: w => w.sqlite.exec("UPDATE x_users SET approval_status = 'pending' WHERE id = 'x_owner'") },
+      { label: "other audit field still invalid", icon: longUrl, omitted: 1, invalid: 1, status: 503, reason: "db_unavailable",
+        change: w => w.sqlite.prepare('UPDATE "user" SET email = ? WHERE id = ?').run("e".repeat(513), "u_owner") },
+      { label: "alias-only not exempt", icon: longUrl, omitted: 0, invalid: 1, status: 503, reason: "db_unavailable", requested: "x_owner_alias",
+        change: w => insert(w.sqlite, "x_user_aliases", { alias_x_id: "x_owner_alias", x_user_id: "x_owner" }) },
+    ];
+    for (const fixture of cases) {
+      const w = world();
+      try {
+        w.sqlite.prepare("UPDATE x_users SET icon_url = ? WHERE id = ?").run(fixture.icon, "x_owner");
+        fixture.change?.(w);
+        const before = snapshot(w);
+        let receipt;
+        const prepare = w.d1.prepare.bind(w.d1);
+        w.d1.prepare = (statement) => {
+          const stmt = prepare(statement);
+          if (!statement.includes("AS actor_icon_omitted")) return stmt;
+          const bind = stmt.bind.bind(stmt);
+          stmt.bind = (...args) => {
+            const bound = bind(...args);
+            const first = bound.first.bind(bound);
+            bound.first = async () => {
+              const row = await first();
+              receipt = row;
+              return row;
+            };
+            return bound;
+          };
+          return stmt;
+        };
+        const reads = w.d1.stats.reads;
+        const batches = w.d1.stats.batches;
+        const response = await runHono(w, "u_owner", "POST", "/api/xid/active", {
+          x_user_id: fixture.requested ?? "x_owner",
+        });
+        assert.equal(response.status, fixture.status, fixture.label);
+        assert.equal(receipt?.actor_icon_omitted, fixture.omitted, fixture.label);
+        assert.equal(receipt?.invalid_gate_snapshot, fixture.invalid, fixture.label);
+        if (fixture.omitted || fixture.invalid) assert.equal(receipt.actor_x_icon_url, null, fixture.label);
+        else assert.equal(receipt.actor_x_icon_url, fixture.icon, fixture.label);
+        assert.ok(Buffer.byteLength(JSON.stringify(receipt)) < 64 * 1024, fixture.label);
+        if (fixture.status === 200) {
+          assert.deepEqual(response.result, { ok: true, message: "すでにこの X ID がアクティブです。" }, fixture.label);
+        } else {
+          assert.equal(response.result.ok, false, fixture.label);
+          if (fixture.reason) assert.equal(response.result.reason, fixture.reason, fixture.label);
+        }
+        assert.equal(w.d1.stats.reads - reads, 2, fixture.label);
+        assert.equal(w.d1.stats.batches - batches, 0, fixture.label);
+        assert.deepEqual(snapshot(w), before, fixture.label);
+        assert.equal(w.bucket.ops.puts.length + w.bucket.ops.deletes.length, 0, fixture.label);
+        if (fixture.current) {
+          const legacy = await runCurrent(w, "u_owner", current.setActiveXId, [["x_user_id", "x_owner"]]);
+          assert.deepEqual(legacy.result, response.result, fixture.label);
+          assert.equal(legacy.wakes, 0, fixture.label);
+          assert.deepEqual(snapshot(w), before, fixture.label);
+        }
+      } finally {
+        w.sqlite.close();
+      }
+    }
+  });
+
+  test("SEC-726 / S3: valid SA-019 full WRITE_FEATURE_KEYS JSON (>768B) and SA-018 xid_links override remain permitted", async () => {
+    const nonXidDisabledJson = JSON.stringify(WRITE_FEATURE_KEYS.filter((k) => k !== "xid_links"));
+    const allDisabledJson = JSON.stringify(WRITE_FEATURE_KEYS);
+    assert.ok(Buffer.byteLength(nonXidDisabledJson) > 768,
+      "42 non-xid_links WRITE_FEATURE_KEYS must exceed the old 768-byte cap");
+    assert.ok(Buffer.byteLength(allDisabledJson) > 768,
+      "all 43 WRITE_FEATURE_KEYS must exceed the old 768-byte cap");
+
+    // (a) 42 non-xid_links features disabled (912B): xid_links remains enabled -> 200 OK
+    {
+      const w = world();
+      w.sqlite.prepare("UPDATE system_settings SET disabled_features_json = ? WHERE id = 'default'")
+        .run(nonXidDisabledJson);
+      const thaw = freeze(900);
+      let res;
+      try {
+        res = await runHono(w, "u_multi", "POST", "/api/xid/active", { x_user_id: "x_free" });
+      } finally {
+        thaw();
+      }
+      assert.equal(res.status, 200);
+      assert.equal(res.result.ok, true);
+      assert.equal(w.sqlite.prepare('SELECT active_x_user_id FROM "user" WHERE id = ?')
+        .get("u_multi").active_x_user_id, "x_free");
+    }
+
+    // (b) All 43 features disabled (924B): without override -> 503 cost_guard_blocked (never db_unavailable);
+    //     with active SA-018 ["xid_links"] override -> 200 OK
+    {
+      const w = world();
+      w.sqlite.prepare("UPDATE system_settings SET disabled_features_json = ? WHERE id = 'default'")
+        .run(allDisabledJson);
+      const before = snapshot(w);
+      const thaw1 = freeze(910);
+      let blocked;
+      try {
+        blocked = await runHono(w, "u_multi", "POST", "/api/xid/active", { x_user_id: "x_free" });
+      } finally {
+        thaw1();
+      }
+      assert.equal(blocked.status, 503);
+      assert.equal(blocked.result.ok, false);
+      assert.equal(blocked.result.reason, "cost_guard_blocked");
+      assert.deepEqual(snapshot(w), before, "full CostGuard lockdown must not mutate");
+
+      w.sqlite.prepare(
+        "UPDATE system_settings SET cost_guard_exception_until = ?, cost_guard_exception_features_json = ? WHERE id = 'default'",
+      ).run(1_800_000_900, JSON.stringify(["xid_links"]));
+      const thaw2 = freeze(920);
+      let allowed;
+      try {
+        allowed = await runHono(w, "u_multi", "POST", "/api/xid/active", { x_user_id: "x_free" });
+      } finally {
+        thaw2();
+      }
+      assert.equal(allowed.status, 200);
+      assert.equal(allowed.result.ok, true);
+      assert.equal(w.sqlite.prepare('SELECT active_x_user_id FROM "user" WHERE id = ?')
+        .get("u_multi").active_x_user_id, "x_free");
+    }
+  });
 
   test("SA-098, SA-102..105 full differential parity vs CURRENT on real migrated schema (3 D1 pre-reads + 1 batch)", async () => {
     const a = world();
