@@ -26,6 +26,9 @@ import {
 } from "./freeVideoCustomQuestionRead.ts";
 import { buildSlotParts } from "./slotGrouping.ts";
 
+// Keep chunk buckets integer and unbound; D1/SQLite adapters may bind JS numbers as REAL.
+const GENERAL_QUESTION_EVENT_CHUNK_SIZE_SQL = sql.raw(String(GENERAL_QUESTION_EVENT_CHUNK_SIZE));
+
 /** MIG-0651 unmounted SA-086 general-question read candidate. */
 export { loadGeneralCustomQuestionsForFreeVideo, decodeGeneralCustomQuestionPolicyProjection, type LoadedGeneralCustomQuestion } from "./freeVideoCustomQuestionRead.ts";
 
@@ -646,7 +649,7 @@ export function buildSlotSubmissionQuestionPolicyAssertions(
         ON event_custom_questions.event_id = CAST(event_order.value AS TEXT)
       WHERE event_custom_questions.is_active = 1
         AND NOT (${stagePermissionQuestionKeyCondition()})
-      ORDER BY CAST(event_order.key AS INTEGER) / ${GENERAL_QUESTION_EVENT_CHUNK_SIZE},
+      ORDER BY CAST(CAST(event_order.key AS INTEGER) / ${GENERAL_QUESTION_EVENT_CHUNK_SIZE_SQL} AS INTEGER),
                event_custom_questions.event_id ASC,
                event_custom_questions.sort_order ASC,
                event_custom_questions.id ASC
@@ -790,7 +793,7 @@ export async function readSlotSubmissionVideoEventReceipt(
         ON event_custom_questions.event_id = event_order.id
       WHERE event_custom_questions.is_active = 1
         AND NOT (${stagePermissionQuestionKeyCondition()})
-      ORDER BY event_order.ordinal / ${GENERAL_QUESTION_EVENT_CHUNK_SIZE},
+      ORDER BY CAST(event_order.ordinal / ${GENERAL_QUESTION_EVENT_CHUNK_SIZE_SQL} AS INTEGER),
                event_custom_questions.event_id ASC,
                event_custom_questions.sort_order ASC,
                event_custom_questions.id ASC
