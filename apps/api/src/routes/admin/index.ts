@@ -29,6 +29,7 @@ import { adminNotificationRoutes } from "./notifications.ts";
 import { adminPermissionsRoutes } from "./permissions.ts";
 import { adminTermsRoutes } from "./terms.ts";
 import { adminUsersRoutes, adminXUsersRoutes } from "./users.ts";
+import { adminXIdMergeRoutes } from "./xidMerges.ts";
 import { mountMig0643AdminRoutes } from "./mig0643.ts";
 
 export function createAdminRoutes(
@@ -68,6 +69,8 @@ export function createAdminRoutes(
   admin.route("/terms", adminTermsRoutes);
   admin.route("/users", adminUsersRoutes);
   admin.route("/x-users", adminXUsersRoutes);
+  // SA-092..097: admin X ID merge & revert lifecycle endpoints (D-17-4).
+  admin.route("/x-id-merges", adminXIdMergeRoutes);
   // MIG-0643 routes inherit the shared admin origin, auth and read/write guards.
   mountMig0643AdminRoutes(admin);
   return admin;
