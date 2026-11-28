@@ -167,6 +167,30 @@ async function persistPermanentRestoreFailure(args: {
   return runId;
 }
 
+/** Only explicitly enumerated invariant codes may be shown to the caller.
+ * Arbitrary Drizzle/provider exceptions can contain SQL parameters, user data
+ * and headers even when they have no token:/secret: prefix.
+ */
+function publicRestoreMutationFailureMessage(error: unknown): string {
+  const prefix = "復元を確定できませんでした。変更はロールバックされました";
+  if (error instanceof Error && error.message === "video_status_rebuild_event_limit_exceeded") {
+    return `${prefix}: video_status_rebuild_event_limit_exceeded`;
+  }
+  return `${prefix}。`;
+}
+
+/** Preserve only intentional adapter diagnostics, never arbitrary SQL/provider errors. */
+function publicRestoreBuildFailureMessage(error: unknown): string {
+  const safeCodes = new Set([
+    "video_members_set_snapshot_invalid",
+    "video_members_set_target_mismatch",
+  ]);
+  if (error instanceof Error && safeCodes.has(error.message)) {
+    return error.message;
+  }
+  return "復元mutationを作成できません。";
+}
+
 /**
  * 復元本体、復元履歴、元ログの状態更新、RESTORE 監査ログを単一 D1 batch で確定する。
  * いずれか一つでも失敗した場合は、復元対象を含めて全て rollback される。
@@ -259,10 +283,15 @@ export async function restoreAuditLog(
     payloadExceeded,
   });
   if (!capability.restorable) {
+    // A database-derived, unregistered table name is not an authorized
+    // diagnostic. Never echo it to callers or persisted failure records.
+    const publicMessage = capability.reasonCode === RestoreFailureReason.adapterMissing
+      ? "復元アダプターが見つかりません。"
+      : capability.message;
     if (dry_run) {
       return {
         ok: false,
-        message: capability.message,
+        message: publicMessage,
         reason_code: capability.reasonCode,
         restore_status: capability.status,
       };
@@ -280,7 +309,7 @@ export async function restoreAuditLog(
           userId,
           reason,
           reasonCode: capability.reasonCode,
-          message: capability.message,
+          message: publicMessage,
           now,
         })
       : await persistFailedRestoreRun({
@@ -289,13 +318,13 @@ export async function restoreAuditLog(
           userId,
           reason,
           reasonCode: capability.reasonCode,
-          message: capability.message,
+          message: publicMessage,
           now,
         });
 
     return {
       ok: false,
-      message: capability.message,
+      message: publicMessage,
       reason_code: capability.reasonCode,
       restore_status: capability.status,
       restore_run_id: runId,
@@ -405,10 +434,9 @@ export async function restoreAuditLog(
       expectedCurrent: current,
     });
   } catch (error) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : "復元mutationを作成できません。";
+    // Adapter construction can throw SQL/framework errors; they are not
+    // user-facing diagnostics even when an explicit secret key is absent.
+    const message = publicRestoreBuildFailureMessage(error);
 
     if (dry_run) {
       return {
@@ -459,11 +487,12 @@ export async function restoreAuditLog(
   let visibilityFenceToken: string | null = null;
   let depublicizedFromPublic = false;
   let publicCacheKeys: string[] = [];
+  let videoExportEventIds: string[] = [];
   try {
     if (log.table_name === "events") {
       const previousStatus = String(current?.visibility_status ?? "");
       const nextStatus = String(target.visibility_status ?? "");
-      const transition = planEventVisibilityTransition({
+      const transition = await planEventVisibilityTransition({
         db,
         eventId: log.target_id,
         previousStatus: previousStatus as "private" | "public",
@@ -530,7 +559,7 @@ export async function restoreAuditLog(
       if (!publicEligibility.ok) {
         throw new Error(publicEligibility.message);
       }
-      const transition = planVideoVisibilityFenceTransition(db, {
+      const transition = await planVideoVisibilityFenceTransition(db, {
         videoId: log.target_id,
         previousStatus: previousStatus as "pending" | "public" | "private" | "voided",
         nextStatus: nextStatus as "pending" | "public" | "private" | "voided",
@@ -540,8 +569,18 @@ export async function restoreAuditLog(
       });
       const queue = await buildAfterVideoStatusChangeQueueBatch(db, {
         videoId: log.target_id,
-        eventIds: eventRows.map((row) => row.event_id),
+        // A restored primary_event_id may not occur in video_events (legacy
+        // video or historical snapshot). Rebuild both old and restored parents
+        // in the same atomic queue batch; the helper deduplicates and enforces
+        // the existing eight-event fanout limit without another D1 read.
+        eventIds: [
+          ...eventRows.map((row) => row.event_id),
+          String(target.primary_event_id ?? "").trim(),
+        ].filter(Boolean),
         creatorXUserId: String(current?.creator_x_user_id ?? "").trim() || null,
+        // Restore snapshots can change creator identity independently of event
+        // membership. Queue the restored profile too, without another D1 read.
+        additionalCreatorXUserIds: [String(target.creator_x_user_id ?? "").trim()],
         primaryEventId: String(current?.primary_event_id ?? "").trim() || null,
         requestedByUserId: userId,
       });
@@ -595,8 +634,14 @@ export async function restoreAuditLog(
         String(current?.primary_event_id ?? "").trim(),
         String(target.primary_event_id ?? "").trim(),
       ]);
-      for (const eventId of eventIds) {
-        if (!eventId) continue;
+      eventIds.delete("");
+      // The 8-target budget also applies when legacy primary-event fallback
+      // and the before/after primary ID add entries outside video_events.
+      if (eventIds.size > MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS) {
+        throw new Error("video_status_rebuild_event_limit_exceeded");
+      }
+      videoExportEventIds = [...eventIds];
+      for (const eventId of videoExportEventIds) {
         for (const key of host.publicCacheKeys.eventObjectKeys(eventId)) {
           cacheKeys.add(key);
         }
@@ -619,6 +664,28 @@ export async function restoreAuditLog(
         }, host);
       }
     }
+
+    // The atomic D1 batch may be committed before mutateWithAudit asks for
+    // its optional post-commit Queue wake host. If that lazy loader rejects,
+    // it must not be mistaken for a failed D1 commit: compensating the R2
+    // visibility fence at that point could unprotect already-private rows.
+    // The durable static_rebuild_queue rows are still committed and can be
+    // picked up by the normal recovery path even without this wake signal.
+    const loadQueueWakeHostBestEffort = async () => {
+      try {
+        return await host.loadQueueWakeHost();
+      } catch {
+        // Provider/module errors may include credentials, env values or paths.
+        // A safe disabled host preserves the audited commit and emits only a
+        // fixed diagnostic without reflecting Error or nested cause.
+        console.warn("[audit-restore] queue wake host unavailable", "provider_error");
+        return {
+          readEnv: () => null,
+          readWaitUntil: () => null,
+          readKv: () => null,
+        };
+      }
+    };
 
     await mutateWithAudit(db, {
       mutationStatements: restoreStatements,
@@ -654,12 +721,10 @@ export async function restoreAuditLog(
         db.run(assertChanges(1)),
       ],
       staticRebuildWakeSource: visibilityEntity ? "admin" : undefined,
-    }, host.loadQueueWakeHost);
+    }, loadQueueWakeHostBestEffort);
   } catch (error) {
-    const message =
-      `復元を確定できませんでした。変更はロールバックされました: ${
-        sanitizeRestoreError(error)
-      }`;
+    // Never reflect an arbitrary SQL/provider exception into the HTTP body.
+    const message = publicRestoreMutationFailureMessage(error);
 
     let failedRunId: string | undefined;
 
@@ -679,8 +744,10 @@ export async function restoreAuditLog(
             allowNonPublicRollback: !depublicizedFromPublic,
           }, host);
         }
-      } catch (compensationError) {
-        console.warn("[audit-restore] visibility compensation failed", compensationError);
+      } catch {
+        // The R2 provider exception may carry credentials or resource metadata.
+        // Keep this outcome observable without logging the exception or its cause.
+        console.warn("[audit-restore] visibility compensation failed", "provider_error");
       }
     }
 
@@ -696,17 +763,14 @@ export async function restoreAuditLog(
           message,
           now,
         });
-    } catch (recordError) {
-      console.error(
-        JSON.stringify({
-          event: "restore_failure_record_failed",
-          auditId,
-          error:
-            sanitizeRestoreError(recordError),
-          originalError:
-            sanitizeRestoreError(error),
-        }),
-      );
+    } catch {
+      // D1/Drizzle errors can embed the full SQL statement, parameters,
+      // restore reason, user IDs and provider metadata. This failure is
+      // observable through a fixed code without ever serializing an Error.
+      console.error(JSON.stringify({
+        event: "restore_failure_record_failed",
+        code: "d1_write_failed",
+      }));
     }
 
     return {
@@ -719,11 +783,37 @@ export async function restoreAuditLog(
     };
   }
 
+  // Invalidate scheduled exports for every affected video relation/primary
+  // after the D1 commit only. Failed/dry-run restores never evict exports.
+  if (log.table_name === "videos") {
+    for (const eventId of videoExportEventIds) {
+      try {
+        await host.invalidateEventExportCache(eventId);
+      } catch {
+        // Match normal video transition fail-soft behavior without leaking
+        // provider errors, identifiers or cached response contents.
+        console.warn("[audit-restore] event export invalidation failed", "provider_error");
+      }
+    }
+  }
   if (publicCacheKeys.length > 0) {
-    await host.deletePublicJsonCaches(publicCacheKeys);
+    try {
+      await host.deletePublicJsonCaches(publicCacheKeys);
+    } catch {
+      // The D1 transaction already succeeded. A Cache API/provider failure
+      // must neither turn the committed restore into a false HTTP failure nor
+      // serialize potentially sensitive provider errors into application logs.
+      console.warn("[audit-restore] public cache invalidation failed", "provider_error");
+    }
   }
   if (log.table_name === "events") {
-    await host.invalidateEventExportCache(log.target_id);
+    try {
+      await host.invalidateEventExportCache(log.target_id);
+    } catch {
+      // Keep parity with video post-commit export invalidation: report the
+      // committed result, and emit only a fixed, credential-free diagnostic.
+      console.warn("[audit-restore] event export invalidation failed", "provider_error");
+    }
   }
 
   return { ok: true, message: "復元が完了しました。", restore_run_id: restoreRunId };

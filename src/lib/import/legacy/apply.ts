@@ -1219,7 +1219,7 @@ async function applyEvent(
     snapshotDigest(nextStaff),
   ]);
   const visibilityTransition = existing
-    ? planEventVisibilityTransition({
+    ? await planEventVisibilityTransition({
         db,
         eventId: event.id,
         previousStatus: existing.visibility_status,
@@ -1869,7 +1869,7 @@ async function applyVideo(
       .filter((eventId): eventId is string => !!eventId),
   )];
   const visibilityTransition = existing
-    ? planVideoVisibilityFenceTransition(db, {
+    ? await planVideoVisibilityFenceTransition(db, {
         videoId: video.id,
         previousStatus: existing.visibility_status,
         nextStatus: video.visibility_status,

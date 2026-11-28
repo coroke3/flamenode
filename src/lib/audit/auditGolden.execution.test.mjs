@@ -738,6 +738,35 @@ if (runTestWithTsx(import.meta.url)) {
     assert.deepEqual(warnings, [], "no postcommit warning on a real precommit failure");
   });
 
+  test("SEC-730: an unregistered table name is not copied into persisted capability diagnostics", async () => {
+    const canary = "SEC730_SQL_PARAMS_SECRET_CANARY";
+    const tableName = `unregistered_${canary}`;
+    const [, actual] = await runScenario("sec730_logger_private_table", ({ db }) =>
+      mutateWithAudit(db, {
+        mutationStatements: [touchEvent(db)],
+        expectedMutationChanges: 1,
+        audits: [announcementAudit({
+          table_name: tableName,
+          target_id: "unexpected-1",
+          before: { id: "unexpected-1" },
+          after: { id: "unexpected-1", value: 1 },
+        })],
+      }),
+    );
+    assert.equal(actual.outcome.threw, undefined);
+    assert.equal(actual.audit_logs.length, 1);
+    const row = actual.audit_logs[0];
+    assert.equal(row.table_name, tableName,
+      "canonical audited table identity is retained for internal investigation");
+    assert.equal(row.restore_status, "not_restorable");
+    assert.equal(row.restore_unavailable_reason_code, "adapter_missing");
+    assert.equal(row.restore_unavailable_message, "復元アダプターが見つかりません。");
+    assert.ok(!row.restore_unavailable_message.includes(canary),
+      "client-visible capability diagnostics may not include database-provenance names");
+    assert.equal(actual.events.find((event) => event.id === "evt-1")?.updated_at, 2000,
+      "the original audited update remains committed");
+  });
+
   test("golden: mutateWithAudit / logger / queue wake observable behaviour", async () => {
     const actual = {};
     for (const [name, body, options] of scenarios) {

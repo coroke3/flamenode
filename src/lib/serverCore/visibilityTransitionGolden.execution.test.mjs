@@ -435,7 +435,7 @@ if (runTestWithTsx(import.meta.url)) {
           ["public_to_public", "public", "public"],
           ["pending_to_private", "pending", "private"],
         ]) {
-          const plan = videoTransition.planVideoVisibilityFenceTransition(db, { ...base, previousStatus, nextStatus });
+          const plan = await videoTransition.planVideoVisibilityFenceTransition(db, { ...base, previousStatus, nextStatus });
           out[key] = summarizePlan(plan);
           if (plan.mutationStatements.length > 0) await exec(db, plan.mutationStatements);
         }
@@ -811,7 +811,11 @@ if (runTestWithTsx(import.meta.url)) {
           ["draft_to_archived", "draft", "archived"],
           ["unchanged", "public", "public"],
         ]) {
-          const plan = eventTransition.planEventVisibilityTransition({ ...base, previousStatus, nextStatus });
+          const plan = await eventTransition.planEventVisibilityTransition({ ...base, previousStatus, nextStatus });
+          if (key === "private_to_public" || key === "draft_to_archived") {
+            assert.equal(plan.fenceToken, out.public_to_private.fenceToken,
+              "re-publish and repeated block preserve the D1/R2 fence token");
+          }
           out[key] = summarizePlan(plan);
           if (plan.mutationStatements.length > 0) await exec(db, plan.mutationStatements);
         }
@@ -859,7 +863,6 @@ if (runTestWithTsx(import.meta.url)) {
           options: {
             onFirstPutConflict: raceTo([
               entity("event", "evt-old", "ef_tok", { blocked_at: 88 }),
-              entity("event", "evt-new", "ef_tok"),
             ]),
           },
         },
@@ -867,25 +870,26 @@ if (runTestWithTsx(import.meta.url)) {
     ],
     [
       "event_rename_tombstone_precommit_keeps_previous_entry_details",
-      () => eventTransition.preCommitEventVisibilityRenameTombstone({ eventId: "evt-old", fenceToken: "ef_tok" }),
+      () => eventTransition.preCommitEventVisibilityRenameTombstone({ eventId: "evt-old", fenceToken: "ef_tok", expectedPreviousFenceToken: "ef_prev" }),
       { bucket: seededManifest([entity("event", "evt-old", "ef_prev", { blocked_at: 55, reason: "old reason" })]) },
     ],
     [
       "event_rename_tombstone_precommit_defaults_reason",
-      () => eventTransition.preCommitEventVisibilityRenameTombstone({ eventId: "evt-old", fenceToken: "ef_tok" }),
+      () => eventTransition.preCommitEventVisibilityRenameTombstone({ eventId: "evt-old", fenceToken: "ef_tok", expectedPreviousFenceToken: null }),
     ],
     [
       "event_rename_tombstone_precommit_cas_conflict_uses_latest_entry",
-      () => eventTransition.preCommitEventVisibilityRenameTombstone({ eventId: "evt-old", fenceToken: "ef_tok" }),
+      () => eventTransition.preCommitEventVisibilityRenameTombstone({ eventId: "evt-old", fenceToken: "ef_tok", expectedPreviousFenceToken: "ef_x" }),
       {
         bucket: {
+          ...seededManifest([entity("event", "evt-old", "ef_x", { blocked_at: 55, reason: "stale" })]),
           options: { onFirstPutConflict: raceTo([entity("event", "evt-old", "ef_x", { blocked_at: 66, reason: "latest" })]) },
         },
       },
     ],
     [
       "event_rename_tombstone_precommit_fails_when_confirmation_token_differs",
-      () => eventTransition.preCommitEventVisibilityRenameTombstone({ eventId: "evt-old", fenceToken: "ef_tok" }),
+      () => eventTransition.preCommitEventVisibilityRenameTombstone({ eventId: "evt-old", fenceToken: "ef_tok", expectedPreviousFenceToken: null }),
       { bucket: { options: { afterPut: tamperTo([entity("event", "evt-old", "ef_tampered")]) } } },
     ],
     [
@@ -895,6 +899,7 @@ if (runTestWithTsx(import.meta.url)) {
           eventTransition.compensateEventVisibilityFenceRenameOnD1Failure({
             ...renameInput(),
             previousOldEntry: entity("event", "evt-old", "ef_tok", { blocked_at: 77 }),
+            writtenNewEntry: entity("event", "evt-new", "ef_tok"),
           }),
         ),
       { bucket: seededManifest([entity("event", "evt-new", "ef_tok")]) },
@@ -903,7 +908,7 @@ if (runTestWithTsx(import.meta.url)) {
       "event_compensate_fence_rename_without_previous_entry_bumps_revision",
       () =>
         done(
-          eventTransition.compensateEventVisibilityFenceRenameOnD1Failure({ ...renameInput(), previousOldEntry: null }),
+          eventTransition.compensateEventVisibilityFenceRenameOnD1Failure({ ...renameInput(), previousOldEntry: null, writtenNewEntry: entity("event", "evt-new", "ef_tok") }),
         ),
       { bucket: seededManifest([entity("event", "evt-new", "ef_tok")]) },
     ],
@@ -911,7 +916,7 @@ if (runTestWithTsx(import.meta.url)) {
       "event_compensate_fence_rename_leaves_newer_token_alone",
       () =>
         done(
-          eventTransition.compensateEventVisibilityFenceRenameOnD1Failure({ ...renameInput(), previousOldEntry: null }),
+          eventTransition.compensateEventVisibilityFenceRenameOnD1Failure({ ...renameInput(), previousOldEntry: null, writtenNewEntry: entity("event", "evt-new", "ef_tok") }),
         ),
       { bucket: seededManifest([entity("event", "evt-new", "ef_newer")]) },
     ],
@@ -919,7 +924,7 @@ if (runTestWithTsx(import.meta.url)) {
       "event_compensate_fence_rename_logs_stuck_after_three_failures",
       () =>
         done(
-          eventTransition.compensateEventVisibilityFenceRenameOnD1Failure({ ...renameInput(), previousOldEntry: null }),
+          eventTransition.compensateEventVisibilityFenceRenameOnD1Failure({ ...renameInput(), previousOldEntry: null, writtenNewEntry: entity("event", "evt-new", "ef_tok") }),
         ),
       { bucket: { ...seededManifest([entity("event", "evt-new", "ef_tok")]), options: { failPuts: true } } },
     ],
@@ -931,6 +936,7 @@ if (runTestWithTsx(import.meta.url)) {
             eventId: "evt-old",
             fenceToken: "ef_tok",
             previousEntry: entity("event", "evt-old", "ef_prev", { blocked_at: 55 }),
+            writtenEntry: entity("event", "evt-old", "ef_tok"),
           }),
         ),
       { bucket: seededManifest([entity("event", "evt-old", "ef_tok")]) },
@@ -943,6 +949,7 @@ if (runTestWithTsx(import.meta.url)) {
             eventId: "evt-old",
             fenceToken: "ef_tok",
             previousEntry: null,
+            writtenEntry: entity("event", "evt-old", "ef_tok"),
           }),
         ),
       { bucket: { ...seededManifest([entity("event", "evt-old", "ef_tok")]), options: { failPuts: true } } },
@@ -1238,6 +1245,212 @@ if (runTestWithTsx(import.meta.url)) {
 
   const scenarios = [...videoScenarios, ...eventScenarios, ...fenceScenarios, ...moderationScenarios];
 
+  test("Issue #659: real video public-private-public-private sequence keeps the same D1/R2 fence owner", async () => {
+    const [, result] = await runScenario(
+      "video_repeated_visibility_cycle_same_owner",
+      async ({ db }) => {
+        const tokens = [];
+        const statuses = ["private", "public", "private"];
+        for (const nextStatus of statuses) {
+          const current = await loadVideo(db);
+          const plan = await planVideo(db, current, { nextStatus, reason: "cycle" });
+          assert.equal(plan.validationError, undefined);
+          assert.equal(plan.expectedMutationChanges[0], 1, "video CAS must be planned");
+          assert.equal(plan.expectedMutationChanges[1], 1, "D1 fence CAS must be planned");
+          assert.ok(plan.fenceToken, "a boundary crossing must produce a fence owner");
+          tokens.push(plan.fenceToken);
+          // The same CURRENT bridge and synthetic ETag CAS R2 host are used
+          // by the production status transition. R2 must be blocked before
+          // committing the canonical D1 transition on every crossing.
+          await videoTransition.preCommitVideoVisibilityDepublicization({
+            videoId: "vid-1", fenceToken: plan.fenceToken, reason: "cycle",
+          });
+          await exec(db, plan.mutationStatements);
+          const confirmed = await loadVideo(db);
+          assert.equal(confirmed.visibility_status, nextStatus,
+            "the canonical video must commit the requested status");
+        }
+        return { tokens, statuses };
+      },
+      { setup: withVideo({}) },
+    );
+    assert.equal(result.outcome.threw, undefined,
+      "valid repeated transitions must not mistake their own R2 block for a foreign writer");
+    const { tokens } = result.outcome.returned;
+    assert.equal(tokens.length, 3);
+    assert.match(tokens[0], /^vf_/);
+    assert.deepEqual(tokens, [tokens[0], tokens[0], tokens[0]],
+      "public-private-public-private must preserve the same active D1/R2 token");
+    assert.equal(result.videos[0].visibility_status, "private");
+    assert.equal(result.public_visibility_fences.length, 1);
+    assert.equal(result.public_visibility_fences[0].state, "blocked");
+    assert.equal(result.public_visibility_fences[0].fence_token, tokens[0]);
+    assert.equal(result.manifest_after.entities.length, 1);
+    assert.equal(result.manifest_after.entities[0].fence_token, tokens[0]);
+    const puts = result.log.filter((entry) => entry.op === "r2.put");
+    assert.equal(puts.length, 3, "one conditional R2 precommit per public-boundary crossing");
+    assert.equal(result.log.filter((entry) => entry.op === "batch.commit").length, 3);
+  });
+
+  test("Issue #659: video planner reuses active D1 fence tokens for legitimate republish", async () => {
+    for (const state of ["blocked", "release_pending"]) {
+      const [, result] = await runScenario(
+        `video_existing_${state}_republish`,
+        async ({ db }) => {
+          const video = await loadVideo(db);
+          const plan = await planVideo(db, video, { nextStatus: "public", reason: "republish" });
+          assert.equal(plan.fenceToken, "vf_existing", "the observed active D1 token is reused");
+          assert.equal(plan.expectedMutationChanges[1], 1);
+          await videoTransition.preCommitVideoVisibilityDepublicization({
+            videoId: "vid-1", fenceToken: plan.fenceToken, reason: "republish",
+          });
+          await exec(db, plan.mutationStatements);
+          return { token: plan.fenceToken, state: "release_pending" };
+        },
+        {
+          setup: (sqlite) => {
+            seedVideo(sqlite, { visibility_status: "private" });
+            seedFence(sqlite, { fence_token: "vf_existing", state,
+              requirements_json: '{"release_guard":"legacy"}',
+            });
+          },
+          bucket: seededManifest([entity("video", "vid-1", "vf_existing")]),
+        },
+      );
+      assert.equal(result.outcome.threw, undefined, state);
+      assert.deepEqual(result.outcome.returned, { token: "vf_existing", state: "release_pending" });
+      assert.equal(result.videos[0].visibility_status, "public");
+      assert.equal(result.public_visibility_fences[0].fence_token, "vf_existing");
+      assert.equal(result.public_visibility_fences[0].state, "release_pending");
+      assert.equal(result.public_visibility_fences[0].requirements_json,
+        '{"release_guard":"legacy"}',
+        "a valid reuse must not erase existing D1 release requirements");
+      assert.equal(result.manifest_after.entities[0].fence_token, "vf_existing");
+    }
+  });
+
+  test("Issue #659: lightweight video planner also preserves D1 release requirements", async () => {
+    const [, result] = await runScenario(
+      "video_lightweight_preserve_requirements",
+      async ({ db }) => {
+        const plan = await videoTransition.planVideoVisibilityFenceTransition(db, {
+          videoId: "vid-1", previousStatus: "private", nextStatus: "public",
+          actorUserId: "u-actor", reason: "audit_restore_visibility", now: 1760000100,
+        });
+        assert.equal(plan.fenceToken, "vf_existing");
+        await exec(db, plan.mutationStatements);
+        return plan.fenceToken;
+      },
+      {
+        setup: (sqlite) => {
+          seedVideo(sqlite, { visibility_status: "private" });
+          seedFence(sqlite, {
+            fence_token: "vf_existing",
+            state: "blocked",
+            requirements_json: '{"release_guard":"legacy"}',
+          });
+        },
+      },
+    );
+    assert.equal(result.outcome.threw, undefined);
+    assert.equal(result.outcome.returned, "vf_existing");
+    assert.equal(result.public_visibility_fences[0].state, "release_pending");
+    assert.equal(result.public_visibility_fences[0].requirements_json,
+      '{"release_guard":"legacy"}',
+      "audit restore/import must preserve the previous release conditions");
+  });
+
+  test("Issue #659: video planner D1 fence CAS denies token, state or deleted-row races", async () => {
+    for (const race of ["foreign-token", "state-only", "vanished-row"]) {
+      const [, result] = await runScenario(
+        `video_fence_d1_${race}`,
+        async ({ db, sqlite }) => {
+          const plan = await planVideo(db, await loadVideo(db), { nextStatus: "public" });
+          assert.equal(plan.fenceToken, "vf_existing");
+          if (race === "foreign-token") {
+            sqlite.prepare("UPDATE public_visibility_fences SET fence_token = ? WHERE entity_type = 'video' AND entity_id = 'vid-1'")
+              .run("vf_foreign_owner");
+          } else if (race === "state-only") {
+            sqlite.prepare("UPDATE public_visibility_fences SET state = 'release_pending' WHERE entity_type = 'video' AND entity_id = 'vid-1'").run();
+          } else {
+            sqlite.prepare("DELETE FROM public_visibility_fences WHERE entity_type = 'video' AND entity_id = 'vid-1'").run();
+          }
+          // Execute the exact planned fence SQL by itself. A zero-row result
+          // makes strict mutateWithAudit [1] fail and roll back the real batch.
+          const stmt = plan.mutationStatements[1].toSQL();
+          const changed = sqlite.prepare(stmt.sql).run(...stmt.params).changes;
+          return { changed, plannedToken: plan.fenceToken };
+        },
+        {
+          setup: (sqlite) => {
+            seedVideo(sqlite, { visibility_status: "private" });
+            seedFence(sqlite, { fence_token: "vf_existing", state: "blocked" });
+          },
+        },
+      );
+      assert.equal(result.outcome.threw, undefined, race);
+      assert.equal(result.outcome.returned.changed, 0, "conditional update must fail closed");
+      assert.equal(result.public_visibility_fences.length, race === "vanished-row" ? 0 : 1);
+      if (race === "foreign-token") {
+        assert.equal(result.public_visibility_fences[0].fence_token, "vf_foreign_owner",
+          "foreign owner is not overwritten");
+      } else if (race === "state-only") {
+        assert.equal(result.public_visibility_fences[0].fence_token, "vf_existing");
+        assert.equal(result.public_visibility_fences[0].state, "release_pending",
+          "a same-token concurrent state change is never reverted by stale planning");
+      }
+    }
+  });
+
+  test("Issue #659: audit-restore video fence SQL denies token/state races, DELETE and late INSERT", async () => {
+    for (const race of ["foreign-token", "state-only", "vanished-row", "late-insert"]) {
+      const [, result] = await runScenario(
+        `video_lightweight_fence_d1_${race}`,
+        async ({ db, sqlite }) => {
+          const plan = await videoTransition.planVideoVisibilityFenceTransition(db, {
+            videoId: "vid-1", previousStatus: "private", nextStatus: "public",
+            actorUserId: "u-actor", reason: "audit_restore_visibility", now: 1760000100,
+          });
+          assert.deepEqual(plan.expectedMutationChanges, [1]);
+          assert.equal(plan.mutationStatements.length, 1);
+          if (race === "foreign-token") {
+            sqlite.prepare("UPDATE public_visibility_fences SET fence_token = ? WHERE entity_type = 'video' AND entity_id = 'vid-1'")
+              .run("vf_foreign_owner");
+          } else if (race === "state-only") {
+            sqlite.prepare("UPDATE public_visibility_fences SET state = 'release_pending' WHERE entity_type = 'video' AND entity_id = 'vid-1'").run();
+          } else if (race === "vanished-row") {
+            sqlite.prepare("DELETE FROM public_visibility_fences WHERE entity_type = 'video' AND entity_id = 'vid-1'").run();
+          } else {
+            seedFence(sqlite, { fence_token: "vf_foreign_owner", state: "blocked" });
+          }
+          const statement = plan.mutationStatements[0].toSQL();
+          const changed = sqlite.prepare(statement.sql).run(...statement.params).changes;
+          return { changed, token: plan.fenceToken };
+        },
+        {
+          setup: (sqlite) => {
+            seedVideo(sqlite, { visibility_status: "private" });
+            if (race !== "late-insert") {
+              seedFence(sqlite, { fence_token: "vf_existing", state: "blocked" });
+            }
+          },
+        },
+      );
+      assert.equal(result.outcome.threw, undefined, race);
+      assert.equal(result.outcome.returned.changed, 0,
+        "strict [1] expectation rejects foreign token, disappeared row, or late inserted owner");
+      assert.equal(result.public_visibility_fences.length, race === "vanished-row" ? 0 : 1);
+      if (race === "state-only") {
+        assert.equal(result.public_visibility_fences[0].fence_token, "vf_existing");
+        assert.equal(result.public_visibility_fences[0].state, "release_pending",
+          "a same-token concurrent state owner must be preserved");
+      } else if (race !== "vanished-row") {
+        assert.equal(result.public_visibility_fences[0].fence_token, "vf_foreign_owner",
+          "the concurrent D1 owner must not be overwritten");
+      }
+    }
+  });
+
   test("golden: video / event / event_group / x_user visibility transition planners and open cases", async () => {
     const actual = {};
     for (const [name, body, options] of scenarios) {
@@ -1258,4 +1471,32 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(serialized, expected);
     assert.equal(Object.keys(actual).length, scenarios.length);
   });
+  test("Issue #679: event compensation preserves any active foreign D1 fence", async () => {
+    for (const state of ["blocked", "release_pending"]) {
+      const [, result] = await runScenario(
+        `event_compensate_foreign_${state}_d1_fence`,
+        ({ db }) => done(compensateEvent(db, "evt-1")),
+        {
+          setup: (sqlite) => seedFence(sqlite, {
+            entity_type: "event",
+            entity_id: "evt-1",
+            fence_token: "ef_foreign_owner",
+            state,
+          }),
+          bucket: seededManifest([entity("event", "evt-1", "ef_tok")]),
+        },
+      );
+      assert.deepEqual(result.outcome, { returned: "done" }, state);
+      assert.equal(result.public_visibility_fences.length, 1, state);
+      assert.equal(result.public_visibility_fences[0].fence_token, "ef_foreign_owner", state);
+      assert.equal(result.public_visibility_fences[0].state, state);
+      assert.equal(result.manifest_after.entities[0].fence_token, "ef_tok", state);
+      assert.equal(
+        result.log.some((entry) => entry.op === "r2.get" || entry.op === "r2.put"),
+        false,
+        "an active D1 fence prevents reading or rewriting the R2 manifest",
+      );
+    }
+  });
+
 }
