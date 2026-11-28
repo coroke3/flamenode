@@ -12,10 +12,13 @@ import { fileURLToPath } from "node:url";
 import { MessageChannel } from "node:worker_threads";
 import { EventForm } from "../.test-dist/apps/ops/src/components/event/EventForm.js";
 import { eventFormStyles, eventFormCss } from "../.test-dist/apps/ops/src/components/event/eventFormStyles.js";
-import { portCssModule } from "../scripts/portCssModule.mjs";
+import { editorCss, fieldCss } from "../.test-dist/apps/ops/src/components/event/eventCustomQuestionsStyles.js";
+import { youtubeTemplateEditorCss } from "../.test-dist/apps/ops/src/components/event/youtubeDescriptionTemplateEditorStyles.js";
+import { buildEventFormCss, portCssModule } from "../scripts/portCssModule.mjs";
 import { buildFormDraftStorageKey } from "../.test-dist/apps/ops/src/lib/useFormDraft.js";
 
 const read = path => readFileSync(new URL(path, import.meta.url), "utf8");
+const generatedEventFormCss = read("../src/styles/event-form.css");
 const noop = async () => ({ ok: false });
 const base = { mode: "create", createEvent: noop, updateEvent: noop, router: { push() {}, refresh() {} } };
 const field = (form, name) => form.querySelector('[name="' + name + '"]');
@@ -45,6 +48,10 @@ test("U01 preserves CURRENT JSX, submit flow and generated CSS selectors", () =>
     .replace("</Link>", "</a>");
   assert.equal(targetRender, current.slice(current.indexOf(renderStart)));
   assert.equal(eventFormCss, portCssModule(read("../../../src/components/admin/EventForm.module.css"), "ops-event-form"));
+  assert.equal(buildEventFormCss(), generatedEventFormCss);
+  for (const css of [eventFormCss, editorCss, fieldCss, youtubeTemplateEditorCss]) {
+    assert.ok(generatedEventFormCss.includes(css), "generated stylesheet preserves every CURRENT EventForm editor CSS module");
+  }
   for (const match of target.matchAll(/\bstyles\.([A-Za-z]\w*)/g)) {
     assert.equal(eventFormStyles[match[1]], "ops-event-form-" + match[1]);
     assert.ok(eventFormCss.includes("." + eventFormStyles[match[1]]));
