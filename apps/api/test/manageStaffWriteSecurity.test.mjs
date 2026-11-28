@@ -938,7 +938,7 @@ test("SEC-800: genuine non-owner denial remains the fixed 409 after both reads s
       "INSERT INTO x_user_account_links (auth_user_id, x_user_id, link_role) VALUES ('admin-2', 'other_owner_x', 'owner');\n" +
       "UPDATE event_staff SET x_user_id = 'other_owner_x' WHERE id = 's-owner';\n" +
       "INSERT INTO event_staff (id, event_id, x_user_id, display_name, permission_preset, custom_permission_keys_json, is_public, created_at, updated_at) " +
-      "VALUES ('s-member', 'ev-1', 'owner_x', 'Member Manager', 'custom', '[\\"event.members\\"]', 0, 1, 1);"
+      "VALUES ('s-member', 'ev-1', 'owner_x', 'Member Manager', 'custom', json_array('event.members'), 0, 1, 1);"
     );
     const before = s.before();
     await withThrowingDiagnostics(async ({ errors, warnings }) => {
