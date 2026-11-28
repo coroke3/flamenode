@@ -5,6 +5,7 @@ import {
   preCommitEventVisibilityFenceRename,
   preCommitEventVisibilityRenameTombstone,
   compensateEventVisibilityFenceRenameOnD1Failure,
+  compensateEventVisibilityFenceOnD1Failure,
   compensateEventVisibilityRenameTombstoneOnD1Failure,
 } from "@flamenode/server-core/visibility/eventTransition";
 import { preCommitPublicVisibilityFence, compensatePublicVisibilityFenceOnD1Failure } from "@flamenode/server-core/visibility/fenceTransition";
@@ -468,6 +469,48 @@ test("Issue #659: generic compensation must preserve R2 while a foreign D1 fence
     assert.equal(calls.selects, 1, "one authoritative D1 fence read");
     assert.equal(host.reads, 0, "R2 must not be read for a foreign active D1 fence");
     assert.equal(host.attemptedWrites, 0, "no R2 DELETE/PUT may release its block");
+    assert.deepEqual(host.manifest, initial, state);
+  }
+});
+
+test("Issue #659: event compensation preserves R2 while a foreign active D1 fence owns the event", async () => {
+  for (const state of ["blocked", "release_pending"]) {
+    const calls = { selects: 0 };
+    const db = {
+      select() {
+        return {
+          from() {
+            return {
+              where() {
+                return {
+                  async limit() {
+                    calls.selects += 1;
+                    if (calls.selects === 1) return [{ visibility_status: "public" }];
+                    if (calls.selects === 2) {
+                      return [{ fence_token: "foreign-writer", state }];
+                    }
+                    throw new Error("unexpected extra D1 read");
+                  },
+                };
+              },
+            };
+          },
+        };
+      },
+    };
+    const initial = manifestOf(
+      entry("event", "event-one", "incoming"),
+      entry("video", "unrelated", "untouched"),
+    );
+    const host = hostOf(initial);
+    await compensateEventVisibilityFenceOnD1Failure(
+      db,
+      { eventId: "event-one", fenceToken: "incoming" },
+      host.host,
+    );
+    assert.equal(calls.selects, 2, "read event and authoritative D1 fence once");
+    assert.equal(host.reads, 0, "do not read R2 while a foreign active D1 fence owns the event");
+    assert.equal(host.attemptedWrites, 0, "do not remove the R2 block owned by the failed precommit");
     assert.deepEqual(host.manifest, initial, state);
   }
 });
