@@ -38,7 +38,7 @@ function stopTree(child) {
   });
 }
 
-test("U04a-U04f: local workerd/D1 actor history, bounded reader, lease retention, measurements and backfill", { timeout: 120_000 }, async () => {
+test("U04a-U04g: local workerd/D1 actor history, bounded reader, lease retention, measurements and backfill", { timeout: 120_000 }, async () => {
   const loggerSource = fs.readFileSync(path.join(REPO_ROOT, "packages/server-core/src/audit/logger.ts"), "utf8");
   assert.match(loggerSource, /discord_id: row\.discord_id \?\? null,[\s\S]*discord_name: row\.discord_name \?\? null,[\s\S]*x_user_id: row\.active_x_user_id \?\? null,[\s\S]*x_name: row\.x_name \?\? null,[\s\S]*icon_url: row\.x_icon_url \|\| row\.user_image \|\| null/);
 
@@ -158,6 +158,55 @@ test("U04a-U04f: local workerd/D1 actor history, bounded reader, lease retention
     "  const oldRow=(await all(db,'SELECT typeof(x_name) AS name_type,hex(CAST(x_name AS BLOB)) AS name_hex,typeof(icon_url) AS icon_type,hex(CAST(icon_url AS BLOB)) AS icon_hex FROM u04f_x_history WHERE version=?',[old.v]))[0];",
     "  const retained=oldRow?.name_type==='text'&&oldRow?.name_hex==='FF8000C3'&&oldRow?.icon_type==='blob'&&oldRow?.icon_hex==='FF8000C3'&&(await version('u04f_x','legacy'))>old.v&&(await snapshot('u04f_x','legacy')).match;",
     "  return {initialZero,prefilled,first,replay,replayStable,rollback,retry,user,concurrentOnce,versionsDistinct,rawAndDecoded,rawLegacy,userLegacy,retained,sequence:await seq(),historyRows:(await count('u04f_user'))+(await count('u04f_x')),productionRowsScanned:0};",
+    "}",
+    "async function probePendingBackfill(db) {",
+    "  // A separate disposable actor table with the baseline's ordinary rowid/TEXT PK shape.",
+    "  // Keep the target identity entirely in SQL; never bind a decoded legacy ID or a JS Number rowid.",
+    "  await run(db, 'CREATE TABLE u04g_actor (id TEXT PRIMARY KEY NOT NULL, label TEXT NOT NULL, image TEXT, actor_snapshot_version INTEGER NOT NULL DEFAULT 0)');",
+    "  await run(db, 'CREATE TABLE u04g_history (version INTEGER PRIMARY KEY, id TEXT, label TEXT, image TEXT)');",
+    "  await run(db, \"CREATE TABLE u04g_seq (id INTEGER PRIMARY KEY CHECK(id=1), n INTEGER NOT NULL CHECK(typeof(n)='integer' AND n BETWEEN 0 AND 9007199254740991))\");",
+    "  await run(db, 'INSERT INTO u04g_seq VALUES(1,0)');",
+    "  await run(db, 'CREATE TABLE u04g_failure (v INTEGER CHECK(v=1))');",
+    "  await run(db, 'CREATE INDEX u04g_pending_actor ON u04g_actor(actor_snapshot_version) WHERE actor_snapshot_version=0');",
+    "  await run(db, \"INSERT INTO u04g_actor(rowid,id,label,image) VALUES(-9223372036854775808,'','empty',CAST(X'FF8000C3' AS TEXT)),(-3,'A','text-A',CAST(X'FF8000C3' AS TEXT)),(-1,X'41','blob-A',CAST(X'FF8000C3' AS TEXT)),(0,CAST(X'FF' AS TEXT),'malformed',CAST(X'FF8000C3' AS TEXT)),(1,CAST(X'EFBFBD' AS TEXT),'replacement',CAST(X'FF8000C3' AS TEXT)),(9007199254740993,CAST(X'610062' AS TEXT),'NUL',CAST(X'FF8000C3' AS TEXT)),(9223372036854775806,CAST(X'EFBBBF61' AS TEXT),'BOM',CAST(X'FF8000C3' AS TEXT)),(9223372036854775807,?,'large',CAST(X'FF8000C3' AS TEXT))\", ['L'.repeat(100000)]);",
+    "  const pick='SELECT rowid FROM u04g_actor WHERE actor_snapshot_version=0 ORDER BY rowid LIMIT 1';",
+    "  const pending='rowid=('+pick+') AND actor_snapshot_version=0';",
+    "  const statements=[",
+    "    'UPDATE u04g_seq SET n=n+1 WHERE id=1 AND EXISTS(SELECT 1 FROM u04g_actor WHERE actor_snapshot_version=0)',",
+    "    'INSERT INTO u04g_history(version,id,label,image) SELECT (SELECT n FROM u04g_seq WHERE id=1),id,label,image FROM u04g_actor WHERE '+pending,",
+    "    'UPDATE u04g_actor SET actor_snapshot_version=(SELECT n FROM u04g_seq WHERE id=1) WHERE '+pending,",
+    "  ];",
+    "  const plans=await Promise.all([pick,...statements].map(sql=>all(db,'EXPLAIN QUERY PLAN '+sql)));",
+    "  const indexed=plans.every(plan=>plan.some(r=>String(r.detail).includes('u04g_pending_actor')) && !plan.some(r=>String(r.detail).includes('TEMP B-TREE')));",
+    "  const locators=(await all(db,'SELECT CAST(rowid AS TEXT) AS locator FROM u04g_actor WHERE actor_snapshot_version=0 ORDER BY rowid LIMIT 8')).map(r=>r.locator);",
+    "  const exactLocators=locators.join(',')==='-9223372036854775808,-3,-1,0,1,9007199254740993,9223372036854775806,9223372036854775807' && locators.every(v=>typeof v==='string'&&v.length<=20);",
+    "  const count=async(table)=>Number((await all(db,'SELECT COUNT(*) AS n FROM '+table))[0].n);",
+    "  const sequence=async()=>Number((await all(db,'SELECT n FROM u04g_seq WHERE id=1'))[0].n);",
+    "  const pendingCount=async()=>Number((await all(db,'SELECT COUNT(*) AS n FROM u04g_actor WHERE actor_snapshot_version=0'))[0].n);",
+    "  async function backfill(lateFailure=false) {",
+    "    const batch=statements.map(sql=>db.prepare(sql));",
+    "    if(lateFailure)batch.push(db.prepare('INSERT INTO u04g_failure VALUES(2)'));",
+    "    const results=await db.batch(batch);",
+    "    if(!results.every(r=>r.success===true))throw new Error('pending backfill failed');",
+    "    return results.map(r=>({changes:Number(r.meta?.changes??-1),rowsRead:Number(r.meta?.rows_read??-1),rowsWritten:Number(r.meta?.rows_written??-1)}));",
+    "  }",
+    "  const rejects=async(lateFailure=false)=>{try{await backfill(lateFailure);return false;}catch{return true;}};",
+    "  const lateRollback=await rejects(true) && (await sequence())===0 && (await count('u04g_history'))===0 && (await pendingCount())===8;",
+    "  await run(db,'DELETE FROM u04g_seq');",
+    "  const missingRollback=await rejects() && (await count('u04g_history'))===0 && (await pendingCount())===8;",
+    "  await run(db,'INSERT INTO u04g_seq VALUES(1,9007199254740991)');",
+    "  const exhaustedRollback=await rejects() && (await sequence())===9007199254740991 && (await count('u04g_history'))===0 && (await pendingCount())===8;",
+    "  await run(db,'UPDATE u04g_seq SET n=0');",
+    "  // Simulate locator movement before the next transaction. No externally selected cursor is retained.",
+    "  await run(db,\"UPDATE u04g_actor SET rowid=-10 WHERE label='empty'\");",
+    "  const results=await Promise.all(Array.from({length:8},()=>backfill()));",
+    "  const oneEach=results.every(batch=>batch.length===3&&batch.every(r=>r.changes===1));",
+    "  const receiptMetadata=results.every(batch=>batch.every(r=>Number.isFinite(r.rowsRead)&&r.rowsRead>=0&&Number.isFinite(r.rowsWritten)&&r.rowsWritten>=0));",
+    "  const rawMatch=Number((await all(db,\"SELECT COUNT(*) AS n FROM u04g_actor a JOIN u04g_history h ON h.version=a.actor_snapshot_version WHERE a.label=h.label AND typeof(a.id)=typeof(h.id) AND hex(CAST(a.id AS BLOB))=hex(CAST(h.id AS BLOB)) AND typeof(a.image)=typeof(h.image) AND hex(CAST(a.image AS BLOB))=hex(CAST(h.image AS BLOB))\"))[0].n);",
+    "  const distinct=Number((await all(db,'SELECT COUNT(DISTINCT actor_snapshot_version) AS n FROM u04g_actor WHERE actor_snapshot_version>0'))[0].n);",
+    "  const replay=[await backfill(),await backfill()];",
+    "  const replayNoop=replay.every(batch=>batch.length===3&&batch.every(r=>r.changes===0));",
+    "  return {indexed,exactLocators,lateRollback,missingRollback,exhaustedRollback,oneEach,receiptMetadata,rawMatch,distinct,replayNoop,sequence:await sequence(),pending:await pendingCount(),historyRows:await count('u04g_history'),batchMetrics:results,productionRowsScanned:0};",
     "}",
     "async function probe(db) {",
     "  await run(db, 'CREATE TABLE IF NOT EXISTS u04a_user (id TEXT PRIMARY KEY, discord_id TEXT, name TEXT, active_x_user_id TEXT, image TEXT, actor_snapshot_version INTEGER NOT NULL DEFAULT 0)');",
@@ -542,6 +591,7 @@ test("U04a-U04f: local workerd/D1 actor history, bounded reader, lease retention
     "  const metricMetas = [baselineUserMeta, triggeredUserMeta, baselineXMeta, triggeredXMeta, baselineBulkMeta, triggeredBulkMeta, ...concurrentMeta];",
     "  const metrics = { metadataAvailable: metricMetas.every(meta => Number.isFinite(Number(meta?.rows_written)) && Number.isFinite(Number(meta?.duration))), single: { user: { baseline: metricMeta(baselineUserMeta), triggered: metricMeta(triggeredUserMeta) }, x: { baseline: metricMeta(baselineXMeta), triggered: metricMeta(triggeredXMeta) } }, bulkX: { count: bulkRows.length, baseline: metricMeta(baselineBulkMeta), triggered: metricMeta(triggeredBulkMeta) }, concurrent: { count: concurrentMeta.length, sequenceDelta: Number(sequenceAfterConcurrent) - Number(sequenceBeforeConcurrent), rowsWritten: concurrentMeta.reduce((sum, meta) => sum + Number(meta?.rows_written ?? 0), 0), maxDurationMs: Math.max(...concurrentMeta.map(meta => Number(meta?.duration ?? 0))) }, historyPayloadBytes: userPayloadBytes + xPayloadBytes, syntheticBackfill: { source: 'synthetic-fixture-only', productionRowsScanned: 0, largeImageBytes: new TextEncoder().encode(largeImage).length, largeIconBytes: new TextEncoder().encode(largeIcon).length, userPayloadBytes, xPayloadBytes } };",
     "  const backfill = await probeBackfill(db);",
+    "  const pendingBackfill = await probePendingBackfill(db);",
     "  // Exhaustion is terminal for this disposable fixture. Explicit RAISE(ABORT)",
     "  // must not be weakened by an outer OR IGNORE or OR FAIL statement.",
     "  const allocatorOut = [];",
@@ -563,7 +613,7 @@ test("U04a-U04f: local workerd/D1 actor history, bounded reader, lease retention
     "  const missingFailed = await batchFailed([db.prepare(\"UPDATE OR IGNORE u04a_x_users SET x_name='after-missing' WHERE id='u04a-x'\")]);",
     "  const missing = { failed: missingFailed, versions: await getVersions(), name: (await all(db, sourceSql, ['admin-1']))[0]?.x_name, rows: (await all(db, 'SELECT n FROM u04a_actor_sequence')).length };",
     "  const allocator = { fractionalRejected, oldVersions, atMaxSeq, maxToken, allocatorOut, overflowBatch, missing };",
-    "return { cases: casesOut, blobCanonicalJson: blobCase?.sourceJson ?? null, blobJson1FixtureMatches, json1, json1Error, staleChanges, staleCount, rollbackFailed, rollbackCount, abandonedCount, successRef, fenceOut, positive, interleaving, interleavingFence, interleavingFailure, interleavingFailureFence, immutableHistory, immutableHistoryFailureOut, immutableHistoryLifecycle, cleanupRace: { noFk: cleanupNoFk, fk: cleanupFk }, reader, leaseLifecycle, leaseOrphan, leaseExpiry, lateRollback, allocator, metrics, backfill };",
+    "return { cases: casesOut, blobCanonicalJson: blobCase?.sourceJson ?? null, blobJson1FixtureMatches, json1, json1Error, staleChanges, staleCount, rollbackFailed, rollbackCount, abandonedCount, successRef, fenceOut, positive, interleaving, interleavingFence, interleavingFailure, interleavingFailureFence, immutableHistory, immutableHistoryFailureOut, immutableHistoryLifecycle, cleanupRace: { noFk: cleanupNoFk, fk: cleanupFk }, reader, leaseLifecycle, leaseOrphan, leaseExpiry, lateRollback, allocator, metrics, backfill, pendingBackfill };",
     "}",
     "export default {",
     "  async fetch(request, env) {",
@@ -757,6 +807,16 @@ test("U04a-U04f: local workerd/D1 actor history, bounded reader, lease retention
       rawAndDecoded: true, rawLegacy: true, userLegacy: true, retained: true,
       sequence: 7, historyRows: 7, productionRowsScanned: 0,
     });
+    const pendingBackfill = body.pendingBackfill;
+    console.log('U04G_PENDING_BACKFILL ' + JSON.stringify(pendingBackfill));
+    const { batchMetrics, ...pendingReceipt } = pendingBackfill;
+    assert.deepEqual(pendingReceipt, {
+      indexed: true, exactLocators: true, lateRollback: true, missingRollback: true,
+      exhaustedRollback: true, oneEach: true, receiptMetadata: true, rawMatch: 8,
+      distinct: 8, replayNoop: true, sequence: 8, pending: 0, historyRows: 8,
+      productionRowsScanned: 0,
+    });
+    assert.equal(batchMetrics.length, 8);
     const allocator = body.allocator;
     assert.equal(allocator.fractionalRejected, true);
     assert.equal(allocator.atMaxSeq, Number.MAX_SAFE_INTEGER);
