@@ -13,10 +13,11 @@ export const MODULES = [
 const root = new URL("../../../", import.meta.url);
 
 export function buildSharedCss() {
-  return MODULES.filter(([, , target]) => target === "apps/ops/src/styles/shared.css").map(([prefix, from]) => {
+  const generated = MODULES.filter(([, , target]) => target === "apps/ops/src/styles/shared.css").map(([prefix, from]) => {
     const source = fs.readFileSync(new URL(from, root), "utf8");
     return `/* Generated from CURRENT ${from}; prefix=${prefix}. */\n${portCssModule(source, prefix).trimEnd()}`;
   }).join("\n\n") + "\n";
+  return "/* MIG-0724: Ops shared CSS loads video-review styling without Node.js ESM CSS imports. */\n@import \"./video-review.css\";\n\n" + generated;
 }
 
 export function buildManageCss() {
