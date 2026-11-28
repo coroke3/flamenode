@@ -514,3 +514,67 @@ test("SEC-800: projection and diagnostic failure after strict audit preserves or
     }
   }
 });
+
+test("SEC-800: CSV assignment and X validation precedence matches CURRENT for mixed-invalid rows", async () => {
+  const valid = csv().rows[0];
+  const cases = [
+    {
+      name: "owner assignment before duplicate X",
+      rows: [valid, { ...valid, lineNumber: 4, permission_preset: "owner" }],
+      status: 409,
+      message: "4行目: 代表者の追加・変更はCSVでは行えません。専用の代表者移譲操作を使用してください。",
+    },
+    {
+      name: "admin-only assignment before duplicate X",
+      rows: [valid, { ...valid, lineNumber: 4, permission_preset: "custom", permission_keys: ["xid.link_requests"] }],
+      status: 400,
+      message: "site admin 専用権限は付与できません。",
+    },
+    {
+      name: "owner assignment before invalid X",
+      rows: [valid, { ...valid, lineNumber: 4, permission_preset: "owner", x_user_id: "@@" }],
+      status: 409,
+      message: "4行目: 代表者の追加・変更はCSVでは行えません。専用の代表者移譲操作を使用してください。",
+    },
+    {
+      name: "admin-only assignment before invalid X",
+      rows: [valid, { ...valid, lineNumber: 4, permission_preset: "custom", permission_keys: ["xid.link_requests"], x_user_id: "@@" }],
+      status: 400,
+      message: "site admin 専用権限は付与できません。",
+    },
+    {
+      name: "later invalid X before earlier duplicate detection",
+      rows: [
+        valid,
+        { ...valid, lineNumber: 4 },
+        { ...valid, lineNumber: 5, x_user_id: "@@" },
+      ],
+      status: 400,
+      message: "5行目: X IDが不正です",
+    },
+  ];
+  const s = setup({
+    user: MEMBER,
+    fault: { match: staffRead, error: new Error(CANARY) },
+  });
+  try {
+    await withThrowingDiagnostics(async ({ errors, warnings }) => {
+      for (const item of cases) {
+        const result = await s.send("POST", "/csv", {
+          reason: "CURRENT mixed-invalid precedence",
+          rows: item.rows,
+        });
+        assert.equal(result.status, item.status, item.name + ": " + await result.clone().text());
+        assert.deepEqual(await result.json(), { ok: false, message: item.message }, item.name);
+        assert.equal(result.headers.get("cache-control"), "private, no-store", item.name);
+      }
+      assert.deepEqual(errors, []);
+      assert.equal(warnings(), 0);
+    });
+    assert.equal(s.receipt.readFaults, 0, "all validation failures precede preparation reads");
+    assert.equal(s.stats.batches, 0);
+    assert.deepEqual(s.before(), s.initial);
+  } finally {
+    s.sqlite.close();
+  }
+});

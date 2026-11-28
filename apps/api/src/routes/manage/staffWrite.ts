@@ -404,20 +404,15 @@ export function registerStaffWriteRoutes(app: Hono<AppEnv>): void {
       };
     };
     const normalized: CsvNormalized[] = [];
-    const seen = new Map<string, number>();
     try {
       for (const row of parsed.data.rows) {
-        const xId = parseCanonicalXId(row.x_user_id);
-        if (!xId) return deny(c, `${row.lineNumber}行目: X IDが不正です`, 400);
-        const previous = seen.get(xId);
-        if (previous !== undefined) {
-          return deny(c, `${row.lineNumber}行目: X IDは${previous}行目と重複しています`, 409);
-        }
-        seen.set(xId, row.lineNumber);
+        // CURRENT resolves preset/admin-only/owner policy before canonical X parsing.
         const a = assignmentFromCsv(row.permission_preset, row.permission_keys, isAdmin);
         if (a.permission_preset === "owner") {
           return deny(c, `${row.lineNumber}行目: 代表者の追加・変更はCSVでは行えません。専用の代表者移譲操作を使用してください。`, 409);
         }
+        const xId = parseCanonicalXId(row.x_user_id);
+        if (!xId) return deny(c, `${row.lineNumber}行目: X IDが不正です`, 400);
         normalized.push({
           line: row.lineNumber, xId, displayName: row.display_name,
           values: {
@@ -458,7 +453,15 @@ export function registerStaffWriteRoutes(app: Hono<AppEnv>): void {
       const context = `event-staff-csv:${generateId("batch")}`;
       const newX = normalized.filter((row) => !knownIds.has(row.xId));
       const upserts = [];
+      // CURRENT checks duplicate CSV X IDs only after every row has passed
+      // assignment/X validation and after the existing-row scan.
+      const seen = new Map<string, number>();
       for (const row of normalized) {
+        const previous = seen.get(row.xId);
+        if (previous !== undefined) {
+          return deny(c, `${row.line}行目: X IDは${previous}行目と重複しています`, 409);
+        }
+        seen.set(row.xId, row.line);
         const existing = byX.get(row.xId) ?? null;
         if (existing?.permission_preset === "owner") {
           // This is a trusted local validation outcome, not a provider error.
