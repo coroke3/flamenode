@@ -15,6 +15,26 @@ import {
 import type { AppEnv } from "../../env.ts";
 import type { PreloadedAuditContext } from "@flamenode/server-core/audit/logger";
 import type { EnvValues, QueueWakeHostLoader } from "@flamenode/server-core/ports";
+import type { VisibilityFenceHost } from "@flamenode/server-core/visibility/manifestHost";
+import {
+  readVisibilityManifestObject,
+  putVisibilityManifestWithCas,
+  type VisibilityManifestBucket,
+} from "@flamenode/server-core/visibility/manifestR2";
+import {
+  deletePublicJsonCaches,
+  type PublicJsonCacheDeleteHost,
+} from "@flamenode/server-core/publicCache/delete";
+import {
+  EVENT_EXPORT_REFRESH_MINUTES,
+  eventExportPayloadCacheKey,
+} from "@flamenode/server-core/publicCache/eventExportKeys";
+import {
+  eventBaseObjectKey,
+  eventSlotsObjectKey,
+  eventComposedObjectKey,
+  eventReleaseObjectKey,
+} from "@flamenode/server-core/publicData/eventDetailCore";
 import { costGuardMiddleware } from "../../middleware/costGuard.ts";
 import { onlyMutating } from "../../middleware/writeOrigin.ts";
 import { runLegacyImportApplyPipeline } from "./legacyImportApplyPipeline.ts";
@@ -25,7 +45,58 @@ type AtomicD1Step = (input: Parameters<PipelineStep>[0] & {
   db: AppEnv["Variables"]["db"];
   preloaded: PreloadedAuditContext;
   loadWakeHost: QueueWakeHostLoader;
+  eventEffects: ReturnType<typeof createLegacyImportEventEffects>;
 }) => ReturnType<PipelineStep>;
+
+/** Unmounted RH-002 event replacement effects. Constructing the host is I/O-free. */
+export function createLegacyImportEventEffects(
+  bucket: VisibilityManifestBucket | null | undefined,
+  readEdgeCache: PublicJsonCacheDeleteHost["readEdgeCache"] =
+    () => (caches as unknown as { default: Cache }).default,
+) {
+  function requireBucket(): VisibilityManifestBucket {
+    if (!bucket) throw new Error("public_visibility_manifest_bucket_missing");
+    return bucket;
+  }
+  const fenceHost: VisibilityFenceHost = {
+    manifest: {
+      read: async () => readVisibilityManifestObject(requireBucket()),
+      write: async (manifest, options) => {
+        const hasConditionalOption =
+          options && Object.prototype.hasOwnProperty.call(options, "ifMatchEtag");
+        await putVisibilityManifestWithCas(
+          requireBucket(),
+          manifest,
+          hasConditionalOption ? options?.ifMatchEtag ?? null : undefined,
+          options?.mutateOnConflict,
+        );
+      },
+    },
+  };
+  const cacheHost: PublicJsonCacheDeleteHost = {
+    // No Next isolate-local cache map exists in this Hono host.
+    // Cache API deletes are local-colo best effort.
+    dropIsolateEntry: () => {},
+    readEdgeCache,
+  };
+  return {
+    fenceHost,
+    invalidateEventCaches: async (eventId: string) => {
+      const exportKeys = (["v5", "legacy"] as const).flatMap((format) =>
+        EVENT_EXPORT_REFRESH_MINUTES.map((refreshMinutes) =>
+          eventExportPayloadCacheKey(eventId, format, refreshMinutes),
+        ),
+      );
+      await deletePublicJsonCaches([
+        eventComposedObjectKey(eventId),
+        eventBaseObjectKey(eventId),
+        eventSlotsObjectKey(eventId),
+        eventReleaseObjectKey(eventId),
+        ...exportKeys,
+      ], cacheHost);
+    },
+  };
+}
 
 /**
  * Creates a route only when an audit-atomic D1 step has been provided.
@@ -62,6 +133,7 @@ export function createLegacyImportApplyRoutes(applyStep: AtomicD1Step) {
           settings: c.get("auditSettings"),
           actorSnapshotJsonById: c.get("actorSnapshotJsonById"),
         },
+        eventEffects: createLegacyImportEventEffects(c.env.BUCKET),
         loadWakeHost: async () => ({
           readEnv: () => c.env as unknown as EnvValues,
           readWaitUntil: () => {

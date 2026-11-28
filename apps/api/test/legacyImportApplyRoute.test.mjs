@@ -11,7 +11,26 @@ import {
   legacyImportSkipSnapshotFingerprint,
 } from "@flamenode/server-core/legacyImport/progress";
 import { createAdminRoutes } from "../src/routes/admin/index.ts";
-import { createLegacyImportApplyRoutes } from "../src/routes/admin/legacyImportApplyRoute.ts";
+import {
+  createLegacyImportApplyRoutes,
+  createLegacyImportEventEffects,
+} from "../src/routes/admin/legacyImportApplyRoute.ts";
+import { preCommitEventVisibilityTransition } from "@flamenode/server-core/visibility/eventTransition";
+import {
+  emptyPublicVisibilityBlockedEntitiesManifest,
+  PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY,
+} from "@flamenode/server-core/visibility/manifestCore";
+import { publicJsonCacheUrl } from "@flamenode/server-core/publicCache/delete";
+import {
+  EVENT_EXPORT_REFRESH_MINUTES,
+  eventExportPayloadCacheKey,
+} from "@flamenode/server-core/publicCache/eventExportKeys";
+import {
+  eventComposedObjectKey,
+  eventBaseObjectKey,
+  eventSlotsObjectKey,
+  eventReleaseObjectKey,
+} from "@flamenode/server-core/publicData/eventDetailCore";
 import { legacyImportD1ApplyStep } from "../src/routes/admin/legacyImportD1ApplyAdapter.ts";
 import { createAdminD1, seedBase } from "./helpers/sqliteD1.mjs";
 
@@ -217,6 +236,117 @@ async function createApplyCredential(bucket, authUserId = ADMIN.id, planOverride
   return { credential, form };
 }
 
+// Separate R2 object double for the manifest's conditional PUT contract.
+function manifestBucket(concurrentEntry = null) {
+  let current = null;
+  let version = 0;
+  const attempts = [];
+  let reads = 0;
+  return {
+    attempts,
+    reads: () => reads,
+    bucket: {
+      async get(key) {
+        assert.equal(key, PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY);
+        reads++;
+        return current ? {
+          etag: current.etag, size: Buffer.byteLength(current.body),
+          text: async () => current.body,
+        } : null;
+      },
+      async put(key, value, options = {}) {
+        assert.equal(key, PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY);
+        const create = options.onlyIf instanceof Headers &&
+          options.onlyIf.get("If-None-Match") === "*";
+        const expected = options.onlyIf?.etagMatches;
+        attempts.push({ create, expected, cacheControl: options.httpMetadata?.cacheControl });
+        assert.ok(create || expected, "precommit must use a conditional PUT");
+        if (create && !current && concurrentEntry) {
+          const manifest = emptyPublicVisibilityBlockedEntitiesManifest(1);
+          manifest.revision = 1;
+          manifest.entities.push(concurrentEntry);
+          current = { etag: String(++version), body: JSON.stringify(manifest) };
+        }
+        if ((create && current) || (expected && expected !== current?.etag)) return null;
+        current = { etag: String(++version), body: String(value) };
+        return { etag: current.etag };
+      },
+    },
+    manifest: () => current ? JSON.parse(current.body) : null,
+  };
+}
+
+test("MIG-0645 U02ag event fence host: first-writer CAS conflict preserves another entity", async () => {
+  const concurrent = {
+    entity_type: "event", entity_id: "other-event", fence_token: "other-token",
+    blocked_at: 1, reason: "other",
+  };
+  const fixture = manifestBucket(concurrent);
+  const effects = createLegacyImportEventEffects(fixture.bucket);
+  assert.equal(fixture.reads(), 0);
+  assert.equal(fixture.attempts.length, 0);
+  await preCommitEventVisibilityTransition({
+    eventId: "import-event", fenceToken: "import-token", reason: "legacy_import_visibility",
+  }, effects.fenceHost);
+  assert.deepEqual(fixture.attempts, [
+    { create: true, expected: undefined, cacheControl: "no-store" },
+    { create: false, expected: "1", cacheControl: "no-store" },
+  ]);
+  assert.equal(fixture.reads(), 3, "initial read, conflict reread, confirmation");
+  const entries = fixture.manifest().entities;
+  assert.equal(entries.length, 2);
+  assert.deepEqual(entries.find((row) => row.entity_id === "other-event"), concurrent);
+  const imported = entries.find((row) => row.entity_id === "import-event");
+  assert.equal(imported.fence_token, "import-token");
+  assert.equal(imported.reason, "legacy_import_visibility");
+});
+
+test("MIG-0645 U02ag event fence host: absent bucket and competing same-event token fail closed", async () => {
+  const input = {
+    eventId: "import-event", fenceToken: "import-token", reason: "legacy_import_visibility",
+  };
+  await assert.rejects(
+    preCommitEventVisibilityTransition(input, createLegacyImportEventEffects(undefined).fenceHost),
+    /public_visibility_manifest_bucket_missing/,
+  );
+  const concurrent = {
+    entity_type: "event", entity_id: "import-event", fence_token: "competing-token",
+    blocked_at: 1, reason: "other",
+  };
+  const fixture = manifestBucket(concurrent);
+  await assert.rejects(
+    preCommitEventVisibilityTransition(input, createLegacyImportEventEffects(fixture.bucket).fenceHost),
+    /public_visibility_fence_token_mismatch/,
+  );
+  assert.deepEqual(fixture.manifest().entities, [concurrent]);
+  assert.ok(fixture.attempts.length <= 3);
+});
+
+test("MIG-0645 U02ag event cache host: four snapshot and eight export keys, best effort", async () => {
+  const deleted = [];
+  const fixture = manifestBucket();
+  const effects = createLegacyImportEventEffects(fixture.bucket, () => ({
+    async delete(url) {
+      deleted.push(url);
+      if (deleted.length === 1) throw new Error("test-only cache failure");
+      return true;
+    },
+  }));
+  const eventId = "legacy-event-1";
+  await effects.invalidateEventCaches(eventId);
+  const keys = [
+    eventComposedObjectKey(eventId), eventBaseObjectKey(eventId),
+    eventSlotsObjectKey(eventId), eventReleaseObjectKey(eventId),
+    ...["v5", "legacy"].flatMap((format) =>
+      EVENT_EXPORT_REFRESH_MINUTES.map((refresh) => eventExportPayloadCacheKey(eventId, format, refresh))),
+  ];
+  assert.equal(keys.length, 12);
+  assert.equal(new Set(keys).size, 12);
+  assert.deepEqual(deleted, keys.map(publicJsonCacheUrl));
+  assert.equal(fixture.reads(), 0);
+  assert.equal(fixture.attempts.length, 0);
+});
+
 test("MIG-0645 U02 apply Hono: authenticated request DB and owner reach exactly one step, then R2 advances", async () => {
   const { bucket, record } = previewBucket();
   const { credential, form } = await createApplyCredential(bucket);
@@ -224,6 +354,10 @@ test("MIG-0645 U02 apply Hono: authenticated request DB and owner reach exactly 
     bucket,
     applyStep: async (input) => {
       assert.equal(typeof input.db.select, "function", "request-scoped Drizzle DB required");
+      assert.equal(typeof input.eventEffects.invalidateEventCaches, "function");
+      const manifest = await input.eventEffects.fenceHost.manifest.read();
+      assert.equal(manifest.etag, null);
+      assert.deepEqual(manifest.manifest.entities, []);
       assert.equal(input.actorAuthUserId, ADMIN.id);
       assert.equal(input.previewToken, credential.previewToken);
       assert.equal(input.planHash, credential.planHash);
