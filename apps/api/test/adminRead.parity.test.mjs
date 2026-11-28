@@ -905,6 +905,142 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+  // Feasibility probe only, not the existing HTTP contract or a release gate.
+  // A new versioned producer/consumer requires stable collection revision,
+  // agreed tie order, auth revalidation and a bounded client traversal.
+  test("#924: proposed byte-budget template page and oversized-field receipts preserve stored bytes", () => {
+    const local = createSqlite();
+    seed(local);
+    const cap = 64 * 1024, budget = 48 * 1024, fragment = 8192;
+    const ordered = `WITH selected AS (
+      SELECT id,name,description,source_event_id,updated_at FROM event_templates
+      ORDER BY updated_at DESC,id ASC LIMIT 100
+    ), numbered AS (
+      SELECT *, row_number() OVER (ORDER BY updated_at DESC,id ASC)-1 AS row_index,
+        count(*) OVER () AS row_count,
+        256+2*(length(CAST(id AS BLOB))+length(CAST(name AS BLOB))+
+          coalesce(length(CAST(description AS BLOB)),0)+coalesce(length(CAST(source_event_id AS BLOB)),0)) AS wire_upper,
+        typeof(id)='text' AND typeof(name)='text' AND typeof(description) IN ('text','null')
+          AND typeof(source_event_id) IN ('text','null') AND typeof(updated_at)='integer' AS valid_storage
+      FROM selected
+    )`;
+    // Never return a large first row or skip it: emit only a small receipt.
+    // HEX(BLOB) preserves NUL and UTF-8 bytes before the provider decodes TEXT.
+    const page = local.prepare(ordered + `, remaining AS (
+      SELECT *,sum(wire_upper) OVER (ORDER BY row_index ROWS UNBOUNDED PRECEDING) AS prefix_upper,
+        min(valid_storage) OVER (ORDER BY row_index ROWS UNBOUNDED PRECEDING) AS prefix_valid
+      FROM numbered WHERE row_index>=?
+    ), receipt AS (
+      SELECT *,prefix_upper<=? AND prefix_valid=1 AS admitted FROM remaining
+    )
+      SELECT row_index,row_count,wire_upper,admitted,valid_storage,
+        CASE WHEN admitted THEN hex(CAST(id AS BLOB)) END AS id_hex,
+        CASE WHEN admitted THEN hex(CAST(name AS BLOB)) END AS name_hex,
+        CASE WHEN admitted AND description IS NOT NULL THEN hex(CAST(description AS BLOB)) END AS description_hex,
+        CASE WHEN admitted AND source_event_id IS NOT NULL THEN hex(CAST(source_event_id AS BLOB)) END AS source_event_id_hex,
+        CASE WHEN admitted THEN updated_at END AS updated_at
+      FROM receipt WHERE admitted OR row_index=? ORDER BY row_index LIMIT 100`);
+    const piece = local.prepare(ordered + `, chosen AS (
+      SELECT CASE ? WHEN 'id' THEN id WHEN 'name' THEN name WHEN 'description' THEN description
+        WHEN 'source_event_id' THEN source_event_id END AS value,updated_at
+      FROM numbered WHERE row_index=? AND valid_storage=1 LIMIT 1
+    )
+      SELECT updated_at,typeof(value) AS storage,length(CAST(value AS BLOB)) AS total_bytes,
+        CASE WHEN value IS NOT NULL THEN hex(substr(CAST(value AS BLOB),?,?)) END AS data_hex
+      FROM chosen LIMIT 1`);
+    const decode = (hex) => hex === null ? null : Buffer.from(hex, "hex").toString("utf8");
+    try {
+      const insert = local.prepare("INSERT INTO event_templates (id,name,description,source_event_id,settings_json,created_by_user_id,updated_at) VALUES (?,?,?,?,?,'u_root',?)");
+      for (let i = 0; i < 101; i++) {
+        insert.run("transport-" + String(i).padStart(3,"0"), "N" + "日🚀".repeat(20),
+          "D" + '\\"' .concat("\u0001").repeat(140), i % 2 ? "source" : null, "{}", 4_000_000_000 + Math.floor(i/2));
+      }
+      // Legacy oversized metadata, a UTF-8 sequence spanning the byte boundary,
+      // raw NUL, and the distinction between null and empty text.
+      const long = "a".repeat(8191) + "🚀\u0000" + "日".repeat(40000);
+      insert.run("transport-large", "Large", long, "", "{}", 5_000_000_000);
+      const expected = local.prepare("SELECT id,name,description,source_event_id,updated_at FROM event_templates ORDER BY updated_at DESC,id ASC LIMIT 100").all();
+      let pos = 0, pages = 0, fragments = 0;
+      const out = [];
+      while (pos < expected.length) {
+        const rows = page.all(pos,budget,pos);
+        assert.ok(rows.length > 0);
+        assert.ok(Buffer.byteLength(JSON.stringify({ rows })) <= cap);
+        assert.equal(rows[0].row_count, 100);
+        pages++;
+        if (!rows[0].admitted) {
+          assert.equal(rows.length,1);
+          assert.equal(rows[0].valid_storage,1);
+          for (const key of ["id_hex","name_hex","description_hex","source_event_id_hex","updated_at"]) {
+            assert.equal(rows[0][key],null, key + " not transferred before admission");
+          }
+          const item = {};
+          for (const field of ["id","name","description","source_event_id"]) {
+            let at = 0, hex = "", total;
+            do {
+              const f = piece.get(field,pos,at+1,fragment);
+              assert.ok(f);
+              assert.ok(Buffer.byteLength(JSON.stringify(f)) <= cap);
+              if (item.updated_at === undefined) item.updated_at = f.updated_at;
+              else assert.equal(item.updated_at,f.updated_at);
+              fragments++;
+              if (f.storage === "null") {
+                assert.equal(f.data_hex,null);
+                item[field] = null;
+                break;
+              }
+              assert.equal(f.storage,"text");
+              if (total !== undefined) assert.equal(f.total_bytes,total);
+              total = f.total_bytes;
+              assert.equal(f.data_hex.length,2*Math.min(fragment,total-at));
+              hex += f.data_hex;
+              at += f.data_hex.length/2;
+              if (at === total) item[field] = decode(hex);
+            } while (at < total);
+          }
+          out.push(item);
+          pos++;
+        } else {
+          for (const row of rows) {
+            assert.equal(row.admitted,1);
+            assert.equal(row.row_index,pos++);
+            assert.equal(row.row_count,100);
+            assert.ok(Buffer.byteLength(JSON.stringify(row))+1 <= row.wire_upper);
+            out.push({ id: decode(row.id_hex), name: decode(row.name_hex),
+              description: decode(row.description_hex), source_event_id: decode(row.source_event_id_hex), updated_at: row.updated_at });
+          }
+        }
+      }
+      assert.ok(pages > 1 && fragments > 1);
+      assert.equal(out.length,100);
+      assert.equal(out[0].id,"transport-large");
+      assert.equal(out[0].description,long);
+      assert.equal(out[0].source_event_id,"");
+      assert.equal(out[0].updated_at,5_000_000_000);
+      const raw = local.prepare("SELECT hex(CAST(description AS BLOB)) AS h FROM event_templates WHERE id='transport-large'").get().h;
+      assert.equal(Buffer.from(out[0].description).toString("hex").toUpperCase(),raw);
+      assert.deepEqual(out.slice(1),canon(expected.slice(1)));
+      // Same timestamp + same row count are not a snapshot/revision receipt.
+      const before = page.all(1,budget,1);
+      local.prepare("UPDATE event_templates SET name=? WHERE id=?").run("changed",out[1].id);
+      const after = page.all(1,budget,1);
+      assert.notDeepEqual(before,after);
+      assert.equal(before[0].row_count,after[0].row_count);
+      assert.equal(before[0].updated_at,after[0].updated_at);
+      // SQLite permits legacy BLOB in a TEXT-affinity field. Do not return it as
+      // an ordinary row or silently omit it from the continuation.
+      local.prepare("UPDATE event_templates SET name=? WHERE id=?").run(Buffer.from([255,0]),out[1].id);
+      const invalid = page.all(1,budget,1);
+      assert.equal(invalid.length,1);
+      assert.equal(invalid[0].valid_storage,0);
+      assert.equal(invalid[0].admitted,0);
+      assert.equal(invalid[0].name_hex,null);
+      assert.equal(piece.get("name",1,1,fragment),undefined);
+    } finally {
+      local.close();
+    }
+  });
+
   test("T01 event groups: list filters/counts and edit detail (members, first option page) equal CURRENT", async () => {
     const { queryEventGroupEventOptions } = await import("../../../src/lib/admin/eventGroupEventOptions.ts");
     for (const query of ["", "?visibility=public", "?visibility=private", "?visibility=archived", "?type=series", "?type=other&visibility=archived", "?type=bogus", "?visibility=zzz"]) {
