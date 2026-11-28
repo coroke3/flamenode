@@ -764,7 +764,7 @@ test("MIG-0645 U02ac Hono: all-existing software group writes marker only and pr
 
 
 test("MIG-0645 U02ad Hono: event, owner staff, rebuild targets and audit receipt commit atomically and replay after R2 CAS failure", async () => {
-  const { bucket, record } = previewBucket({ failAdvanceOnce: true, failAdvanceStage: "events" });
+  const { bucket, record } = previewBucket({ failAdvanceOnce: true, failAdvanceStage: "custom_questions" });
   const plan = normalizeLegacyFiles([], {
     eventVisibility: "private", videoVisibility: "private", now: 1700000000,
   });
