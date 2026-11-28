@@ -21,7 +21,7 @@ const previewFingerprint = (token) => createHash("sha256").update(token).digest(
 const runDigest = (token) => previewFingerprint(token).slice(0, 24);
 
 function extendLegacyImportUserSchema(sqlite) {
-  sqlite.exec("ALTER TABLE \"user\" ADD COLUMN \"emailVerified\" INTEGER; ALTER TABLE \"user\" ADD COLUMN can_create_events INTEGER; ALTER TABLE \"user\" ADD COLUMN is_notification_enabled INTEGER; ALTER TABLE \"user\" ADD COLUMN terms_reaccept_required INTEGER; ALTER TABLE \"user\" ADD COLUMN onboarding_completed_at INTEGER; ALTER TABLE \"user\" ADD COLUMN last_guild_check INTEGER; ALTER TABLE \"user\" ADD COLUMN created_at INTEGER;");
+  sqlite.exec("ALTER TABLE \\"user\\" ADD COLUMN \\"emailVerified\\" INTEGER; ALTER TABLE \\"user\\" ADD COLUMN can_create_events INTEGER; ALTER TABLE \\"user\\" ADD COLUMN is_notification_enabled INTEGER; ALTER TABLE \\"user\\" ADD COLUMN terms_reaccept_required INTEGER; ALTER TABLE \\"user\\" ADD COLUMN onboarding_completed_at INTEGER; ALTER TABLE \\"user\\" ADD COLUMN last_guild_check INTEGER; ALTER TABLE \\"user\\" ADD COLUMN created_at INTEGER; ALTER TABLE x_users ADD COLUMN profile_text TEXT; ALTER TABLE x_users ADD COLUMN portfolio_contact TEXT; ALTER TABLE x_users ADD COLUMN youtube_channel_url TEXT; ALTER TABLE x_users ADD COLUMN other_social_links TEXT; ALTER TABLE x_users ADD COLUMN creative_start_date INTEGER;");
 }
 const ADMIN = { id: "admin-1", name: "Admin", email: null, image: null,
   role: "admin", is_banned: 0, active_x_user_id: null };
@@ -119,7 +119,7 @@ test("MIG-0645 U02 apply Hono: non-multipart input rejects before claim and D1",
 
 // Test the real shared preview-store CAS with an explicitly simulated D1 step.
 // This does not establish the atomic D1 mutation/step-marker/audit contract.
-function previewBucket({ failAdvanceOnce = false, failCompleteOnce = false } = {}) {
+function previewBucket({ failAdvanceOnce = false, failAdvanceStage = "x_users", failCompleteOnce = false } = {}) {
   const objects = new Map();
   let version = 0;
   return {
@@ -142,7 +142,7 @@ function previewBucket({ failAdvanceOnce = false, failCompleteOnce = false } = {
           return null;
         }
         if (failAdvanceOnce && expected && next.status === "ready" &&
-            next.progress.stage === "x_users") {
+            next.progress.stage === failAdvanceStage) {
           failAdvanceOnce = false;
           return null;
         }
@@ -167,8 +167,8 @@ function previewBucket({ failAdvanceOnce = false, failCompleteOnce = false } = {
   };
 }
 
-async function createApplyCredential(bucket, authUserId = ADMIN.id) {
-  const plan = normalizeLegacyFiles([], {
+async function createApplyCredential(bucket, authUserId = ADMIN.id, planOverride = null) {
+  const plan = planOverride ?? normalizeLegacyFiles([], {
     eventVisibility: "private", videoVisibility: "private", now: 1700000000,
   });
   assert.deepEqual(plan.errors, []);
@@ -438,6 +438,142 @@ test("MIG-0645 U02u Hono: reserved principal collision fails closed before any D
     assert.equal(stats.reads, 3);
     assert.equal(stats.batches, 0);
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+  } finally {
+    sqlite.close();
+  }
+});
+
+
+test("MIG-0645 U02x Hono: x_users mutation, rebuild queue and receipt commit atomically and replay after R2 CAS failure", async () => {
+  const { bucket, record } = previewBucket({
+    failAdvanceOnce: true,
+    failAdvanceStage: "softwares",
+  });
+  const plan = normalizeLegacyFiles([], {
+    eventVisibility: "private", videoVisibility: "private", now: 1700000000,
+  });
+  plan.xUsers.push(
+    {
+      id: "legacy_x_existing",
+      x_name: "Existing creator",
+      icon_url: null,
+      youtube_channel_url: null,
+      other_social_links: null,
+    },
+    {
+      id: "legacy_x_new",
+      x_name: "New creator",
+      icon_url: "https://example.com/new.png",
+      youtube_channel_url: "https://youtube.com/@new",
+      other_social_links: null,
+    },
+  );
+  const { credential, form } = await createApplyCredential(bucket, ADMIN.id, plan);
+  const { request, sqlite, stats, getD1ApplyCalls } = setup({
+    bucket,
+    applyStep: legacyImportD1ApplyStep,
+  });
+  extendLegacyImportUserSchema(sqlite);
+  sqlite.prepare(
+    "INSERT INTO x_users (id, x_name, icon_url, approval_status, profile_text, portfolio_contact, youtube_channel_url, other_social_links, creative_start_date) VALUES (?, ?, NULL, ?, NULL, NULL, NULL, NULL, NULL)",
+  ).run("legacy_x_existing", "Existing creator", "approved");
+
+  try {
+    const systemUser = await request(form());
+    assert.equal(systemUser.status, 200, JSON.stringify(await systemUser.clone().json()));
+    assert.equal((await systemUser.json()).progress.stage, "x_users");
+    assert.equal(record().progress.stage, "x_users");
+    assert.equal(stats.reads, 3);
+    assert.equal(stats.batches, 1);
+
+    const failedAdvance = await request(form());
+    assert.equal(failedAdvance.status, 503, JSON.stringify(await failedAdvance.clone().json()));
+    const pending = await failedAdvance.json();
+    assert.equal(pending.kind, "committed_progress_pending");
+    assert.equal(pending.committed, true);
+    assert.equal(pending.requires_repreview, false);
+    assert.equal(record().status, "ready");
+    assert.equal(record().progress.stage, "x_users");
+    assert.equal(stats.reads, 6);
+    assert.equal(stats.batches, 2, "X users, rebuild queue and audit receipt commit in one batch");
+
+    const existing = sqlite.prepare(
+      "SELECT x_name, approval_status FROM x_users WHERE id = ?",
+    ).get("legacy_x_existing");
+    assert.deepEqual(existing, { x_name: "Existing creator", approval_status: "approved" });
+    const created = sqlite.prepare(
+      "SELECT x_name, icon_url, youtube_channel_url, approval_status FROM x_users WHERE id = ?",
+    ).get("legacy_x_new");
+    assert.deepEqual(created, {
+      x_name: "New creator",
+      icon_url: "https://example.com/new.png",
+      youtube_channel_url: "https://youtube.com/@new",
+      approval_status: "imported",
+    });
+
+    const queue = sqlite.prepare(
+      "SELECT id, target_type, target_id, reason, priority, requested_by_user_id FROM static_rebuild_queue",
+    ).get();
+    assert.deepEqual(queue, {
+      id: "legacy_import_" + runDigest(credential.previewToken) + "_" +
+        credential.planHash.slice(0, 24) + "_x_users_0_0",
+      target_type: "users_index",
+      target_id: "global",
+      reason: "legacy_import_x_users",
+      priority: "low",
+      requested_by_user_id: ADMIN.id,
+    });
+    const batchAudit = sqlite.prepare(
+      "SELECT after_json FROM audit_logs WHERE table_name = 'x_users_import_batch'",
+    ).get();
+    assert.deepEqual(JSON.parse(batchAudit.after_json).ids, ["legacy_x_new"]);
+    const stepAudit = sqlite.prepare(
+      "SELECT after_json FROM audit_logs WHERE table_name = 'legacy_import_steps' AND target_id LIKE '%:x_users:0'",
+    ).get();
+    const stepReceipt = JSON.parse(stepAudit.after_json);
+    assert.deepEqual(stepReceipt.outcome, {
+      kind: "x_users", created: 1, createdAuthUsers: 0,
+    });
+    assert.equal(stepReceipt.next_stage, "softwares");
+    assert.equal(stepReceipt.next_index, 0);
+
+    const replay = await request(form());
+    assert.equal(replay.status, 200, JSON.stringify(await replay.clone().json()));
+    const recovered = await replay.json();
+    assert.equal(recovered.progress.stage, "softwares");
+    assert.equal(recovered.progress.counts.createdXUsers, 1);
+    assert.equal(record().progress.stage, "softwares");
+    assert.equal(stats.reads, 9, "each stage/replay request uses three pre-reads");
+    assert.equal(stats.batches, 2, "replaying the durable receipt never duplicates the D1 batch");
+    assert.equal(getD1ApplyCalls(), 3);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM x_users").get().n, 2);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 1);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 4);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE table_name = 'legacy_import_steps'").get().n, 2);
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("MIG-0645 U02x Hono: empty x_users stage writes only its durable marker", async () => {
+  const { bucket, record } = previewBucket();
+  const { form } = await createApplyCredential(bucket);
+  const { request, sqlite, stats } = setup({ bucket, applyStep: legacyImportD1ApplyStep });
+  extendLegacyImportUserSchema(sqlite);
+  try {
+    const systemUser = await request(form());
+    assert.equal(systemUser.status, 200);
+    assert.equal((await systemUser.json()).progress.stage, "x_users");
+    const emptyStage = await request(form());
+    assert.equal(emptyStage.status, 200, JSON.stringify(await emptyStage.clone().json()));
+    assert.equal((await emptyStage.json()).progress.stage, "softwares");
+    assert.equal(record().progress.stage, "softwares");
+    assert.equal(stats.reads, 6);
+    assert.equal(stats.batches, 2);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM x_users").get().n, 0);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 0);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE table_name = 'legacy_import_steps'").get().n, 2);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE table_name = 'x_users_import_batch'").get().n, 0);
   } finally {
     sqlite.close();
   }
