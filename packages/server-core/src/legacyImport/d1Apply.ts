@@ -1,7 +1,7 @@
 import { getTableColumns, sql } from "drizzle-orm";
 import {
   events, eventStaff, eventCustomQuestions, videos, videoEvents, videoMembers,
-  videoChapters, videoSoftwares, videoYoutubeMetadata, videoCustomAnswers,
+  videoChapters, videoSoftwares, videoYoutubeMetadata, videoCustomAnswers, publicVisibilityFences,
 } from "@flamenode/db/schema";
 import {
   isValidPreloadedActorSnapshotJson,
@@ -54,6 +54,108 @@ function canonicalRowJson(columns: Record<string, { name: string }>, table: stri
 const existingEventJson = canonicalRowJson(getTableColumns(events), "events");
 const existingStaffJson = canonicalRowJson(getTableColumns(eventStaff), "event_staff");
 const existingQuestionJson = canonicalRowJson(getTableColumns(eventCustomQuestions), "event_custom_questions");
+const existingFenceJson = canonicalRowJson(getTableColumns(publicVisibilityFences), "public_visibility_fences");
+
+type LegacyImportFenceIdentity = {
+  entityType: "event" | "video";
+  entityId: string;
+  fenceToken: string;
+};
+type LegacyImportFenceSnapshot = LegacyImportFenceIdentity & {
+  previousState: "blocked" | "release_pending" | "released" | null;
+  raw: string | null;
+};
+
+const LEGACY_FENCE_CONFLICT = "旧形式インポートの公開フェンスの所有権を確認できません。";
+
+function validateLegacyFenceSnapshot(identity: LegacyImportFenceIdentity, raw: string | null) {
+  if ((identity.entityType !== "event" && identity.entityType !== "video") ||
+      !identity.entityId || !identity.fenceToken ||
+      new TextEncoder().encode(JSON.stringify(identity)).byteLength > MAX_LEGACY_IMPORT_STEP_BYTES) {
+    return fixedFailure(LEGACY_FENCE_CONFLICT);
+  }
+  if (raw === null) return null;
+  if (new TextEncoder().encode(raw).byteLength > MAX_LEGACY_IMPORT_STEP_BYTES) {
+    return fixedFailure(LEGACY_FENCE_CONFLICT);
+  }
+  const row = parseJsonRecord(raw, LEGACY_FENCE_CONFLICT);
+  if (row.entity_type !== identity.entityType || row.entity_id !== identity.entityId ||
+      typeof row.fence_token !== "string" || !row.fence_token ||
+      (row.state !== "blocked" && row.state !== "release_pending" && row.state !== "released") ||
+      !Number.isSafeInteger(row.updated_at) ||
+      ["reason", "requirements_json", "requested_by_auth_user_id"].some((key) =>
+        row[key] !== null && typeof row[key] !== "string") ||
+      ["blocked_at", "release_requested_at"].some((key) =>
+        row[key] !== null && !Number.isSafeInteger(row[key]))) {
+    return fixedFailure(LEGACY_FENCE_CONFLICT);
+  }
+  // Never seize an active foreign token, or reuse an already released token.
+  // Reusing an active matching token still needs manifest and release-worker
+  // coordination; this read alone authorizes no transition.
+  if (row.state === "released" ? row.fence_token === identity.fenceToken
+    : row.fence_token !== identity.fenceToken) {
+    return fixedFailure(LEGACY_FENCE_CONFLICT);
+  }
+  return row.state;
+}
+
+/**
+ * U02ar: bounded D1 ownership snapshot, without mutating the fence or R2.
+ * A caller must supply a proposed token, not infer ownership from a row.
+ */
+export async function readLegacyImportFenceSnapshot(
+  db: ServerCoreDb,
+  identity: LegacyImportFenceIdentity,
+): Promise<LegacyImportFenceSnapshot> {
+  validateLegacyFenceSnapshot(identity, null);
+  const rows = await db.all(sql`
+    WITH candidates AS (
+      SELECT ${existingFenceJson} AS payload
+      FROM public_visibility_fences
+      WHERE entity_type = ${identity.entityType} AND entity_id = ${identity.entityId}
+      LIMIT 2
+    )
+    SELECT CASE WHEN length(CAST(payload AS BLOB)) <= ${MAX_LEGACY_IMPORT_STEP_BYTES}
+      THEN payload ELSE NULL END AS payload
+    FROM candidates
+  `) as Array<{ payload: string | null }>;
+  if (rows.length > 1 || (rows.length === 1 && typeof rows[0].payload !== "string")) {
+    return fixedFailure(LEGACY_FENCE_CONFLICT);
+  }
+  const raw = rows[0]?.payload ?? null;
+  const previousState = validateLegacyFenceSnapshot(identity, raw);
+  return { ...identity, previousState, raw };
+}
+
+/**
+ * Unexecuted same-batch CAS: compare the entire row (including requirements,
+ * state, timestamps and actor), or require continued absence. Must precede
+ * the future audited canonical mutation and fence write in the same D1 batch.
+ * No transition, R2 compensation, or cross-writer lock is implemented here.
+ */
+export function buildLegacyImportFenceAssertion(db: ServerCoreDb, snapshot: LegacyImportFenceSnapshot) {
+  const state = validateLegacyFenceSnapshot(snapshot, snapshot.raw);
+  if (state !== snapshot.previousState) return fixedFailure(LEGACY_FENCE_CONFLICT);
+  const predicate = snapshot.raw === null ? sql`
+    NOT EXISTS (
+      SELECT 1 FROM public_visibility_fences
+      WHERE entity_type = ${snapshot.entityType} AND entity_id = ${snapshot.entityId}
+    )
+  ` : sql`
+    (SELECT COUNT(*) FROM public_visibility_fences
+      WHERE entity_type = ${snapshot.entityType} AND entity_id = ${snapshot.entityId}) = 1
+    AND EXISTS (
+      SELECT 1 FROM public_visibility_fences
+      WHERE entity_type = ${snapshot.entityType} AND entity_id = ${snapshot.entityId}
+        AND ${existingFenceJson} = ${snapshot.raw}
+    )
+  `;
+  return db.run(sql`
+    SELECT CASE WHEN (${predicate}) THEN 1
+      ELSE json_extract('legacy_import_fence_snapshot_mismatch', '$') END
+  `);
+}
+
 // CURRENT legacy import limit (distinct from the interactive new-question limit).
 const MAX_EVENT_CUSTOM_QUESTIONS = 18;
 type PlannedQuestion = CanonicalLegacyPlan["eventCustomQuestions"][number];

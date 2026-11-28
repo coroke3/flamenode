@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { Hono } from "hono";
 import { sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { normalizeLegacyFiles } from "@flamenode/server-core/legacyImport/normalize";
 import { createLegacyImportPreview } from "@flamenode/server-core/legacyImport/previewStore";
 import {
@@ -40,6 +41,8 @@ import {
   buildLegacyVideoReplacementAssertion,
   prepareLegacyVideoReplacementAnswers,
   buildLegacyAnswerReplacementAssertion,
+  readLegacyImportFenceSnapshot,
+  buildLegacyImportFenceAssertion,
 } from "@flamenode/server-core/legacyImport/d1Apply";
 import { createAdminD1, seedBase, seedEvent } from "./helpers/sqliteD1.mjs";
 
@@ -342,6 +345,100 @@ test("MIG-0645 U02ag event fence host: absent bucket and competing same-event to
   );
   assert.deepEqual(fixture.manifest().entities, [concurrent]);
   assert.ok(fixture.attempts.length <= 3);
+});
+
+test("MIG-0645 U02ar D1 fence ownership snapshot and same-batch CAS", async () => {
+  const { db, sqlite, stats } = createAdminD1();
+  const serverDb = drizzle(db);
+  try {
+    // Exact canonical columns and compound identity; no production DB access.
+    sqlite.exec(`
+      CREATE TABLE public_visibility_fences (
+        entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, fence_token TEXT NOT NULL,
+        state TEXT NOT NULL, reason TEXT, requirements_json TEXT, blocked_at INTEGER,
+        release_requested_at INTEGER, requested_by_auth_user_id TEXT, updated_at INTEGER NOT NULL,
+        PRIMARY KEY(entity_type, entity_id)
+      );
+      CREATE TABLE legacy_fence_guard_test (value INTEGER NOT NULL);
+      INSERT INTO legacy_fence_guard_test(value) VALUES (0);
+    `);
+    const insert = sqlite.prepare(`
+      INSERT INTO public_visibility_fences (
+        entity_type, entity_id, fence_token, state, reason, requirements_json,
+        blocked_at, release_requested_at, requested_by_auth_user_id, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const put = (entityType, entityId, token, state) =>
+      insert.run(entityType, entityId, token, state, "legacy_import_visibility", null,
+        state === "blocked" ? 1 : null, state === "release_pending" ? 1 : null, ADMIN.id, 1);
+    for (const entityType of ["event", "video"]) {
+      const identity = { entityType, entityId: "same-id", fenceToken: "new-token" };
+      const otherType = entityType === "event" ? "video" : "event";
+      const readBefore = stats.reads;
+      const batchBefore = stats.batches;
+      const absent = await readLegacyImportFenceSnapshot(serverDb, identity);
+      assert.equal(absent.raw, null);
+      assert.equal(absent.previousState, null);
+      assert.equal(stats.reads - readBefore, 1);
+      assert.equal(stats.batches, batchBefore, "snapshot never writes");
+
+      const check = (snapshot) => serverDb.batch([buildLegacyImportFenceAssertion(serverDb, snapshot)]);
+      const checkThenWrite = (snapshot) => serverDb.batch([
+        buildLegacyImportFenceAssertion(serverDb, snapshot),
+        serverDb.run(sql`UPDATE legacy_fence_guard_test SET value = value + 1`),
+      ]);
+      put(otherType, identity.entityId, "unrelated-token", "blocked");
+      await check(absent); // same ID with a different type must not collide.
+      put(entityType, identity.entityId, "foreign-token", "blocked");
+      await assert.rejects(checkThenWrite(absent), "fence inserted after read must abort");
+      assert.equal(sqlite.prepare("SELECT value FROM legacy_fence_guard_test").get().value, 0);
+      await assert.rejects(readLegacyImportFenceSnapshot(serverDb, identity), "active foreign token is not import-owned");
+
+      const foreign = { ...identity, fenceToken: "foreign-token" };
+      const captured = await readLegacyImportFenceSnapshot(serverDb, foreign);
+      assert.equal(captured.previousState, "blocked");
+      await check(captured);
+      const change = (field, value) => sqlite.prepare("UPDATE public_visibility_fences SET " + field +
+        " = ? WHERE entity_type = ? AND entity_id = ?").run(value, entityType, identity.entityId);
+      const drifts = [
+        ["requirements_json", '{"rebuild":true}', null],
+        ["reason", "another reason", "legacy_import_visibility"],
+        ["updated_at", 2, 1],
+        ["requested_by_auth_user_id", "other-actor", ADMIN.id],
+        ["blocked_at", 3, 1],
+        ["release_requested_at", 4, null],
+        ["state", "release_pending", "blocked"],
+        ["fence_token", "competing-token", "foreign-token"],
+      ];
+      for (const [field, changed, original] of drifts) {
+        change(field, changed);
+        await assert.rejects(checkThenWrite(captured), "full-row CAS detects " + field);
+        assert.equal(sqlite.prepare("SELECT value FROM legacy_fence_guard_test").get().value, 0);
+        change(field, original);
+      }
+      change("state", "release_pending");
+      const pending = await readLegacyImportFenceSnapshot(serverDb, foreign);
+      assert.equal(pending.previousState, "release_pending");
+      await check(pending);
+      change("state", "released");
+      await assert.rejects(readLegacyImportFenceSnapshot(serverDb, foreign), "released token cannot be reused");
+      const released = await readLegacyImportFenceSnapshot(serverDb, identity);
+      assert.equal(released.previousState, "released");
+      await check(released);
+      change("requirements_json", "x".repeat(128 * 1024));
+      await assert.rejects(readLegacyImportFenceSnapshot(serverDb, identity), "oversized row fails closed");
+      change("requirements_json", null);
+      sqlite.prepare("DELETE FROM public_visibility_fences WHERE entity_type = ? AND entity_id = ?")
+        .run(entityType, identity.entityId);
+      await assert.rejects(checkThenWrite(released), "released row deleted after read must abort");
+      await check(absent);
+      sqlite.prepare("DELETE FROM public_visibility_fences WHERE entity_type = ? AND entity_id = ?")
+        .run(otherType, identity.entityId);
+    }
+    assert.equal(sqlite.prepare("SELECT value FROM legacy_fence_guard_test").get().value, 0);
+  } finally {
+    sqlite.close();
+  }
 });
 
 test("MIG-0645 U02aq import fence precommit: never take an existing event or video token", async () => {
