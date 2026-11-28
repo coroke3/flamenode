@@ -1,6 +1,7 @@
 import test from "node:test";
 import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,7 +10,7 @@ import { spawnSync } from "node:child_process";
 import { materializeD1CompatibleMigrations } from "./d1-migration-compat.mjs";
 import {
   operationModeMirrorFixtureCases, buildOperationModeMirrorFixture, operationModeBannerReceiptMismatch, createOperationModeKvProbe, operationModeKvEvidenceMismatch, operationModeScannerBlobSha, assertOperationModeScannerSource, EXPECTED_OPERATION_MODE_SCANNER_BLOB_SHA, collectOperationModeKvSamples, operationModeKvBaseline, summarizeOperationModeKvDiagnostic,
-  BUDGETS_MS, KINDS, MIN_SAMPLES, QUIET_BASELINE_MAX_MS, ROUTE_INVENTORY, SEED, WARM_KINDS, aggregate, applyBudgetVerdicts, benchmarkRequestHeaders, benchmarkRequestEnv, enforceCpuMeasurementEnvironment, buildPendingScenarios, buildScenarios, createInprocTarget, createReplayTarget, createReplayInputScope, runCold, runScenario, validateCpuProfilerCalibration, requireInspectorResult, summarizeCpuProfile, eventExportCacheRequestUrls, judge, parseArgs, percentile, playlistResponseMismatch, templateResponseMismatch, renderMarkdown, returnedRows, replayIdentity, replayEvidenceMismatch, requireBenchmarkControl, snapshotReplayResult, snapshotReplayScript, summarize, workerSource,
+  BUDGETS_MS, KINDS, MIN_SAMPLES, QUIET_BASELINE_MAX_MS, ROUTE_INVENTORY, SEED, WARM_KINDS, aggregate, applyBudgetVerdicts, benchmarkRequestHeaders, benchmarkRequestEnv, enforceCpuMeasurementEnvironment, buildPendingScenarios, buildScenarios, createInprocTarget, createReplayTarget, createReplayInputScope, runCold, runScenario, validateCpuProfilerCalibration, requireInspectorResult, summarizeCpuProfile, createInspectorSession, waitForInspectorOpen, fetchWithDeadline, waitForChildExit, eventExportCacheRequestUrls, judge, parseArgs, percentile, playlistResponseMismatch, templateResponseMismatch, renderMarkdown, returnedRows, replayIdentity, replayEvidenceMismatch, requireBenchmarkControl, snapshotReplayResult, snapshotReplayScript, summarize, workerSource,
 } from "./benchmark-api-cpu.mjs";
 
 async function loadReplayWorker(generation, script, body) {
@@ -2704,4 +2705,172 @@ test("MIG-0639: CDP profiler commands and CPU profile receipts fail closed", () 
   const start = source.indexOf('requireInspectorResult(await call("Profiler.start"), "Profiler.start");');
   const request = source.indexOf('const res = await fetch(`${base}${spec.path}`, { method:', start);
   assert.ok(start >= 0 && request > start, "the request cannot run unless Profiler.start returned a valid result");
+});
+
+test("MIG-0639: inspector commands are connection-scoped and fail closed on transport faults", async () => {
+  const fakeClock = () => {
+    let sequence = 0;
+    const timers = new Map();
+    return {
+      timers,
+      setTimer(fn, ms) { const id = ++sequence; timers.set(id, { fn, ms }); return id; },
+      clearTimer(id) { timers.delete(id); },
+      runAll() { for (const [id, timer] of [...timers]) { timers.delete(id); timer.fn(); } },
+    };
+  };
+  class FakeSocket extends EventEmitter {
+    constructor() { super(); this.readyState = 1; this.sent = []; this.throwOnSend = false; this.callbackError = null; }
+    send(raw, callback) {
+      if (this.throwOnSend) throw new Error("synthetic send failure");
+      this.sent.push(JSON.parse(raw));
+      callback?.(this.callbackError);
+    }
+    reply(message) { this.emit("message", Buffer.from(JSON.stringify(message))); }
+    terminate() {
+      if (this.readyState === 3) return;
+      this.readyState = 3;
+      this.emit("close", 1006, Buffer.alloc(0));
+    }
+  }
+  const clock = fakeClock(), socket = new FakeSocket();
+  const session = createInspectorSession(socket, { timeoutMs: 100, setTimer: clock.setTimer, clearTimer: clock.clearTimer });
+  const start = session.call("Profiler.start"), stop = session.call("Profiler.stop");
+  assert.deepEqual(socket.sent.map((item) => item.id), [1, 2]);
+  socket.reply({ method: "Debugger.paused", params: {} });
+  socket.reply({ id: 2, result: { profile: "second" } });
+  assert.deepEqual(await stop, { id: 2, result: { profile: "second" } });
+  socket.reply({ id: 1, result: { started: true } });
+  assert.deepEqual(await start, { id: 1, result: { started: true } });
+  assert.equal(session.pendingCount, 0);
+  assert.equal(clock.timers.size, 0);
+  session.close();
+
+  const faults = [
+    ["close", (s) => s.emit("close", 1006, Buffer.alloc(0))],
+    ["error", (s) => s.emit("error", new Error("synthetic transport error"))],
+    ["malformed JSON", (s) => s.emit("message", Buffer.from("{"))],
+    ["invalid id", (s) => s.reply({ id: "1", result: {} })],
+    ["unexpected id", (s) => s.reply({ id: 99, result: {} })],
+    ["timeout", (_s, c) => c.runAll()],
+  ];
+  for (const [name, trigger] of faults) {
+    const c = fakeClock(), s = new FakeSocket();
+    const client = createInspectorSession(s, { timeoutMs: 10, setTimer: c.setTimer, clearTimer: c.clearTimer });
+    const pending = client.call("Profiler.start");
+    trigger(s, c);
+    await assert.rejects(pending, /inspector/i, name);
+    assert.equal(client.pendingCount, 0, name + " clears pending commands");
+    assert.equal(c.timers.size, 0, name + " clears command deadlines");
+    assert.equal(client.closed, true, name + " invalidates the session");
+  }
+  for (const mode of ["sync-send", "callback-send"]) {
+    const c = fakeClock(), s = new FakeSocket();
+    if (mode === "sync-send") s.throwOnSend = true;
+    else s.callbackError = new Error("synthetic callback failure");
+    const client = createInspectorSession(s, { timeoutMs: 10, setTimer: c.setTimer, clearTimer: c.clearTimer });
+    await assert.rejects(client.call("Profiler.start"), /inspector/i, mode);
+    assert.equal(client.pendingCount, 0, mode + " does not leak a waiter");
+    assert.equal(c.timers.size, 0, mode + " does not leak a timer");
+  }
+  const unopened = new FakeSocket();
+  unopened.readyState = 0;
+  const unopenedClient = createInspectorSession(unopened);
+  await assert.rejects(unopenedClient.call("Profiler.start"), /not open/);
+  assert.equal(unopenedClient.pendingCount, 0);
+
+  const oldSocket = new FakeSocket(), oldClock = fakeClock();
+  const oldSession = createInspectorSession(oldSocket, { setTimer: oldClock.setTimer, clearTimer: oldClock.clearTimer });
+  const oldPending = oldSession.call("Profiler.start");
+  oldSession.close();
+  await assert.rejects(oldPending, /inspector/);
+  const newSocket = new FakeSocket(), newClock = fakeClock();
+  const newSession = createInspectorSession(newSocket, { setTimer: newClock.setTimer, clearTimer: newClock.clearTimer });
+  const newPending = newSession.call("Profiler.start");
+  oldSocket.reply({ id: 1, result: { from: "old socket" } });
+  assert.equal(newSession.pendingCount, 1, "stale socket cannot settle a new connection");
+  newSocket.reply({ id: 1, result: { from: "new socket" } });
+  assert.deepEqual(await newPending, { id: 1, result: { from: "new socket" } });
+  newSession.close();
+});
+
+test("MIG-0639: inspector open, fetch/body and child-exit waits have finite deadlines", async () => {
+  const fakeClock = () => {
+    let sequence = 0;
+    const timers = new Map();
+    return {
+      timers,
+      setTimer(fn, ms) { const id = ++sequence; timers.set(id, { fn, ms }); return id; },
+      clearTimer(id) { timers.delete(id); },
+      runAll() { for (const [id, timer] of [...timers]) { timers.delete(id); timer.fn(); } },
+    };
+  };
+  class FakeSocket extends EventEmitter { constructor() { super(); this.readyState = 0; } }
+  const openClock = fakeClock(), socket = new FakeSocket();
+  const opening = waitForInspectorOpen(socket, { timeoutMs: 10, setTimer: openClock.setTimer, clearTimer: openClock.clearTimer });
+  socket.readyState = 1;
+  socket.emit("open");
+  await opening;
+  assert.equal(openClock.timers.size, 0);
+
+  const openTimeoutClock = fakeClock(), unopened = new FakeSocket();
+  const openTimeout = waitForInspectorOpen(unopened, { timeoutMs: 10, setTimer: openTimeoutClock.setTimer, clearTimer: openTimeoutClock.clearTimer });
+  openTimeoutClock.runAll();
+  await assert.rejects(openTimeout, /open timed out/);
+  assert.equal(unopened.listenerCount("open"), 0);
+  assert.equal(unopened.listenerCount("error"), 0);
+  assert.equal(unopened.listenerCount("close"), 0);
+
+  const successClock = fakeClock();
+  const success = await fetchWithDeadline("https://bench.invalid/success", {}, {
+    timeoutMs: 10, label: "test fetch", fetchImpl: async () => new Response("body", { status: 200, headers: { "content-length": "4" } }),
+    setTimer: successClock.setTimer, clearTimer: successClock.clearTimer,
+  });
+  assert.equal(await success.text(), "body");
+  assert.equal(success.headers.get("content-length"), null);
+  assert.equal(successClock.timers.size, 0);
+
+  const fetchClock = fakeClock();
+  let fetchSignal;
+  const pendingFetch = fetchWithDeadline("https://bench.invalid/hang", {}, {
+    timeoutMs: 10, label: "test fetch",
+    fetchImpl: (_url, init) => new Promise((_resolve, reject) => {
+      fetchSignal = init.signal;
+      init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true });
+    }),
+    setTimer: fetchClock.setTimer, clearTimer: fetchClock.clearTimer,
+  });
+  fetchClock.runAll();
+  assert.equal(fetchSignal.aborted, true);
+  await assert.rejects(pendingFetch, /timed out/);
+  assert.equal(fetchClock.timers.size, 0);
+
+  const bodyClock = fakeClock();
+  const pendingBody = fetchWithDeadline("https://bench.invalid/body", {}, {
+    timeoutMs: 10, label: "test body",
+    fetchImpl: async (_url, init) => ({
+      status: 200, statusText: "OK", headers: new Headers(),
+      arrayBuffer: () => new Promise((_resolve, reject) => {
+        init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true });
+      }),
+    }),
+    setTimer: bodyClock.setTimer, clearTimer: bodyClock.clearTimer,
+  });
+  bodyClock.runAll();
+  await assert.rejects(pendingBody, /timed out/);
+  assert.equal(bodyClock.timers.size, 0);
+
+  const childClock = fakeClock(), child = new EventEmitter();
+  child.exitCode = null; child.signalCode = null;
+  const exit = waitForChildExit(child, { timeoutMs: 10, setTimer: childClock.setTimer, clearTimer: childClock.clearTimer });
+  child.emit("exit", 0, null);
+  await exit;
+  assert.equal(childClock.timers.size, 0);
+
+  const stuckClock = fakeClock(), stuckChild = new EventEmitter();
+  stuckChild.exitCode = null; stuckChild.signalCode = null;
+  const stuck = waitForChildExit(stuckChild, { timeoutMs: 10, setTimer: stuckClock.setTimer, clearTimer: stuckClock.clearTimer });
+  stuckClock.runAll();
+  await assert.rejects(stuck, /child exit timed out/);
+  assert.equal(stuckChild.listenerCount("exit"), 0);
+  assert.equal(stuckChild.listenerCount("error"), 0);
 });

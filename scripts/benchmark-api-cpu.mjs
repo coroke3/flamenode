@@ -2447,11 +2447,210 @@ export default {
 
 function killTree(child) {
   if (!child || child.exitCode !== null || child.signalCode !== null) return;
-  if (process.platform === "win32") spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
-  else process.kill(-child.pid, "SIGKILL"); // Dedicated process group includes workerd.
+  try {
+    if (process.platform === "win32") {
+      spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+    } else {
+      process.kill(-child.pid, "SIGKILL");
+    }
+  } catch {
+    try { child.kill("SIGKILL"); } catch { /* child already exited */ }
+  }
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const INSPECTOR_COMMAND_TIMEOUT_MS = 10_000;
+const INSPECTOR_DISCOVERY_TIMEOUT_MS = 5_000;
+const BENCHMARK_REQUEST_TIMEOUT_MS = 30_000;
+const WORKER_EXIT_TIMEOUT_MS = 10_000;
+
+export async function fetchWithDeadline(url, init = {}, options = {}) {
+  const timeoutMs = options.timeoutMs ?? BENCHMARK_REQUEST_TIMEOUT_MS;
+  const label = options.label ?? "benchmark request";
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const schedule = options.setTimer ?? setTimeout;
+  const cancel = options.clearTimer ?? clearTimeout;
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = schedule(() => {
+    timedOut = true;
+    controller.abort(new Error(label + " timed out"));
+  }, timeoutMs);
+  try {
+    const response = await fetchImpl(url, { ...init, signal: controller.signal });
+    const bytes = await response.arrayBuffer();
+    if (timedOut) throw new Error(label + " timed out");
+    const headers = new Headers(response.headers);
+    headers.delete("content-length");
+    headers.delete("content-encoding");
+    headers.delete("transfer-encoding");
+    return new Response(bytes.byteLength ? bytes : null, {
+      status: response.status, statusText: response.statusText, headers,
+    });
+  } catch (error) {
+    throw new Error(label + (timedOut ? " timed out" : " failed"), { cause: error });
+  } finally {
+    cancel(timer);
+  }
+}
+
+export function waitForInspectorOpen(socket, options = {}) {
+  const timeoutMs = options.timeoutMs ?? INSPECTOR_COMMAND_TIMEOUT_MS;
+  const schedule = options.setTimer ?? setTimeout;
+  const cancel = options.clearTimer ?? clearTimeout;
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let timer;
+    const remove = (name, handler) => {
+      if (typeof socket.off === "function") socket.off(name, handler);
+      else socket.removeListener(name, handler);
+    };
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      cancel(timer);
+      remove("open", onOpen);
+      remove("error", onError);
+      remove("close", onClose);
+      if (error) reject(error);
+      else resolve();
+    };
+    const onOpen = () => finish();
+    const onError = () => finish(new Error("inspector WebSocket open failed"));
+    const onClose = () => finish(new Error("inspector WebSocket closed before open"));
+    socket.once("open", onOpen);
+    socket.once("error", onError);
+    socket.once("close", onClose);
+    timer = schedule(() => finish(new Error("inspector WebSocket open timed out")), timeoutMs);
+    if (socket.readyState === 1) finish();
+  });
+}
+
+export function createInspectorSession(socket, options = {}) {
+  const timeoutMs = options.timeoutMs ?? INSPECTOR_COMMAND_TIMEOUT_MS;
+  const schedule = options.setTimer ?? setTimeout;
+  const cancel = options.clearTimer ?? clearTimeout;
+  const pending = new Map();
+  let nextId = 0;
+  let closed = false;
+  let closedError = null;
+  const terminate = () => {
+    try {
+      if (typeof socket.terminate === "function") socket.terminate();
+      else if (typeof socket.close === "function") socket.close();
+    } catch { /* transport is already closing */ }
+  };
+  const invalidate = (reason, terminateSocket = false) => {
+    if (!closed) {
+      closed = true;
+      closedError = reason instanceof Error ? reason : new Error("inspector transport failed");
+      for (const entry of pending.values()) {
+        cancel(entry.timer);
+        entry.reject(closedError);
+      }
+      pending.clear();
+    }
+    if (terminateSocket) terminate();
+  };
+  const onMessage = (raw) => {
+    let message;
+    try {
+      const payload = typeof raw === "string"
+        ? raw
+        : Buffer.isBuffer(raw) ? raw.toString("utf8") : String(raw);
+      message = JSON.parse(payload);
+    } catch {
+      invalidate(new Error("inspector returned malformed JSON"), true);
+      return;
+    }
+    if (!message || typeof message !== "object" || Array.isArray(message)) {
+      invalidate(new Error("inspector returned malformed message"), true);
+      return;
+    }
+    if (!Object.prototype.hasOwnProperty.call(message, "id")) {
+      if (typeof message.method === "string") return;
+      invalidate(new Error("inspector returned an uncorrelated message"), true);
+      return;
+    }
+    if (!Number.isSafeInteger(message.id) || message.id < 1) {
+      invalidate(new Error("inspector returned an invalid response id"), true);
+      return;
+    }
+    const entry = pending.get(message.id);
+    if (!entry) {
+      invalidate(new Error("inspector returned an unexpected response id"), true);
+      return;
+    }
+    pending.delete(message.id);
+    cancel(entry.timer);
+    entry.resolve(message);
+  };
+  const onError = () => invalidate(new Error("inspector WebSocket transport error"));
+  const onClose = () => invalidate(new Error("inspector WebSocket closed"));
+  socket.on("message", onMessage);
+  socket.on("error", onError);
+  socket.on("close", onClose);
+  return {
+    call(method, params = {}) {
+      if (closed) return Promise.reject(closedError ?? new Error("inspector session is closed"));
+      if (socket.readyState !== 1) {
+        const error = new Error("inspector WebSocket is not open");
+        invalidate(error, true);
+        return Promise.reject(error);
+      }
+      if (typeof method !== "string" || method.length === 0) {
+        return Promise.reject(new Error("inspector method is invalid"));
+      }
+      return new Promise((resolve, reject) => {
+        const id = ++nextId;
+        const timer = schedule(() => invalidate(new Error("inspector " + method + " timed out"), true), timeoutMs);
+        pending.set(id, { resolve, reject, timer });
+        try {
+          socket.send(JSON.stringify({ id, method, params }), (error) => {
+            if (error && pending.has(id)) invalidate(new Error("inspector " + method + " send failed"), true);
+          });
+        } catch {
+          invalidate(new Error("inspector " + method + " send failed"), true);
+        }
+      });
+    },
+    close(reason) { invalidate(reason ?? new Error("inspector session closed"), true); },
+    get pendingCount() { return pending.size; },
+    get closed() { return closed; },
+  };
+}
+
+export function waitForChildExit(child, options = {}) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+  const timeoutMs = options.timeoutMs ?? WORKER_EXIT_TIMEOUT_MS;
+  const schedule = options.setTimer ?? setTimeout;
+  const cancel = options.clearTimer ?? clearTimeout;
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let timer;
+    const remove = (name, handler) => {
+      if (typeof child.off === "function") child.off(name, handler);
+      else child.removeListener(name, handler);
+    };
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      cancel(timer);
+      remove("exit", onExit);
+      remove("error", onError);
+      if (error) reject(error);
+      else resolve();
+    };
+    const onExit = () => finish();
+    const onError = () => finish(new Error("worker child process error"));
+    child.once("exit", onExit);
+    child.once("error", onError);
+    timer = schedule(() => finish(new Error("worker child exit timed out")), timeoutMs);
+    if (child.exitCode !== null || child.signalCode !== null) finish();
+  });
+}
+
 
 export function replayEvidenceMismatch(rec, headers) {
   const observedStatements = headers.get("x-bench-d1");
@@ -2472,9 +2671,9 @@ export function requireBenchmarkControl(response, operation) {
 async function createWranglerTarget(plan, opts) {
   const require = createRequire(path.join(REPO_ROOT, "package.json"));
   const wranglerBin = path.join(path.dirname(require.resolve("wrangler/package.json")), "bin", "wrangler.js");
+  const mig = await materializeMigrations();
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "flamenode-api-bench-"));
   const state = path.join(workDir, "state");
-  const mig = await materializeMigrations();
   const toml = path.join(workDir, "wrangler.toml");
   fs.writeFileSync(toml, [
     'name = "flamenode-api-bench-local"',
@@ -2510,12 +2709,17 @@ async function createWranglerTarget(plan, opts) {
   const workerPath = path.join(workDir, "worker.mjs");
   fs.writeFileSync(workerPath, workerSource(`b${build}`, null, { operationModeKv: opts.operationModeKv === true }));
 
-  const apply = spawnSync(process.execPath, [wranglerBin, "d1", "migrations", "apply", "flamenode_db", "--local", "--config", toml, "--persist-to", state], { cwd: workDir, encoding: "utf8" });
+  const apply = spawnSync(process.execPath, [wranglerBin, "d1", "migrations", "apply", "flamenode_db", "--local", "--config", toml, "--persist-to", state], {
+    cwd: workDir, encoding: "utf8", timeout: 120_000,
+  });
   fs.rmSync(mig.workspace, { recursive: true, force: true });
-  if (apply.status !== 0) throw new Error(`local D1 migration apply failed:\n${apply.stdout}\n${apply.stderr}`);
+  if (apply.status !== 0) {
+    fs.rmSync(workDir, { recursive: true, force: true });
+    throw new Error("local D1 migration apply failed:\\n" + (apply.stdout ?? "") + "\\n" + (apply.stderr ?? ""));
+  }
 
   const base = `http://127.0.0.1:${opts.port}`;
-  let child, ws = null;
+  let child, ws = null, inspectorSession = null;
   let log = "";
   const startWorker = () => {
     child = spawn(process.execPath, [wranglerBin, "dev", "--local", "--config", toml, "--persist-to", state, "--port", String(opts.port), "--ip", "127.0.0.1", "--inspector-port", String(opts.inspectorPort)], { cwd: workDir, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, WRANGLER_SEND_METRICS: "false" } });
@@ -2523,30 +2727,67 @@ async function createWranglerTarget(plan, opts) {
     child.stderr.on("data", (d) => { log += d; });
   };
   const stopWorker = async () => {
+    if (inspectorSession) {
+      inspectorSession.close(new Error("benchmark worker stopping"));
+      inspectorSession = null;
+    }
     try { ws?.terminate(); } catch { /* already closed */ }
-    if (child.exitCode !== null || child.signalCode !== null) return;
-    const exited = new Promise((resolve) => child.once("exit", resolve));
+    if (!child || child.exitCode !== null || child.signalCode !== null) return;
+    const exited = waitForChildExit(child, { timeoutMs: WORKER_EXIT_TIMEOUT_MS });
     killTree(child);
-    await exited;
+    try {
+      await exited;
+    } catch {
+      try { child.kill("SIGKILL"); } catch { /* child already exited */ }
+      await waitForChildExit(child, { timeoutMs: 5_000 }).catch(() => {});
+      if (child.exitCode === null && child.signalCode === null) {
+        throw new Error("benchmark worker did not exit after forced termination");
+      }
+    }
   };
-  startWorker();
   const cleanup = async () => {
-    await stopWorker();
-    await sleep(1500); // let workerd release its file handles (Windows EPERM otherwise)
-    try { fs.rmSync(workDir, { recursive: true, force: true, maxRetries: 20, retryDelay: 300 }); } catch (e) { console.error(`warning: could not remove ${workDir}: ${e.code}`); }
+    let stopError = null;
+    try { await stopWorker(); } catch (error) { stopError = error; }
+    await sleep(1500);
+    try {
+      fs.rmSync(workDir, { recursive: true, force: true, maxRetries: 20, retryDelay: 300 });
+    } catch (error) {
+      try { console.error("warning: could not remove benchmark work directory: " + (error?.code ?? "unknown")); } catch {}
+    }
+    if (stopError) throw stopError;
   };
 
   const ping = async () => {
-    try { const r = await fetch(`${base}/__bench/ping`); return r.ok ? r.headers.get("x-bench-build") : null; } catch { return null; }
+    try {
+      const response = await fetchWithDeadline(base + "/__bench/ping", {}, {
+        timeoutMs: 2_000, label: "worker readiness ping",
+      });
+      return response.ok ? response.headers.get("x-bench-build") : null;
+    } catch { return null; }
   };
   const waitBuild = async (want, ms = 60000) => {
     const t0 = Date.now();
-    while (Date.now() - t0 < ms) { if ((await ping()) === want) return; await sleep(150); }
-    throw new Error(`wrangler dev did not serve build ${want} within ${ms}ms. Log tail:\n${log.slice(-1500)}`);
+    while (Date.now() - t0 < ms) {
+      if (child && (child.exitCode !== null || child.signalCode !== null)) {
+        throw new Error("wrangler dev exited before serving build " + want + ". Log tail:\\n" + log.slice(-1500));
+      }
+      if ((await ping()) === want) return;
+      await sleep(150);
+    }
+    throw new Error("wrangler dev did not serve build " + want + " within " + ms + "ms. Log tail:\\n" + log.slice(-1500));
   };
-  try { await waitBuild("b0"); } catch (e) { await cleanup(); throw e; }
 
-  const post = (p, body, method = "POST") => fetch(`${base}${p}`, { method, body });
+  try {
+    startWorker();
+    await waitBuild("b0");
+  } catch (error) {
+    try { await cleanup(); } catch {}
+    throw error;
+  }
+
+  const post = (p, body, method = "POST") => fetchWithDeadline(base + p, { method, body }, {
+    timeoutMs: BENCHMARK_REQUEST_TIMEOUT_MS, label: "benchmark control " + method + " " + p,
+  });
   const exec = async (list) => {
     for (let i = 0; i < list.length; i += 40) {
       const res = await post("/__bench/exec", json({ list: list.slice(i, i + 40) }));
@@ -2562,40 +2803,63 @@ async function createWranglerTarget(plan, opts) {
   // reports 0 even for a multi-second synchronous burn (see clockCalibration).
   const WebSocket = createRequire(require.resolve("wrangler/package.json"))("ws");
   const SAMPLING_US = opts.samplingUs;
-  let msgId = 0;
-  const waiters = new Map();
-  const call = (method, params = {}) => new Promise((resolve) => {
-    const id = (msgId += 1);
-    waiters.set(id, resolve);
-    ws.send(json({ id, method, params }));
-  });
+  const call = (method, params = {}) => {
+    if (!inspectorSession) return Promise.reject(new Error("inspector is not connected"));
+    return inspectorSession.call(method, params);
+  };
   const connect = async () => {
-    if (ws) { try { ws.terminate(); } catch { /* already closed */ } }
-    let lastError;
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      try {
-        const list = await (await fetch(`http://127.0.0.1:${opts.inspectorPort}/json`)).json();
-        const url = list[0]?.webSocketDebuggerUrl;
-        if (url) {
-          const sock = new WebSocket(url);
-          await new Promise((res, rej) => { sock.once("open", res); sock.once("error", rej); });
-          sock.on("message", (raw) => {
-            const d = JSON.parse(raw.toString());
-            const w = d.id && waiters.get(d.id);
-            if (w) { waiters.delete(d.id); w(d); }
-          });
-          ws = sock;
-          requireInspectorResult(await call("Profiler.enable"), "Profiler.enable");
-          requireInspectorResult(
-            await call("Profiler.setSamplingInterval", { interval: SAMPLING_US }),
-            "Profiler.setSamplingInterval",
-          );
-          return;
-        }
-      } catch (error) { lastError = error; /* inspector not ready yet */ }
-      await sleep(150);
+    if (inspectorSession) {
+      inspectorSession.close(new Error("inspector reconnect"));
+      inspectorSession = null;
     }
-    throw new Error(`could not attach to the workerd inspector: ${lastError?.message ?? "no target"}. Log tail:\n${log.slice(-1000)}`);
+    try { ws?.terminate(); } catch { /* already closed */ }
+    ws = null;
+    const deadline = Date.now() + 60_000;
+    let lastError = null;
+    while (Date.now() < deadline) {
+      let sock = null;
+      try {
+        const remaining = deadline - Date.now();
+        const response = await fetchWithDeadline(
+          "http://127.0.0.1:" + opts.inspectorPort + "/json",
+          {},
+          { timeoutMs: Math.max(1, Math.min(INSPECTOR_DISCOVERY_TIMEOUT_MS, remaining)), label: "inspector discovery" },
+        );
+        if (!response.ok) throw new Error("inspector discovery returned HTTP " + response.status);
+        const list = await response.json();
+        const url = Array.isArray(list) ? list[0]?.webSocketDebuggerUrl : null;
+        if (!url) {
+          lastError = new Error("inspector target is not ready");
+          await sleep(Math.min(150, Math.max(1, deadline - Date.now())));
+          continue;
+        }
+        sock = new WebSocket(url);
+        sock.on("error", () => {});
+        await waitForInspectorOpen(sock, {
+          timeoutMs: Math.max(1, Math.min(INSPECTOR_COMMAND_TIMEOUT_MS, deadline - Date.now())),
+        });
+        ws = sock;
+        inspectorSession = createInspectorSession(sock, { timeoutMs: INSPECTOR_COMMAND_TIMEOUT_MS });
+        requireInspectorResult(await call("Profiler.enable"), "Profiler.enable");
+        requireInspectorResult(
+          await call("Profiler.setSamplingInterval", { interval: SAMPLING_US }),
+          "Profiler.setSamplingInterval",
+        );
+        return;
+      } catch (error) {
+        lastError = error;
+        if (inspectorSession) {
+          inspectorSession.close(new Error("inspector connection attempt failed"));
+          inspectorSession = null;
+        }
+        try { sock?.terminate(); } catch {}
+        if (ws === sock) ws = null;
+        const remaining = deadline - Date.now();
+        if (remaining > 0) await sleep(Math.min(150, remaining));
+      }
+    }
+    throw new Error("could not attach to the workerd inspector: " +
+      (lastError?.message ?? "no target") + ". Log tail:\\n" + log.slice(-1000));
   };
   await connect();
 
@@ -2617,7 +2881,11 @@ async function createWranglerTarget(plan, opts) {
       headers.set("x-bench-script", id);
     }
     requireInspectorResult(await call("Profiler.start"), "Profiler.start");
-    const res = await fetch(`${base}${spec.path}`, { method: spec.method, headers, body: spec.body });
+    const res = await fetchWithDeadline(base + spec.path, {
+      method: spec.method, headers, body: spec.body,
+    }, {
+      timeoutMs: BENCHMARK_REQUEST_TIMEOUT_MS, label: "measured benchmark request",
+    });
     const buf = await res.arrayBuffer();
     const stopResult = requireInspectorResult(await call("Profiler.stop"), "Profiler.stop");
     const profileSummary = summarizeCpuProfile(stopResult.profile);
@@ -2679,13 +2947,7 @@ async function createWranglerTarget(plan, opts) {
 
   // A broken/stalled V8 inspector can report 0ms for every route. Validate
   // synchronous calibration BEFORE accepting any route CPU measurements.
-  try {
-    validateCpuProfilerCalibration(calibration);
-  } catch (error) {
-    try { ws?.terminate(); } catch { /* already closed */ }
-    await cleanup();
-    throw error;
-  }
+  validateCpuProfilerCalibration(calibration);
   quantumMs = SAMPLING_US / 1000;
   countQuantum = true;
 
@@ -2729,18 +2991,32 @@ async function createWranglerTarget(plan, opts) {
       startWorker(); // New workerd process, not merely reset counters or a hot reload.
       // The first fetch creates workerd's execution context. Inspector attach
       // must not warm it with a ping, script upload or Runtime.evaluate probe.
-      await connect();
-      return { ...await run(spec, rec, generation), coldProcessId: child.pid };
+      try {
+        await connect();
+        return { ...await run(spec, rec, generation), coldProcessId: child.pid };
+      } catch (error) {
+        try { await cleanup(); } catch {}
+        throw error;
+      }
     },
     reload: async () => {
       build += 1;
-      fs.writeFileSync(workerPath, workerSource(`b${build}`, null, { operationModeKv: opts.operationModeKv === true }));
-      await waitBuild(`b${build}`);
-      await connect();
+      fs.writeFileSync(workerPath, workerSource("b" + build, null, { operationModeKv: opts.operationModeKv === true }));
+      try {
+        await waitBuild("b" + build);
+        await connect();
+      } catch (error) {
+        try { await cleanup(); } catch {}
+        throw error;
+      }
     },
     toolVersions: () => spawnSync(process.execPath, [wranglerBin, "--version"], { encoding: "utf8" }).stdout.trim(),
-    close: async () => { try { ws?.terminate(); } catch { /* ignore */ } await cleanup(); },
+    close: cleanup,
   };
+  } catch (error) {
+    try { await cleanup(); } catch {}
+    throw error;
+  }
 }
 
 // --------------------------------------------------------------------- runner
