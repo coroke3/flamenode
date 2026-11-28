@@ -42,6 +42,12 @@ function canonicalPkParts(pk: Record<string, string>): [string, string][] {
     if (key.includes("\0") || value.includes("\0")) {
       throw new Error("invalid_row");
     }
+    // JSON.stringify escapes lone UTF-16 surrogates, but SQLite TEXT
+    // bindings replace them with U+FFFD. Do not invent an audit identity
+    // for a different bound primary key. The /u flag preserves valid pairs.
+    if (/[\uD800-\uDFFF]/u.test(key) || /[\uD800-\uDFFF]/u.test(value)) {
+      throw new Error("invalid_row");
+    }
   }
   // localeCompare can compare distinct Unicode key spellings as equal; use
   // deterministic UTF-16 code-unit order independent of input insertion order.

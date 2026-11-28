@@ -259,6 +259,41 @@ test("Issue #674: invalid or noncanonical V1 representations fail closed", () =>
   }), null);
 });
 
+test("Issue #674: V1 PK identity rejects lone surrogates rather than aliasing SQLite TEXT", () => {
+  const sqlite = new DatabaseSync(":memory:");
+  try {
+    const read = sqlite.prepare("SELECT ? AS value, hex(CAST(? AS BLOB)) AS bytes");
+    const malformed = ["\ud800", "\udfff", "a\ud800b", "\ud800\ud800", "\udfff\ud800",
+      "\ud800\udc00\udfff", "\ud800\u0001", "\udfff\udbff\udfff"];
+    for (const value of malformed) {
+      assert.notEqual(read.get(value, value).value, value);
+      assert.equal(read.get(value, value).value, value.toWellFormed());
+      for (const pk of [{ id: value }, { [value]: "x" }]) {
+        assert.throws(() => buildSpreadsheetAuditIdentityV1(pk), /invalid_row/);
+        assert.throws(() => buildSpreadsheetAuditHistoryLookup("video_events", pk), /invalid_row/);
+        assert.equal(parseSpreadsheetAuditIdentityV1({
+          context: SPREADSHEET_AUDIT_PK_V1_CONTEXT,
+          target_id: SPREADSHEET_AUDIT_PK_V1_PREFIX + JSON.stringify(Object.entries(pk)),
+        }), null);
+      }
+    }
+    assert.equal(read.get("\ud800", "\ud800").bytes, read.get("\udfff", "\udfff").bytes);
+    assert.equal(read.get("\ud800", "\ud800").bytes, read.get("\ufffd", "\ufffd").bytes);
+    for (const value of ["a", "\uFFFD", "\u{10000}", "\u{10FFFF}", "\u{1F600}",
+      "e\u0301", "\u00e9", "\uFFFF", "\uE000", "a\u{10000}b",
+      "\uD800\uDC00\uDBFF\uDFFF", "\u2028x", "\u0001"]) {
+      assert.equal(read.get(value, value).value, value);
+      for (const pk of [{ id: value }, { [value]: "x" }]) {
+        const v1 = buildSpreadsheetAuditIdentityV1(pk);
+        assert.deepEqual(parseSpreadsheetAuditIdentityV1(v1), Object.entries(pk));
+        assert.deepEqual(buildSpreadsheetAuditHistoryLookup("video_events", pk).v1, v1);
+      }
+    }
+  } finally {
+    sqlite.close();
+  }
+});
+
 test("Issue #674: real SQLite audit lookup isolates new composite IDs and preserves legacy rows", () => {
   const sqlite = new DatabaseSync(":memory:");
   try {
