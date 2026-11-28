@@ -81,6 +81,7 @@ test("U04a: local workerd/D1 preserves raw actor snapshot bytes and version-fenc
     "  await run(db, \"INSERT OR IGNORE INTO u04a_resource VALUES ('target', 'before')\");",
     "  await run(db, 'CREATE TABLE IF NOT EXISTS audit_actor_snapshots_u04a (id TEXT PRIMARY KEY, discord_id, discord_name, active_x_user_id, user_image, x_name, x_icon_url, user_version INTEGER NOT NULL, x_version INTEGER NOT NULL)');",
     "  await run(db, 'CREATE TABLE IF NOT EXISTS audit_actor_refs_u04a (audit_id TEXT PRIMARY KEY, snapshot_id TEXT NOT NULL REFERENCES audit_actor_snapshots_u04a(id))');",
+    "  await run(db, 'CREATE TABLE IF NOT EXISTS u04a_audit_inline (id TEXT PRIMARY KEY, actor_snapshot_json TEXT NOT NULL)');",
     "  await run(db, 'CREATE TABLE IF NOT EXISTS u04a_forced_failure (value INTEGER NOT NULL CHECK (value = 1))');",
     "  await run(db, 'INSERT OR IGNORE INTO u04a_user (id, discord_id, name, active_x_user_id, image) VALUES (?, ?, ?, ?, ?)', ['admin-1', 'd', 'Name', 'u04a-x', 'image']);",
     "  await run(db, 'INSERT OR IGNORE INTO u04a_x_users (id, x_name, icon_url) VALUES (?, ?, ?)', ['u04a-x', 'X name', 'https://i/x.png']);",
@@ -205,6 +206,38 @@ test("U04a: local workerd/D1 preserves raw actor snapshot bytes and version-fenc
     "  const positiveVersions = await getVersions();",
     "  const positiveResults = await db.batch(fencedBatch('fence-success', positiveVersions, [db.prepare(\"UPDATE u04a_x_users SET x_name='X after' WHERE id='u04a-x'\")]));",
     "  const positive = { allSuccess: positiveResults.every(r => r.success === true), snapshotName: (await all(db, \"SELECT x_name FROM audit_actor_snapshots_u04a WHERE id='fence-success'\"))[0]?.x_name, liveName: (await all(db, sourceSql, ['admin-1']))[0]?.x_name, resource: await getResource(), refCount: await countRef('fence-success') };",
+    "  // CURRENT keeps the admission-time actor JSON across a concurrent actor update before the final batch.",
+    "  await resetActor();",
+    "  const interleavingAdmissionRow = (await all(db, sourceSql, ['admin-1']))[0];",
+    "  const interleavingAdmissionJson = JSON.stringify(actorSnapshotFromRow(interleavingAdmissionRow));",
+    "  await updateX(['X concurrent', 'https://i/concurrent.png']);",
+    "  const interleavingLiveJson = JSON.stringify(actorSnapshotFromRow((await all(db, sourceSql, ['admin-1']))[0]));",
+    "  const interleavingResults = await db.batch([",
+    "    db.prepare('UPDATE u04a_resource SET value=? WHERE id=?').bind('current-success', 'target'),",
+    "    db.prepare('INSERT INTO u04a_audit_inline (id, actor_snapshot_json) VALUES (?, ?)').bind('current-success', interleavingAdmissionJson),",
+    "  ]);",
+    "  const interleavingStored = (await all(db, 'SELECT actor_snapshot_json FROM u04a_audit_inline WHERE id=?', ['current-success']))[0]?.actor_snapshot_json ?? null;",
+    "  const interleaving = { allSuccess: interleavingResults.every(r => r.success === true), admissionJson: interleavingAdmissionJson, storedJson: interleavingStored, liveJson: interleavingLiveJson, resource: await getResource() };",
+    "  await resetActor();",
+    "  const interleavingFenceVersions = await getVersions();",
+    "  await updateX(['X concurrent', 'https://i/concurrent.png']);",
+    "  const interleavingFenceFailed = await batchFailed(fencedBatch('interleave-fenced', interleavingFenceVersions));",
+    "  const interleavingFence = { failed: interleavingFenceFailed, snapshotCount: await countSnapshot('interleave-fenced'), refCount: await countRef('interleave-fenced'), resource: await getResource(), liveName: (await all(db, sourceSql, ['admin-1']))[0]?.x_name };",
+    "  await resetActor();",
+    "  const interleavingFailureRow = (await all(db, sourceSql, ['admin-1']))[0];",
+    "  const interleavingFailureJson = JSON.stringify(actorSnapshotFromRow(interleavingFailureRow));",
+    "  await updateX(['X concurrent', 'https://i/concurrent.png']);",
+    "  const interleavingCurrentFailure = await batchFailed([",
+    "    db.prepare('UPDATE u04a_resource SET value=? WHERE id=?').bind('current-failed', 'target'),",
+    "    db.prepare('INSERT INTO u04a_audit_inline (id, actor_snapshot_json) VALUES (?, ?)').bind('current-failed', interleavingFailureJson),",
+    "    db.prepare('INSERT INTO u04a_forced_failure(value) VALUES (?)').bind(2),",
+    "  ]);",
+    "  const interleavingFailure = { failed: interleavingCurrentFailure, auditCount: Number((await all(db, 'SELECT COUNT(*) AS n FROM u04a_audit_inline WHERE id=?', ['current-failed']))[0].n), resource: await getResource(), liveName: (await all(db, sourceSql, ['admin-1']))[0]?.x_name };",
+    "  await resetActor();",
+    "  const interleavingFailureFenceVersions = await getVersions();",
+    "  await updateX(['X concurrent', 'https://i/concurrent.png']);",
+    "  const interleavingFailureFenceFailed = await batchFailed(fencedBatch('interleave-failed-fence', interleavingFailureFenceVersions));",
+    "  const interleavingFailureFence = { failed: interleavingFailureFenceFailed, snapshotCount: await countSnapshot('interleave-failed-fence'), refCount: await countRef('interleave-failed-fence'), resource: await getResource(), liveName: (await all(db, sourceSql, ['admin-1']))[0]?.x_name };",
     "  await resetActor();",
     "  const beforeRollback = await getVersions();",
     "  const seqBefore = await getSeq();",
@@ -233,7 +266,7 @@ test("U04a: local workerd/D1 preserves raw actor snapshot bytes and version-fenc
     "  const missingFailed = await batchFailed([db.prepare(\"UPDATE OR IGNORE u04a_x_users SET x_name='after-missing' WHERE id='u04a-x'\")]);",
     "  const missing = { failed: missingFailed, versions: await getVersions(), name: (await all(db, sourceSql, ['admin-1']))[0]?.x_name, rows: (await all(db, 'SELECT n FROM u04a_actor_sequence')).length };",
     "  const allocator = { fractionalRejected, oldVersions, atMaxSeq, maxToken, allocatorOut, overflowBatch, missing };",
-    "  return { cases: casesOut, blobCanonicalJson: blobCase?.sourceJson ?? null, blobJson1FixtureMatches, json1, json1Error, staleChanges, staleCount, rollbackFailed, rollbackCount, abandonedCount, successRef, fenceOut, positive, lateRollback, allocator };",
+    "  return { cases: casesOut, blobCanonicalJson: blobCase?.sourceJson ?? null, blobJson1FixtureMatches, json1, json1Error, staleChanges, staleCount, rollbackFailed, rollbackCount, abandonedCount, successRef, fenceOut, positive, interleaving, interleavingFence, interleavingFailure, interleavingFailureFence, lateRollback, allocator };",
     "}",
     "export default {",
     "  async fetch(request, env) {",
@@ -320,6 +353,19 @@ test("U04a: local workerd/D1 preserves raw actor snapshot bytes and version-fenc
       assert.equal(item.resource, "before", item.label);
     }
     assert.deepEqual(body.positive, { allSuccess: true, snapshotName: "X before", liveName: "X after", resource: "after", refCount: 1 });
+    assert.equal(body.interleaving.allSuccess, true);
+    assert.equal(body.interleaving.storedJson, body.interleaving.admissionJson);
+    assert.notEqual(body.interleaving.liveJson, body.interleaving.admissionJson);
+    assert.equal(body.interleaving.resource, "current-success");
+    assert.deepEqual(body.interleavingFence, {
+      failed: true, snapshotCount: 0, refCount: 0, resource: "before", liveName: "X concurrent",
+    });
+    assert.deepEqual(body.interleavingFailure, {
+      failed: true, auditCount: 0, resource: "before", liveName: "X concurrent",
+    });
+    assert.deepEqual(body.interleavingFailureFence, {
+      failed: true, snapshotCount: 0, refCount: 0, resource: "before", liveName: "X concurrent",
+    });
     const late = body.lateRollback;
     assert.equal(late.failed, true);
     assert.equal(late.snapshotCount, 0);
