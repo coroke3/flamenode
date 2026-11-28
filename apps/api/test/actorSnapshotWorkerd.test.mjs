@@ -76,7 +76,7 @@ test("U04a-U04c: local workerd/D1 actor history, bounded reader, and lease reten
     "async function all(db, sql, params = []) { const statement = db.prepare(sql); const bound = params.length ? statement.bind(...params) : statement; const r = await bound.all(); if (r.success !== true || !Array.isArray(r.results)) throw new Error('D1 all failed'); return r.results; }",
     "async function probe(db) {",
     "  await run(db, 'CREATE TABLE IF NOT EXISTS u04a_user (id TEXT PRIMARY KEY, discord_id TEXT, name TEXT, active_x_user_id TEXT, image TEXT, actor_snapshot_version INTEGER NOT NULL DEFAULT 0)');",
-    "  await run(db, 'CREATE TABLE IF NOT EXISTS u04a_x_users (id TEXT PRIMARY KEY, x_name TEXT NOT NULL, icon_url TEXT, actor_snapshot_version INTEGER NOT NULL DEFAULT 0)');",
+    "  await run(db, 'CREATE TABLE IF NOT EXISTS u04a_x_users (id TEXT PRIMARY KEY, x_name TEXT NOT NULL, icon_url TEXT, approval_status TEXT NOT NULL DEFAULT \\'pending\\', actor_snapshot_version INTEGER NOT NULL DEFAULT 0)');",
     "  // Test-only monotonic allocation: row incarnation must survive DELETE/reinsert, REPLACE and PK changes.",
     "  await run(db, 'CREATE TABLE IF NOT EXISTS u04a_actor_sequence (id INTEGER PRIMARY KEY CHECK (id = 1), n INTEGER NOT NULL CHECK (typeof(n) = \\'integer\\' AND n BETWEEN 0 AND 9007199254740991))');",
     "  await run(db, 'INSERT OR IGNORE INTO u04a_actor_sequence VALUES (1, 0)');",
@@ -87,8 +87,10 @@ test("U04a-U04c: local workerd/D1 actor history, bounded reader, and lease reten
     "    const historyInsertColumns = isUser ? 'version, id, discord_id, name, active_x_user_id, image' : 'version, id, x_name, icon_url';",
     "    const historySelectColumns = isUser ? 'actor_snapshot_version, id, discord_id, name, active_x_user_id, image' : 'actor_snapshot_version, id, x_name, icon_url';",
     "    await run(db, 'CREATE TABLE IF NOT EXISTS ' + historyTable + ' (' + historyColumns + ')');",
+    "    const changed = isUser ? 'OLD.id IS NOT NEW.id OR OLD.discord_id IS NOT NEW.discord_id OR OLD.name IS NOT NEW.name OR OLD.active_x_user_id IS NOT NEW.active_x_user_id OR OLD.image IS NOT NEW.image' : 'OLD.id IS NOT NEW.id OR OLD.x_name IS NOT NEW.x_name OR OLD.icon_url IS NOT NEW.icon_url';",
     "    for (const [kind, event] of [['insert', 'INSERT'], ['update', 'UPDATE OF ' + fields]]) {",
-    "      await run(db, 'CREATE TRIGGER IF NOT EXISTS ' + table + '_' + kind + ' AFTER ' + event + ' ON ' + table + ' BEGIN SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM u04a_actor_sequence WHERE id = 1 AND typeof(n) = \\'integer\\' AND n >= 0 AND n < 9007199254740991) THEN RAISE(ABORT, \\'ACTOR_VERSION_UNAVAILABLE\\') END; UPDATE u04a_actor_sequence SET n = n + 1 WHERE id = 1; UPDATE ' + table + ' SET actor_snapshot_version = (SELECT n FROM u04a_actor_sequence WHERE id = 1) WHERE id = NEW.id; INSERT INTO ' + historyTable + ' (' + historyInsertColumns + ') SELECT ' + historySelectColumns + ' FROM ' + table + ' WHERE id = NEW.id; END');",
+    "      const when = kind === 'update' ? ' WHEN ' + changed : '';",
+    "      await run(db, 'CREATE TRIGGER IF NOT EXISTS ' + table + '_' + kind + ' AFTER ' + event + ' ON ' + table + when + ' BEGIN SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM u04a_actor_sequence WHERE id = 1 AND typeof(n) = \\'integer\\' AND n >= 0 AND n < 9007199254740991) THEN RAISE(ABORT, \\'ACTOR_VERSION_UNAVAILABLE\\') END; UPDATE u04a_actor_sequence SET n = n + 1 WHERE id = 1; UPDATE ' + table + ' SET actor_snapshot_version = (SELECT n FROM u04a_actor_sequence WHERE id = 1) WHERE id = NEW.id; INSERT INTO ' + historyTable + ' (' + historyInsertColumns + ') SELECT ' + historySelectColumns + ' FROM ' + table + ' WHERE id = NEW.id; END');",
     "    }",
     "  }",
     "  await run(db, 'CREATE TABLE IF NOT EXISTS u04a_resource (id TEXT PRIMARY KEY, value TEXT NOT NULL)');",
@@ -184,18 +186,27 @@ test("U04a-U04c: local workerd/D1 actor history, bounded reader, and lease reten
     "  const userInsert = \"INSERT INTO u04a_user (id, discord_id, name, active_x_user_id, image) VALUES ('admin-1','d','After','u04a-x','user-image')\";",
     "  const xInsert = \"INSERT INTO u04a_x_users (id, x_name, icon_url) VALUES ('u04a-x','X after','x-icon')\";",
     "  const casesFence = [",
-    "    ['user-delete-reinsert', [\"DELETE FROM u04a_user WHERE id='admin-1'\", userInsert]],",
-    "    ['x-delete-reinsert', [\"DELETE FROM u04a_x_users WHERE id='u04a-x'\", xInsert]],",
-    "    ['user-replace', [userInsert.replace('INSERT INTO', 'INSERT OR REPLACE INTO')]],",
-    "    ['x-replace', [xInsert.replace('INSERT INTO', 'INSERT OR REPLACE INTO')]],",
-    "    ['user-pk-aba', [\"UPDATE u04a_user SET id='temp-user' WHERE id='admin-1'\", \"UPDATE u04a_user SET id='admin-1' WHERE id='temp-user'\"]],",
-    "    ['x-pk-aba', [\"UPDATE u04a_x_users SET id='temp-x' WHERE id='u04a-x'\", \"UPDATE u04a_x_users SET id='u04a-x' WHERE id='temp-x'\"]],",
-    "    ['user-update', [\"UPDATE u04a_user SET name='After' WHERE id='admin-1'\"]],",
-    "    ['x-update', [\"UPDATE u04a_x_users SET x_name='X after' WHERE id='u04a-x'\"]],",
-    "    ['user-delete', [\"DELETE FROM u04a_user WHERE id='admin-1'\"]],",
-    "    ['x-delete', [\"DELETE FROM u04a_x_users WHERE id='u04a-x'\"]],",
-    "    ['active-x-change', [\"UPDATE u04a_user SET active_x_user_id=NULL WHERE id='admin-1'\"]],",
-    "    ['missing-x-to-present', [xInsert], \"DELETE FROM u04a_x_users WHERE id='u04a-x'\"],",
+    "    ['authjs-user-delete-reinsert', [\\"DELETE FROM u04a_user WHERE id='admin-1'\\", userInsert]],",
+    "    ['xid-admin-delete-reinsert', [\\"DELETE FROM u04a_x_users WHERE id='u04a-x'\\", xInsert]],",
+    "    ['authjs-user-replace', [userInsert.replace('INSERT INTO', 'INSERT OR REPLACE INTO')]],",
+    "    ['xid-admin-replace', [xInsert.replace('INSERT INTO', 'INSERT OR REPLACE INTO')]],",
+    "    ['user-pk-aba', [\\"UPDATE u04a_user SET id='temp-user' WHERE id='admin-1'\\", \\"UPDATE u04a_user SET id='admin-1' WHERE id='temp-user'\\"]],",
+    "    ['x-pk-aba', [\\"UPDATE u04a_x_users SET id='temp-x' WHERE id='u04a-x'\\", \\"UPDATE u04a_x_users SET id='u04a-x' WHERE id='temp-x'\\"]],",
+    "    ['authjs-user-name-update', [\\"UPDATE u04a_user SET name='After' WHERE id='admin-1'\\"]],",
+    "    ['authjs-user-discord-id-update', [\\"UPDATE u04a_user SET discord_id='d-after' WHERE id='admin-1'\\"]],",
+    "    ['authjs-user-image-update', [\\"UPDATE u04a_user SET image='image-after' WHERE id='admin-1'\\"]],",
+    "    ['xid-profile-name-update', [\\"UPDATE u04a_x_users SET x_name='X after' WHERE id='u04a-x'\\"]],",
+    "    ['xid-icon-update', [\\"UPDATE u04a_x_users SET icon_url='https://i/xid-after.png' WHERE id='u04a-x'\\"]],",
+    "    ['spreadsheet-x-name-update', [\\"UPDATE u04a_x_users SET x_name='X spreadsheet' WHERE id='u04a-x'\\"]],",
+    "    ['spreadsheet-x-icon-update', [\\"UPDATE u04a_x_users SET icon_url='https://i/spreadsheet.png' WHERE id='u04a-x'\\"]],",
+    "    ['user-delete', [\\"DELETE FROM u04a_user WHERE id='admin-1'\\"]],",
+    "    ['x-delete', [\\"DELETE FROM u04a_x_users WHERE id='u04a-x'\\"]],",
+    "    ['active-x-clear', [\\"UPDATE u04a_user SET active_x_user_id=NULL WHERE id='admin-1'\\"]],",
+    "    ['active-x-reassign', [\\"UPDATE u04a_user SET active_x_user_id='u04a-x2' WHERE id='admin-1'\\"], \\"INSERT OR REPLACE INTO u04a_x_users (id, x_name, icon_url) VALUES ('u04a-x2', 'X two', 'https://i/x2.png')\\"],",
+    "    ['spreadsheet-x-insert', [xInsert], \\"DELETE FROM u04a_x_users WHERE id='u04a-x'\\"],",
+    "    ['bulk-replace-video-members-noop', [\\"INSERT INTO u04a_x_users (id, x_name, icon_url) VALUES ('u04a-x', 'X ignored', 'https://i/ignored.png') ON CONFLICT(id) DO UPDATE SET id=excluded.id\\"], null, false],",
+    "    ['bulk-video-collab-perms-noop', [\\"INSERT INTO u04a_x_users (id, x_name, icon_url) VALUES ('u04a-x', 'X ignored', 'https://i/ignored.png') ON CONFLICT(id) DO UPDATE SET id=excluded.id\\"], null, false],",
+    "    ['approval-status-only', [\\"UPDATE u04a_x_users SET approval_status='approved' WHERE id='u04a-x'\\"], null, false],",
     "  ];",
     "  const fencedBatch = (id, versions, tail = []) => [",
     "    db.prepare(captureSql).bind(id, 'admin-1', versions.user_version, versions.x_version),",
@@ -214,14 +225,16 @@ test("U04a-U04c: local workerd/D1 actor history, bounded reader, and lease reten
     "  const countSnapshot = async (id) => Number((await all(db, 'SELECT COUNT(*) AS n FROM audit_actor_snapshots_u04a WHERE id=?', [id]))[0].n);",
     "  const countRef = async (id) => Number((await all(db, 'SELECT COUNT(*) AS n FROM audit_actor_refs_u04a WHERE audit_id=?', [id]))[0].n);",
     "  const fenceOut = [];",
-    "  for (const [label, changes, beforeAdmission] of casesFence) {",
+    "  for (const [label, changes, beforeAdmission, expectedVersionChange = true] of casesFence) {",
     "    await resetActor();",
     "    if (beforeAdmission) await run(db, beforeAdmission);",
     "    const admitted = await getVersions();",
     "    for (const sql of changes) await run(db, sql);",
     "    const after = await getVersions();",
+    "    const versionChanged = !after || admitted.user_version !== after.user_version || admitted.x_version !== after.x_version;",
     "    const failed = await batchFailed(fencedBatch('fence-' + label, admitted));",
-    "    fenceOut.push({ label, versionChanged: !after || admitted.user_version !== after.user_version || admitted.x_version !== after.x_version, failed, snapshotCount: await countSnapshot('fence-' + label), refCount: await countRef('fence-' + label), resource: await getResource() });",
+    "    const liveX = (await all(db, \"SELECT x_name, icon_url, approval_status FROM u04a_x_users WHERE id='u04a-x'\"))[0] ?? null;",
+    "    fenceOut.push({ label, versionChanged, expectedVersionChange, failed, snapshotCount: await countSnapshot('fence-' + label), refCount: await countRef('fence-' + label), resource: await getResource(), liveX });",
     "  }",
     "  await resetActor();",
     "  const positiveVersions = await getVersions();",
@@ -521,14 +534,20 @@ test("U04a-U04c: local workerd/D1 actor history, bounded reader, and lease reten
     assert.equal(body.rollbackCount, 0);
     assert.equal(body.abandonedCount, 0);
     assert.equal(body.successRef, "kept");
-    assert.equal(body.fenceOut.length, 12);
+    assert.equal(body.fenceOut.length, 21);
     for (const item of body.fenceOut) {
-      assert.equal(item.versionChanged, true, item.label);
-      assert.equal(item.failed, true, item.label);
-      assert.equal(item.snapshotCount, 0, item.label);
-      assert.equal(item.refCount, 0, item.label);
-      assert.equal(item.resource, "before", item.label);
+      assert.equal(item.versionChanged, item.expectedVersionChange, item.label);
+      assert.equal(item.failed, item.expectedVersionChange, item.label);
+      assert.equal(item.snapshotCount, item.expectedVersionChange ? 0 : 1, item.label);
+      assert.equal(item.refCount, item.expectedVersionChange ? 0 : 1, item.label);
+      assert.equal(item.resource, item.expectedVersionChange ? "before" : "after", item.label);
     }
+    assert.deepEqual(body.fenceOut.filter(item => !item.expectedVersionChange).map(item => item.label).sort(), [\"approval-status-only\", \"bulk-replace-video-members-noop\", \"bulk-video-collab-perms-noop\"].sort());
+    for (const item of body.fenceOut.filter(item => !item.expectedVersionChange)) {
+      assert.equal(item.liveX.x_name, "X before", item.label);
+      assert.equal(item.liveX.icon_url, "x-icon", item.label);
+    }
+    assert.equal(body.fenceOut.find(item => item.label === "approval-status-only").liveX.approval_status, "approved");
     assert.deepEqual(body.positive, { allSuccess: true, snapshotName: "X before", liveName: "X after", resource: "after", refCount: 1 });
     assert.equal(body.interleaving.allSuccess, true);
     assert.equal(body.interleaving.storedJson, body.interleaving.admissionJson);
