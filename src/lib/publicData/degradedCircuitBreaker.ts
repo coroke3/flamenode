@@ -51,6 +51,8 @@ type OpenRepair = {
 let openRepair: OpenRepair | null = null;
 let openRepairInFlight = false;
 let hitCloseInFlight = false;
+// Reject stale probe receipts after a newer local transition.
+let circuitRevision = 0;
 
 let localCircuitState: {
   open: boolean;
@@ -64,13 +66,15 @@ let localCircuitState: {
   lastKvProbeAt: 0,
 };
 
-function markCircuitOpen(nowMs: number): void {
+function markCircuitOpen(nowMs: number, preserveHits = false): void {
+  circuitRevision += 1;
   localCircuitState.open = true;
   localCircuitState.openUntil = nowMs + DEGRADED_CIRCUIT_OPEN_TTL_SEC * 1_000;
-  localCircuitState.hitStreak = 0;
+  if (!preserveHits) localCircuitState.hitStreak = 0;
 }
 
 function markCircuitClosed(nowMs: number): void {
+  circuitRevision += 1;
   localCircuitState.open = false;
   localCircuitState.openUntil = 0;
   localCircuitState.hitStreak = 0;
@@ -105,7 +109,7 @@ async function putOpenMarkerIfNeeded(
   }
   if ((await kv.get(key)) === "1") {
     openMarkerKnown = true;
-    markCircuitOpen(nowMs);
+    markCircuitOpen(nowMs, openRepair !== null);
     return null;
   }
 
@@ -121,7 +125,7 @@ async function putOpenMarkerIfNeeded(
   }
   if ((await kv.get(key)) === "1") {
     openMarkerKnown = true;
-    markCircuitOpen(nowMs);
+    markCircuitOpen(nowMs, openRepair !== null);
     return null;
   }
 
@@ -133,7 +137,7 @@ async function putOpenMarkerIfNeeded(
       expirationTtl: DEGRADED_CIRCUIT_OPEN_TTL_SEC,
     });
     openMarkerKnown = true;
-    markCircuitOpen(writeStartedAt);
+    markCircuitOpen(writeStartedAt, openRepair !== null);
     // Only our acknowledged PUT provides a conservative known TTL boundary.
     return writeStartedAt + DEGRADED_CIRCUIT_OPEN_TTL_SEC * 1_000;
   } catch (error) {
@@ -204,9 +208,9 @@ function beginOpenRepair(nowMs: number, missCount: number | null): void {
   };
 }
 
-async function reconcileOpenRepair(kv: KVNamespace, nowMs: number): Promise<void> {
+async function attemptOpenRepair(kv: KVNamespace, nowMs: number): Promise<void> {
   const repair = openRepair;
-  if (!repair || openRepairInFlight || hitCloseInFlight) return;
+  if (!repair || openRepairInFlight || hitCloseInFlight || missFlushInFlight) return;
   if (nowMs >= repair.expiresAt) {
     openRepair = null;
     return;
@@ -267,6 +271,15 @@ async function reconcileOpenRepair(kv: KVNamespace, nowMs: number): Promise<void
   }
 }
 
+async function reconcileOpenRepair(kv: KVNamespace, nowMs: number): Promise<void> {
+  await attemptOpenRepair(kv, nowMs);
+  // Hits accrued while marker I/O was in flight must not require a fourth hit.
+  // Close using this request's binding, not the earlier request's promise.
+  if (localCircuitState.open && shouldCloseDegradedCircuit(localCircuitState.hitStreak)) {
+    await closeCircuitIfReady(kv, Date.now());
+  }
+}
+
 async function flushMissCount(
   kv: KVNamespace,
   bucket: number,
@@ -274,27 +287,21 @@ async function flushMissCount(
   nowMs: number,
   acknowledge: () => void,
 ): Promise<void> {
-  if ((await kv.get(degradedCircuitOpenKey())) === "1") {
+  const remoteOpen = (await kv.get(degradedCircuitOpenKey())) === "1";
+  // A concurrent local threshold crossing owns OPEN repair immediately, even
+  // while this counter flush awaits KV. Never reset or replace that receipt.
+  if (remoteOpen && !openRepair) {
     markCircuitOpen(nowMs);
-    // Keep the bounded miss counter useful for the next window.
-    await persistMissCounter(kv, bucket, pending);
-    acknowledge();
-    return;
-  }
-  if (localCircuitState.open && nowMs < localCircuitState.openUntil) {
+  } else if (!openRepair && localCircuitState.open && nowMs < localCircuitState.openUntil) {
     await putOpenMarkerIfNeeded(kv, nowMs);
-    await persistMissCounter(kv, bucket, pending);
-    acknowledge();
-    return;
+  } else if (!openRepair) {
+    markCircuitClosed(nowMs);
   }
 
-  markCircuitClosed(nowMs);
   const nextCount = await persistMissCounter(kv, bucket, pending);
   acknowledge();
-  if (!shouldOpenDegradedCircuit(nextCount)) return;
-
+  if (!shouldOpenDegradedCircuit(nextCount) || localCircuitState.open || openRepair) return;
   beginOpenRepair(nowMs, nextCount);
-  await reconcileOpenRepair(kv, nowMs);
 }
 
 async function flushPendingMissesIfReady(
@@ -327,6 +334,7 @@ async function flushPendingMissesIfReady(
   } finally {
     missFlushInFlight = false;
   }
+  if (openRepair) await reconcileOpenRepair(kv, Date.now());
   return true;
 }
 
@@ -344,8 +352,12 @@ export async function isDegradedD1CircuitOpen(): Promise<boolean> {
   ) {
     return false;
   }
+  const revision = circuitRevision;
   try {
     const open = await kv.get(degradedCircuitOpenKey());
+    if (revision !== circuitRevision) {
+      return localCircuitState.open && (Date.now() < localCircuitState.openUntil || openRepairInFlight);
+    }
     if (open === "1") {
       markCircuitOpen(now);
       return true;
@@ -353,7 +365,8 @@ export async function isDegradedD1CircuitOpen(): Promise<boolean> {
     markCircuitClosed(now);
     return false;
   } catch {
-    return false;
+    return revision !== circuitRevision && localCircuitState.open &&
+      (Date.now() < localCircuitState.openUntil || openRepairInFlight);
   }
 }
 
@@ -366,8 +379,10 @@ export async function recordDegradedCircuitR2Miss(
   try {
     const bucket = currentDegradedCircuitMinuteBucket(nowMs);
     if (openRepair) {
+      const wasOpen = localCircuitState.open && nowMs < localCircuitState.openUntil;
       await reconcileOpenRepair(kv, nowMs);
-      if (openRepair) return;
+      // This miss arrived while OPEN, even if accumulated hits close it during repair.
+      if (openRepair || (wasOpen && !localCircuitState.open)) return;
     }
     if (localCircuitState.open && nowMs < localCircuitState.openUntil) {
       if (missAccumulator?.bucket === bucket && !hitCloseInFlight) {
@@ -388,9 +403,7 @@ export async function recordDegradedCircuitR2Miss(
     missAccumulator.pending += 1;
     if (
       missAccumulator.observed >= DEGRADED_CIRCUIT_MISS_THRESHOLD &&
-      !localCircuitState.open &&
-      !missFlushInFlight &&
-      !hitCloseInFlight
+      !localCircuitState.open
     ) {
       // Local observation is a fast fail-closed guard. KV only propagates the
       // open marker to other isolates; no request awaits a prior request's I/O.
@@ -430,6 +443,7 @@ export function resetDegradedCircuitBookkeepingForTests(): void {
   openRepair = null;
   openRepairInFlight = false;
   hitCloseInFlight = false;
+  circuitRevision = 0;
   localCircuitState = {
     open: false,
     openUntil: 0,
@@ -456,8 +470,7 @@ export async function recordDegradedCircuitR2Hit(): Promise<void> {
   }
 
   if (localCircuitState.open && now >= localCircuitState.openUntil) {
-    localCircuitState.open = false;
-    localCircuitState.hitStreak = 0;
+    markCircuitClosed(now);
   }
 
   localCircuitState.hitStreak += 1;
@@ -468,6 +481,10 @@ export async function recordDegradedCircuitR2Hit(): Promise<void> {
     return;
   }
 
+  await closeCircuitIfReady(kv, now);
+}
+
+async function closeCircuitIfReady(kv: KVNamespace, now: number): Promise<void> {
   // A repair and close must not mutate the marker concurrently in this isolate.
   if (openRepairInFlight || hitCloseInFlight || missFlushInFlight) return;
   hitCloseInFlight = true;
@@ -508,5 +525,8 @@ export async function recordDegradedCircuitR2Hit(): Promise<void> {
     // Best effort only.
   } finally {
     hitCloseInFlight = false;
+  }
+  if (openRepair && localCircuitState.open && !shouldCloseDegradedCircuit(localCircuitState.hitStreak)) {
+    await attemptOpenRepair(kv, Date.now());
   }
 }

@@ -33,6 +33,7 @@ function createFixture(runtime, { initial = 19, fault = null, badLogger = false 
   const writes = [], warnings = [], writeTimes = [], rateViolations = [];
   const expirations = new Map();
   let gate = null;
+  let gatedOp = null, gatedKey = null;
   let reached = null;
   let release = null;
   const lastWrite = new Map();
@@ -45,14 +46,24 @@ function createFixture(runtime, { initial = 19, fault = null, badLogger = false 
     }
     lastWrite.set(key, now);
   }
+  async function pauseIfSelected(op, key) {
+    if (gate && gatedOp === op && gatedKey === key) {
+      const pendingGate = gate;
+      gate = null;
+      reached();
+      await pendingGate;
+    }
+  }
   const kv = {
     async get(key) {
       if (now >= (expirations.get(key) ?? Infinity)) values.delete(key);
-      return values.get(key) ?? null;
+      const value = values.get(key) ?? null;
+      await pauseIfSelected("get", key);
+      return value;
     },
     async put(key, value, options) {
       recordWrite("put", key, value);
-      if (gate && key === openKey) { reached(); await gate; gate = null; }
+      await pauseIfSelected("put", key);
       if ((faults[0] === "marker" && key === openKey) ||
         (faults[0] === "counter" && key === missKey)) {
         faults.shift();
@@ -78,7 +89,9 @@ function createFixture(runtime, { initial = 19, fault = null, badLogger = false 
   return { ...api, values, writes, warnings, writeTimes, rateViolations, openKey, hitKey, missKey,
     get: key => kv.get(key),
     tick(ms) { now += ms; }, now: () => now,
-    pauseMarker() {
+    pauseMarker() { return this.pause("put", openKey); },
+    pause(op, key) {
+      gatedOp = op; gatedKey = key;
       const started = new Promise(resolve => { reached = resolve; });
       gate = new Promise(resolve => { release = resolve; });
       return { started, resume: () => release() };
@@ -217,8 +230,8 @@ function registerTests(test, equal, runtime) {
     equal(f.snapshot().inflight, true);
     equal(f.writes.filter(x=>x[0]==="delete"&&x[1]===f.openKey).length, 0);
     pause.resume(); await repair;
-    equal(f.values.get(f.openKey), "1");
-    f.tick(1000); await f.hit(); await f.hit(); await f.hit();
+    // The three hits above suffice; the repair request finishes the close.
+    equal(f.writes.filter(x=>x[0]==="delete"&&x[1]===f.openKey).length, 1);
     equal(f.values.has(f.openKey), false);
     equal(f.snapshot().open, false);
     equal(f.snapshot().stage, null);
@@ -275,6 +288,63 @@ function registerTests(test, equal, runtime) {
     equal(f.values.has(f.openKey), false);
     equal(f.values.get(f.missKey), "20");
     equal(f.rateViolations.length, 0);
+  });
+  test("SEC-798: threshold immediately opens locally during counter PUT", async () => {
+    const f = make({initial:0});
+    f.seed({bucket:1,observed:18,pending:0,lastFlushAt:-Infinity});
+    const pause = f.pause("put", f.missKey);
+    const flushing = f.miss(f.now());
+    await pause.started;
+    await f.miss(f.now());
+    equal(await f.isOpen(), true);
+    equal(f.snapshot().stage, "marker");
+    equal(f.snapshot().pending, 1);
+    equal(f.values.has(f.openKey), false);
+    pause.resume(); await flushing;
+    equal(f.values.get(f.openKey), "1");
+    equal(f.values.get(f.missKey), "1");
+    equal(f.snapshot().pending, 1);
+    f.tick(1000); await f.miss(f.now());
+    equal(f.values.get(f.missKey), "2");
+    equal(f.snapshot().pending, 0);
+    equal(f.rateViolations.length, 0);
+  });
+  test("SEC-798: concurrent threshold while counter reads remote state survives stale closed read", async () => {
+    const f = make({initial:0});
+    f.seed({bucket:1,observed:18,pending:0,lastFlushAt:-Infinity});
+    const pause = f.pause("get", f.openKey);
+    const flushing = f.miss(f.now());
+    await pause.started;
+    await f.miss(f.now());
+    equal(await f.isOpen(), true);
+    pause.resume(); await flushing;
+    equal(f.values.get(f.openKey), "1");
+    equal(f.snapshot().open, true);
+    equal(f.snapshot().pending, 1);
+  });
+  test("SEC-798: delayed closed probe cannot erase newly opened circuit", async () => {
+    const f = make();
+    const pause = f.pause("get", f.openKey);
+    const probing = f.isOpen();
+    await pause.started;
+    await f.miss(f.now());
+    equal(f.values.get(f.openKey), "1");
+    pause.resume();
+    equal(await probing, true);
+    equal(f.snapshot().open, true);
+    equal(f.snapshot().known, true);
+  });
+  test("SEC-798: delayed open probe cannot resurrect acknowledged close", async () => {
+    const f = make({initial:0});
+    f.values.set(f.openKey, "1");
+    const pause = f.pause("get", f.openKey);
+    const probing = f.isOpen();
+    await pause.started;
+    await f.hit(); await f.hit(); await f.hit();
+    equal(f.values.has(f.openKey), false);
+    pause.resume();
+    equal(await probing, false);
+    equal(f.snapshot().open, false);
   });
 }
 
