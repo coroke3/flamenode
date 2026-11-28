@@ -352,7 +352,10 @@ async function flushPendingMissesIfReady(
   } finally {
     missFlushInFlight = false;
   }
-  if (openRepair) await reconcileOpenRepair(kv, Date.now());
+  // Complete an earned close even when this flush had no OPEN repair.
+  if (openRepair || (localCircuitState.open && shouldCloseDegradedCircuit(localCircuitState.hitStreak))) {
+    await reconcileOpenRepair(kv, Date.now());
+  }
   // At most one follow-up per request: a newer active bucket may have queued
   // misses while the old flush was awaiting I/O. Never re-credit old counts.
   if (allowRolloverFollowup && !openRepair && !localCircuitState.open &&

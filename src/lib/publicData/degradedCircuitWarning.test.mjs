@@ -489,6 +489,43 @@ function registerTests(test, equal, runtime) {
     equal(f.snapshot().stage, null);
     equal(f.rateViolations.length, 0);
   });
+  test("SEC-798: three hits during pending counter flush close without a fourth hit", async () => {
+    const f = make({initial:0});
+    f.values.set(f.openKey, "1");
+    equal(await f.isOpen(), true);
+    f.seed({bucket:1,observed:1,pending:1,lastFlushAt:-Infinity});
+    const pause = f.pause("put", f.missKey);
+    const flushing = f.miss(f.now());
+    await pause.started;
+    await f.hit(); await f.hit(); await f.hit();
+    equal(f.values.get(f.openKey), "1");
+    equal(f.writes.filter(x=>x[0]==="delete"&&x[1]===f.openKey).length, 0);
+    pause.resume(); await flushing;
+    equal(f.values.get(f.missKey), "1");
+    equal(f.snapshot().pending, 0);
+    equal(f.values.has(f.openKey), false);
+    equal(f.snapshot().open, false);
+    equal(f.rateViolations.length, 0);
+  });
+  test("SEC-798: fewer than three hits during counter flush leave OPEN intact", async () => {
+    const f = make({initial:0});
+    f.values.set(f.openKey, "1");
+    equal(await f.isOpen(), true);
+    f.seed({bucket:1,observed:1,pending:1,lastFlushAt:-Infinity});
+    const pause = f.pause("put", f.missKey);
+    const flushing = f.miss(f.now());
+    await pause.started;
+    await f.hit(); await f.hit();
+    pause.resume(); await flushing;
+    equal(f.values.get(f.missKey), "1");
+    equal(f.snapshot().pending, 0);
+    equal(f.values.get(f.openKey), "1");
+    equal(f.snapshot().open, true);
+    equal(f.writes.filter(x=>x[0]==="delete"&&x[1]===f.openKey).length, 0);
+    await f.hit();
+    equal(f.values.has(f.openKey), false);
+    equal(f.rateViolations.length, 0);
+  });
 }
 
 registerTests(test, assert.equal, runtime);
