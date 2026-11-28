@@ -77,8 +77,15 @@ function legacySoftwareId(normalizedName) {
 const ADMIN = { id: "admin-1", name: "Admin", email: null, image: null,
   role: "admin", is_banned: 0, active_x_user_id: null };
 
-function setup({ user = ADMIN, role = "admin", settings = "normal", bucket, applyStep, bindings = {} } = {}) {
+function setup({ user = ADMIN, role = "admin", settings = "normal", bucket, applyStep, bindings = {}, beforeBatch } = {}) {
   const { db, sqlite, stats } = createAdminD1();
+  if (beforeBatch) {
+    const originalBatch = db.batch.bind(db);
+    db.batch = async (statements) => {
+      beforeBatch(sqlite);
+      return originalBatch(statements);
+    };
+  }
   seedBase(sqlite, { role, settings });
   let d1ApplyCalls = 0;
   const app = new Hono();
@@ -218,13 +225,13 @@ function previewBucket({ failAdvanceOnce = false, failAdvanceStage = "x_users", 
   };
 }
 
-async function createApplyCredential(bucket, authUserId = ADMIN.id, planOverride = null) {
+async function createApplyCredential(bucket, authUserId = ADMIN.id, planOverride = null, strategy = "create_only") {
   const plan = planOverride ?? normalizeLegacyFiles([], {
     eventVisibility: "private", videoVisibility: "private", now: 1700000000,
   });
   assert.deepEqual(plan.errors, []);
   const credential = await createLegacyImportPreview(bucket, {
-    authUserId, strategy: "create_only", plan,
+    authUserId, strategy, plan,
   });
   const form = () => {
     const data = new FormData();
@@ -1047,6 +1054,102 @@ test("MIG-0645 U02ad Hono: event, owner staff, rebuild targets and audit receipt
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE table_name = 'legacy_import_entity_snapshots'").get().n, 1);
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE table_name = 'legacy_import_steps'").get().n, 4);
     assert.ok(!JSON.stringify(receipt).includes(credential.previewToken));
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("MIG-0645 U02ah Hono: proven same-visibility replacement preserves unmanaged fields and rejects stale or competing state", async () => {
+  const { bucket } = previewBucket();
+  let race = false;
+  const { request, sqlite, stats } = setup({
+    bucket, applyStep: legacyImportD1ApplyStep,
+    beforeBatch: (db) => {
+      if (!race) return;
+      race = false;
+      // Change an unmanaged event field after the combined snapshot, but
+      // before the audited D1 batch. Full-row CAS must refuse the mutation.
+      db.prepare("UPDATE events SET accent_color = ? WHERE id = ?").run("#334455", "replace-event");
+    },
+  });
+  extendLegacyImportUserSchema(sqlite);
+  extendLegacyImportSoftwareSchema(sqlite);
+  extendLegacyImportEventSchema(sqlite);
+  const makePlan = (title, visibility = "private") => {
+    const plan = normalizeLegacyFiles([], {
+      eventVisibility: visibility, videoVisibility: "private", now: 1700000000,
+    });
+    plan.xUsers.push({
+      id: "replace-owner", x_name: "Owner", icon_url: null,
+      youtube_channel_url: null, other_social_links: null,
+    });
+    plan.events.push({
+      id: "replace-event", title, event_type: "event", explanation: null,
+      icon_url: null, img_url: null, visibility_status: visibility,
+      start_time: 1700000000, end_time: 1700003600,
+    });
+    plan.eventStaff.push({
+      id: "replace-staff", event_id: "replace-event", x_user_id: "replace-owner",
+      display_name: "Owner", permission_preset: "owner", is_public: 0,
+      public_role_label: null,
+    });
+    return plan;
+  };
+  async function reachEvents(plan, strategy) {
+    const { form } = await createApplyCredential(bucket, ADMIN.id, plan, strategy);
+    for (const expected of ["x_users", "softwares", "events"]) {
+      const response = await request(form());
+      assert.equal(response.status, 200, JSON.stringify(await response.clone().json()));
+      assert.equal((await response.json()).progress.stage, expected);
+    }
+    return form;
+  }
+  try {
+    const create = await reachEvents(makePlan("Original"), "create_only");
+    const created = await request(create());
+    assert.equal(created.status, 200, JSON.stringify(await created.clone().json()));
+    assert.equal((await created.json()).result.created.events, 1);
+    const original = sqlite.prepare("SELECT created_at FROM events WHERE id = ?").get("replace-event");
+    // Keep the earlier proof strictly older, since two equal latest timestamps
+    // are deliberately ambiguous under CURRENT's provenance contract.
+    sqlite.prepare("UPDATE audit_logs SET created_at = 1 WHERE table_name = 'legacy_import_entity_snapshots' AND target_id = ?").run("event:replace-event");
+
+    const stale = await reachEvents(makePlan("Replacement"), "replace_imported");
+    sqlite.prepare("UPDATE events SET title = ? WHERE id = ?").run("Manually edited", "replace-event");
+    const staleBatches = stats.batches;
+    assert.equal((await request(stale())).status, 409);
+    assert.equal(stats.batches, staleBatches, "managed digest mismatch never enters the write batch");
+    sqlite.prepare("UPDATE events SET title = ? WHERE id = ?").run("Original", "replace-event");
+
+    const competing = await reachEvents(makePlan("Replacement"), "replace_imported");
+    race = true;
+    const competingResponse = await request(competing());
+    assert.equal(competingResponse.status, 409);
+    assert.equal(sqlite.prepare("SELECT title FROM events WHERE id = ?").get("replace-event").title, "Original");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE table_name = 'events'").get().n, 1);
+
+    const visibility = await reachEvents(makePlan("Not yet supported", "public"), "replace_imported");
+    const visibilityBatches = stats.batches;
+    assert.equal((await request(visibility())).status, 409);
+    assert.equal(stats.batches, visibilityBatches, "visibility change remains fail closed");
+
+    const replace = await reachEvents(makePlan("Replacement"), "replace_imported");
+    const reads = stats.reads;
+    const batches = stats.batches;
+    const response = await request(replace());
+    assert.equal(response.status, 200, JSON.stringify(await response.clone().json()));
+    const result = await response.json();
+    assert.equal(result.progress.stage, "custom_questions");
+    assert.equal(result.result.replaced.events, 1);
+    assert.equal(stats.reads - reads, 3, "replacement still uses one combined D1 snapshot");
+    assert.equal(stats.batches - batches, 1, "replacement and receipt commit together");
+    const saved = sqlite.prepare("SELECT title, created_at, accent_color, visibility_status FROM events WHERE id = ?").get("replace-event");
+    assert.deepEqual({ ...saved }, {
+      title: "Replacement", created_at: original.created_at, accent_color: "#334455", visibility_status: "private",
+    });
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM event_staff WHERE event_id = ?").get("replace-event").n, 1);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE table_name = 'events' AND operation = 'UPDATE'").get().n, 1);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE table_name = 'legacy_import_entity_snapshots' AND target_id = ?").get("event:replace-event").n, 2);
   } finally {
     sqlite.close();
   }

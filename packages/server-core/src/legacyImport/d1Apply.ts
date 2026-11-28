@@ -1,4 +1,5 @@
-import { sql } from "drizzle-orm";
+import { getTableColumns, sql } from "drizzle-orm";
+import { events, eventStaff } from "@flamenode/db/schema";
 import {
   isValidPreloadedActorSnapshotJson,
   isValidPreloadedAuditSettings,
@@ -10,6 +11,10 @@ import type { QueueWakeHostLoader } from "../ports.ts";
 import type { CanonicalLegacyPlan, LegacyImportStrategy } from "./normalize.ts";
 import type { LegacyImportApplyProgress } from "./previewStore.ts";
 import {
+  MAX_LEGACY_EVENT_STAFF_PER_EVENT,
+  MAX_LEGACY_IMPORT_STEP_BYTES,
+} from "./cpuBudget.ts";
+import {
   LEGACY_IMPORT_SOFTWARE_STEP_SIZE,
   LEGACY_IMPORT_X_USER_STEP_SIZE,
   legacyImportReceiptMatchesProgress,
@@ -19,6 +24,20 @@ import {
 const SYSTEM_USER_ID = "system_legacy_import";
 const STEP_AUDIT_TABLE = "legacy_import_steps";
 const STEP_AUDIT_CONTEXT = "legacy_import:step";
+const ENTITY_SNAPSHOT_AUDIT_TABLE = "legacy_import_entity_snapshots";
+const ENTITY_SNAPSHOT_AUDIT_CONTEXT = "legacy_import:entity-snapshot";
+
+// SQL identifiers and JSON keys come only from the static canonical schema;
+// never interpolate a plan field or provider payload into SQL text.
+function canonicalRowJson(columns: Record<string, { name: string }>, table: string) {
+  const fields = Object.entries(columns).map(([key, column]) =>
+    "'" + key.replaceAll("'", "''") + "', " +
+    '"' + table.replaceAll('"', '""') + '"."' + column.name.replaceAll('"', '""') + '"',
+  );
+  return sql.raw("json_object(" + fields.join(", ") + ")");
+}
+const existingEventJson = canonicalRowJson(getTableColumns(events), "events");
+const existingStaffJson = canonicalRowJson(getTableColumns(eventStaff), "event_staff");
 
 type ApplyInput = {
   db: ServerCoreDb;
@@ -331,9 +350,9 @@ function parseReceipt(value: Record<string, unknown>) {
 
 /**
  * Bounded real Hono D1 apply units for RH-002.
- * system_user, x_users, software catalog, and new-event create/preview-confirmed
- * skip are supported. Existing-event replacement and later stages fail closed
- * until visibility-fence/R2 and their own parity units are ported.
+ * system_user, x_users, software catalog, event create/preview-confirmed skip,
+ * and proven imported-event same-visibility replacement are supported.
+ * Visibility-changing replacements and later stages remain fail closed.
  */
 export async function legacyImportD1ApplyStep(
   input: ApplyInput,
@@ -407,6 +426,8 @@ export async function legacyImportD1ApplyStep(
     ? input.plan.events[input.progress.index]
     : null;
   const eventIdForRead = plannedEvent?.id ?? "";
+  const readReplacement = input.strategy === "replace_imported";
+  const replacementTargetId = entitySnapshotTargetId("event", eventIdForRead);
 
   // One bounded D1 read per request: receipt plus the reserved principal or a
   // 40-row X/software normalized-name existence snapshot.
@@ -528,11 +549,56 @@ export async function legacyImportD1ApplyStep(
                    AND NOT EXISTS (SELECT 1 FROM marker_rows)
                  LIMIT 1
               )
+              , replacement_event AS (
+                SELECT ${existingEventJson} AS payload
+                  FROM events
+                 WHERE id = ${eventIdForRead}
+                   AND ${readReplacement ? 1 : 0} = 1
+                   AND NOT EXISTS (SELECT 1 FROM marker_rows)
+                 LIMIT 1
+              ), replacement_staff AS (
+                SELECT ${existingStaffJson} AS payload
+                  FROM event_staff
+                 WHERE event_id = ${eventIdForRead}
+                   AND EXISTS (SELECT 1 FROM replacement_event)
+                 ORDER BY id
+                 LIMIT ${MAX_LEGACY_EVENT_STAFF_PER_EVENT + 1}
+              ), replacement_audits AS (
+                SELECT json_object(
+                  'id', id, 'target_id', target_id, 'context', context,
+                  'after_json', after_json, 'created_at', created_at
+                ) AS payload
+                  FROM audit_logs
+                 WHERE table_name = ${ENTITY_SNAPSHOT_AUDIT_TABLE}
+                   AND target_id = ${replacementTargetId}
+                   AND context = ${ENTITY_SNAPSHOT_AUDIT_CONTEXT}
+                   AND EXISTS (SELECT 1 FROM replacement_event)
+                   AND created_at = (
+                     SELECT MAX(created_at) FROM audit_logs
+                      WHERE table_name = ${ENTITY_SNAPSHOT_AUDIT_TABLE}
+                        AND target_id = ${replacementTargetId}
+                        AND context = ${ENTITY_SNAPSHOT_AUDIT_CONTEXT}
+                   )
+                 ORDER BY id
+                 LIMIT 2
+              )
               SELECT 'marker' AS kind, payload FROM marker_rows
               UNION ALL
               SELECT 'event' AS kind, payload FROM event_rows
               UNION ALL
               SELECT 'staff' AS kind, payload FROM staff_rows
+              UNION ALL
+              SELECT 'replacement_event' AS kind,
+                CASE WHEN length(CAST(payload AS BLOB)) <= ${MAX_LEGACY_IMPORT_STEP_BYTES}
+                  THEN payload ELSE NULL END FROM replacement_event
+              UNION ALL
+              SELECT 'replacement_staff' AS kind,
+                CASE WHEN SUM(length(CAST(payload AS BLOB))) OVER () <= ${MAX_LEGACY_IMPORT_STEP_BYTES}
+                  THEN payload ELSE NULL END FROM replacement_staff
+              UNION ALL
+              SELECT 'replacement_audit' AS kind,
+                CASE WHEN length(CAST(payload AS BLOB)) <= ${MAX_LEGACY_IMPORT_STEP_BYTES}
+                  THEN payload ELSE NULL END FROM replacement_audits
             `) as unknown as ReadRow[];
 
   const markerRows = readRows.filter((row) => row.kind === "marker");
@@ -540,6 +606,11 @@ export async function legacyImportD1ApplyStep(
   const existingRows = readRows.filter((row) => row.kind === "existing");
   const eventRows = readRows.filter((row) => row.kind === "event");
   const eventStaffSnapshotRows = readRows.filter((row) => row.kind === "staff");
+  const replacementEventRows = readRows.filter((row) => row.kind === "replacement_event");
+  const replacementStaffRows = readRows.filter((row) => row.kind === "replacement_staff");
+  const replacementAuditRows = readRows.filter((row) => row.kind === "replacement_audit");
+  const replacementRowCount = replacementEventRows.length +
+    replacementStaffRows.length + replacementAuditRows.length;
   const maxExistingRows = stage === "x_users"
     ? plannedXUserRows.length
     : stage === "softwares"
@@ -547,7 +618,7 @@ export async function legacyImportD1ApplyStep(
       : 0;
   if (
     markerRows.length + principalRows.length + existingRows.length +
-      eventRows.length + eventStaffSnapshotRows.length !== readRows.length
+      eventRows.length + eventStaffSnapshotRows.length + replacementRowCount !== readRows.length
   ) {
     return fixedFailure("旧形式インポートのステップ監査を確認できません。");
   }
@@ -557,6 +628,11 @@ export async function legacyImportD1ApplyStep(
     existingRows.length > maxExistingRows ||
     eventRows.length > 1 ||
     eventStaffSnapshotRows.length > 1 ||
+    replacementEventRows.length > 1 ||
+    replacementStaffRows.length > MAX_LEGACY_EVENT_STAFF_PER_EVENT ||
+    replacementAuditRows.length > 2 ||
+    (replacementRowCount > 0 && (stage !== "events" || !readReplacement || eventRows.length !== 1 || markerRows.length !== 0)) ||
+    (stage === "events" && readReplacement && eventRows.length === 1 && replacementEventRows.length !== 1) ||
     (stage === "system_user" && existingRows.length !== 0) ||
     ((stage === "x_users" || stage === "softwares" || stage === "events") && principalRows.length !== 0) ||
     (stage !== "events" && (eventRows.length !== 0 || eventStaffSnapshotRows.length !== 0)) ||
@@ -868,6 +944,9 @@ export async function legacyImportD1ApplyStep(
       return fixedFailure("旧形式インポートの既存イベントスタッフsnapshotが不正です。");
     }
     const expectedExistingForSkip = input.progress.skipExistingEventIds.includes(event.id);
+    let beforeEvent: Record<string, unknown> | null = null;
+    let beforeStaff: Record<string, unknown>[] = [];
+    let auditProof: Record<string, unknown> | null = null;
     if (eventRows.length === 1) {
       if (input.strategy === "skip_existing" && expectedExistingForSkip) {
         const outcome = { kind: "event", action: "skipped" } as const;
@@ -898,12 +977,57 @@ export async function legacyImportD1ApplyStep(
       if (input.strategy === "create_only") {
         return fixedFailure(`イベント ${event.id} は既に存在します。`);
       }
-      return fixedFailure("既存イベントの置換は、可視性フェンスとR2補償のHono統合が完了するまで利用できません。");
+      if (!readReplacement || replacementEventRows.length !== 1 || replacementAuditRows.length !== 1) {
+        return fixedFailure("旧形式イベントの最新snapshotを一意に確認できません。");
+      }
+      const eventPayload = replacementEventRows[0].payload;
+      beforeEvent = parseJsonRecord(eventPayload, "旧形式イベントsnapshotが不正です。");
+      beforeStaff = replacementStaffRows.map((row) =>
+        parseJsonRecord(row.payload, "旧形式イベントスタッフsnapshotが不正です。"),
+      );
+      auditProof = parseJsonRecord(replacementAuditRows[0].payload, "旧形式イベント監査snapshotが不正です。");
+      if (
+        beforeEvent.id !== event.id ||
+        typeof beforeEvent.created_at !== "number" ||
+        !["public", "private"].includes(String(beforeEvent.visibility_status)) ||
+        beforeStaff.some((row) => row.event_id !== event.id || typeof row.id !== "string") ||
+        new Set(beforeStaff.map((row) => row.id)).size !== beforeStaff.length ||
+        typeof auditProof.id !== "string" ||
+        auditProof.target_id !== replacementTargetId ||
+        auditProof.context !== ENTITY_SNAPSHOT_AUDIT_CONTEXT ||
+        typeof auditProof.created_at !== "number" ||
+        typeof auditProof.after_json !== "string" ||
+        new TextEncoder().encode(JSON.stringify({ event: beforeEvent, staff: beforeStaff })).byteLength >
+          MAX_LEGACY_IMPORT_STEP_BYTES
+      ) {
+        return fixedFailure("旧形式イベントの既存snapshotが不正または上限超過です。");
+      }
+      const proof = parseJsonRecord(auditProof.after_json, "旧形式イベント監査digestが不正です。");
+      // CURRENT's digest includes only managed event fields, but staff is the
+      // complete ordered snapshot. The D1 CAS below compares every event column.
+      const managed = {
+        id: beforeEvent.id, title: beforeEvent.title, event_type: beforeEvent.event_type,
+        explanation: beforeEvent.explanation, icon_url: beforeEvent.icon_url, img_url: beforeEvent.img_url,
+        visibility_status: beforeEvent.visibility_status, start_time: beforeEvent.start_time,
+        end_time: beforeEvent.end_time, created_at: beforeEvent.created_at,
+      };
+      beforeStaff.sort((left, right) => String(left.id).localeCompare(String(right.id)));
+      const [managedDigest, staffDigest] = await Promise.all([
+        snapshotDigest(managed), snapshotDigest(beforeStaff),
+      ]);
+      if (proof.managed_digest !== managedDigest || proof.staff_digest !== staffDigest) {
+        return fixedFailure("イベントの最新状態を旧形式インポート由来と確認できないため置換できません。");
+      }
+      // U02ah only permits same-status replacement. The visibility-changing
+      // path remains fail closed until precommit/compensation is integrated.
+      if (beforeEvent.visibility_status !== event.visibility_status) {
+        return fixedFailure("公開状態が変わる既存イベントの置換はR2補償統合まで利用できません。");
+      }
     }
     if (input.strategy === "skip_existing" && expectedExistingForSkip) {
       return fixedFailure(`イベント ${event.id} はプレビュー時点から削除されたため、再プレビューが必要です。`);
     }
-    if (eventStaffSnapshotRows.length > 0) {
+    if (!beforeEvent && eventStaffSnapshotRows.length > 0) {
       return fixedFailure("イベント本体のない既存スタッフ行があるため、イベントを作成できません。");
     }
 
@@ -943,7 +1067,7 @@ export async function legacyImportD1ApplyStep(
       visibility_status: event.visibility_status,
       start_time: event.start_time,
       end_time: event.end_time,
-      created_at: now,
+      created_at: beforeEvent?.created_at ?? now,
     };
     const [managedDigest, staffDigest] = await Promise.all([
       snapshotDigest(managedEvent),
@@ -961,18 +1085,62 @@ export async function legacyImportD1ApplyStep(
       ...row,
     }));
     const queuePayload = JSON.stringify(queueRows);
-    const outcome = { kind: "event", action: "created" } as const;
+    const outcome = { kind: "event", action: beforeEvent ? "replaced" : "created" } as const;
     const nextProgress = nextEventProgress(input.plan, input.progress, outcome);
-    const eventAbsenceAssertion = input.db.run(sql`
-      SELECT CASE WHEN
-        NOT EXISTS (SELECT 1 FROM events WHERE id = ${event.id})
-        AND NOT EXISTS (SELECT 1 FROM event_staff WHERE event_id = ${event.id})
-      THEN 1 ELSE json_extract('legacy_import_event_exists_after_snapshot', '$') END
-    `);
+    // Compare the exact JSON text emitted by the same canonical SQL projection.
+    // Bind the list as JSON strings, not dynamic SQL or one bind per staff field.
+    const beforeStaffPayload = JSON.stringify(replacementStaffRows.map((row) => row.payload));
+    const eventStateAssertion = beforeEvent && auditProof
+      ? input.db.run(sql`
+          SELECT CASE WHEN
+            EXISTS (SELECT 1 FROM events WHERE id = ${event.id}
+              AND ${existingEventJson} = ${replacementEventRows[0].payload})
+            AND (SELECT COUNT(*) FROM event_staff WHERE event_id = ${event.id})
+              = json_array_length(${beforeStaffPayload})
+            AND (
+              SELECT COUNT(*) FROM event_staff
+              INNER JOIN json_each(${beforeStaffPayload}) AS snapshot
+                ON ${existingStaffJson} = snapshot.value
+              WHERE event_staff.event_id = ${event.id}
+            ) = json_array_length(${beforeStaffPayload})
+            AND EXISTS (
+              SELECT 1 FROM audit_logs AS proof
+               WHERE proof.id = ${auditProof.id as string}
+                 AND proof.table_name = ${ENTITY_SNAPSHOT_AUDIT_TABLE}
+                 AND proof.target_id = ${replacementTargetId}
+                 AND proof.context = ${ENTITY_SNAPSHOT_AUDIT_CONTEXT}
+                 AND proof.after_json IS ${auditProof.after_json as string}
+                 AND proof.created_at = ${auditProof.created_at as number}
+                 AND NOT EXISTS (
+                   SELECT 1 FROM audit_logs AS competing
+                    WHERE competing.table_name = proof.table_name
+                      AND competing.target_id = proof.target_id
+                      AND competing.context = proof.context
+                      AND (competing.created_at > proof.created_at
+                        OR (competing.created_at = proof.created_at AND competing.id <> proof.id))
+                 )
+            )
+          THEN 1 ELSE json_extract('legacy_import_event_snapshot_mismatch', '$') END
+        `)
+      : input.db.run(sql`
+          SELECT CASE WHEN
+            NOT EXISTS (SELECT 1 FROM events WHERE id = ${event.id})
+            AND NOT EXISTS (SELECT 1 FROM event_staff WHERE event_id = ${event.id})
+          THEN 1 ELSE json_extract('legacy_import_event_exists_after_snapshot', '$') END
+        `);
     await mutateWithAudit(input.db, {
-      preMutationAssertions: [markerAbsenceAssertion, eventAbsenceAssertion],
+      preMutationAssertions: [markerAbsenceAssertion, eventStateAssertion],
       mutationStatements: [
-        input.db.run(sql`
+        beforeEvent
+          ? input.db.run(sql`
+              UPDATE events SET
+                title = ${event.title}, event_type = ${event.event_type},
+                explanation = ${event.explanation}, icon_url = ${event.icon_url},
+                img_url = ${event.img_url}, visibility_status = ${event.visibility_status},
+                start_time = ${event.start_time}, end_time = ${event.end_time}, updated_at = ${now}
+              WHERE id = ${event.id}
+            `)
+          : input.db.run(sql`
           INSERT INTO events (
             id, title, event_type, explanation, icon_url, img_url, accent_color,
             visibility_status, allow_user_video_event_links, allow_unslotted_posts,
@@ -986,6 +1154,9 @@ export async function legacyImportD1ApplyStep(
             NULL, NULL, ${now}, ${now}, 1, 15, 0
           )
         `),
+        ...(beforeEvent && beforeStaff.length > 0
+          ? [input.db.run(sql`DELETE FROM event_staff WHERE event_id = ${event.id}`)]
+          : []),
         input.db.run(sql`
           INSERT INTO event_staff (
             id, event_id, x_user_id, display_name, permission_preset,
@@ -1038,22 +1209,22 @@ export async function legacyImportD1ApplyStep(
             updated_at = MAX(static_rebuild_queue.updated_at + 1, excluded.updated_at)
         `),
       ],
-      expectedMutationChanges: [1, nextStaff.length, queueRows.length],
+      expectedMutationChanges: [1, ...(beforeEvent && beforeStaff.length > 0 ? [beforeStaff.length] : []), nextStaff.length, queueRows.length],
       audits: [
         {
           table_name: "events",
           target_id: event.id,
-          operation: "CREATE" as const,
-          before: null,
+          operation: beforeEvent ? "UPDATE" as const : "CREATE" as const,
+          before: beforeEvent,
           after: { ...event, staff: input.plan.eventStaff.filter((row) => row.event_id === event.id) },
           actor_user_id: input.actorAuthUserId,
           reason: "旧形式イベントを新正本へ変換",
           context: "legacy_import",
           retention_class: "long_audit" as const,
-          restore_strategy: "delete_created" as const,
+          restore_strategy: beforeEvent ? "none" as const : "delete_created" as const,
         },
         {
-          table_name: "legacy_import_entity_snapshots",
+          table_name: ENTITY_SNAPSHOT_AUDIT_TABLE,
           target_id: snapshotTargetId,
           operation: "SYSTEM" as const,
           before: null,
@@ -1064,7 +1235,7 @@ export async function legacyImportD1ApplyStep(
           },
           actor_user_id: input.actorAuthUserId,
           reason: "旧形式イベントの置換可能snapshotを確定",
-          context: "legacy_import:entity-snapshot",
+          context: ENTITY_SNAPSHOT_AUDIT_CONTEXT,
           retention_class: "long_audit" as const,
           restore_strategy: "none" as const,
           strict: true,
