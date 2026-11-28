@@ -38,7 +38,7 @@ function stopTree(child) {
   });
 }
 
-test("U04a-U04g: local workerd/D1 actor history, bounded reader, lease retention, measurements and backfill", { timeout: 120_000 }, async () => {
+test("U04a-U04h: local workerd/D1 actor history, bounded reader, lease retention, measurements and backfill", { timeout: 120_000 }, async () => {
   const loggerSource = fs.readFileSync(path.join(REPO_ROOT, "packages/server-core/src/audit/logger.ts"), "utf8");
   assert.match(loggerSource, /discord_id: row\.discord_id \?\? null,[\s\S]*discord_name: row\.discord_name \?\? null,[\s\S]*x_user_id: row\.active_x_user_id \?\? null,[\s\S]*x_name: row\.x_name \?\? null,[\s\S]*icon_url: row\.x_icon_url \|\| row\.user_image \|\| null/);
 
@@ -207,6 +207,72 @@ test("U04a-U04g: local workerd/D1 actor history, bounded reader, lease retention
     "  const replay=[await backfill(),await backfill()];",
     "  const replayNoop=replay.every(batch=>batch.length===3&&batch.every(r=>r.changes===0));",
     "  return {indexed,exactLocators,lateRollback,missingRollback,exhaustedRollback,oneEach,receiptMetadata,rawMatch,distinct,replayNoop,sequence:await sequence(),pending:await pendingCount(),historyRows:await count('u04g_history'),batchMetrics:results,productionRowsScanned:0};",
+    "}",
+    "async function probePendingBackfillScale(db) {",
+    "  // Synthetic-only index construction and bounded resume; no production actor scan.",
+    "  const metric = meta => ({ rowsRead: Number(meta?.rows_read ?? -1), rowsWritten: Number(meta?.rows_written ?? -1),",
+    "    durationMs: Number(meta?.duration ?? -1), sizeAfter: Number(meta?.size_after ?? -1) });",
+    "  const validMeta = m => Object.values(m).every(n => Number.isFinite(n) && n >= 0)",
+    "    && Number.isSafeInteger(m.rowsRead) && Number.isSafeInteger(m.rowsWritten) && Number.isSafeInteger(m.sizeAfter);",
+    "  const cases = [];",
+    "  for (const [population, initialPending] of [[16,4],[256,4],[4096,4],[4096,4096]]) {",
+    "    const suffix = population + '_' + initialPending;",
+    "    const actor = 'u04h_actor_' + suffix, history = 'u04h_history_' + suffix, seq = 'u04h_seq_' + suffix, index = 'u04h_pending_' + suffix;",
+    "    await run(db, 'CREATE TABLE ' + actor + ' (id TEXT PRIMARY KEY NOT NULL, label TEXT NOT NULL, image TEXT, actor_snapshot_version INTEGER NOT NULL DEFAULT 0)');",
+    "    await run(db, 'CREATE TABLE ' + history + ' (version INTEGER PRIMARY KEY, id TEXT, label TEXT, image TEXT)');",
+    "    await run(db, \"CREATE TABLE \" + seq + \" (id INTEGER PRIMARY KEY CHECK(id=1), n INTEGER NOT NULL CHECK(typeof(n)='integer' AND n BETWEEN 0 AND 9007199254740991))\");",
+    "    await run(db, 'INSERT INTO ' + seq + ' VALUES(1,?)', [population-initialPending]);",
+    "    // Pending rows are deliberately last by rowid in the sparse cases.",
+    "    await run(db, \"WITH RECURSIVE n(v) AS (SELECT 1 UNION ALL SELECT v+1 FROM n WHERE v<?) INSERT INTO \" + actor +",
+    "      \" (rowid,id,label,image,actor_snapshot_version) SELECT v,'actor-'||v,'label-'||v,CAST(X'FF8000C3' AS TEXT),CASE WHEN v>? THEN 0 ELSE v END FROM n\", [population,population-initialPending]);",
+    "    const pick = 'SELECT rowid FROM ' + actor + ' WHERE actor_snapshot_version=0 ORDER BY rowid LIMIT 1';",
+    "    const pending = 'rowid=(' + pick + ') AND actor_snapshot_version=0';",
+    "    const statements = [",
+    "      'UPDATE ' + seq + ' SET n=n+1 WHERE id=1 AND EXISTS(SELECT 1 FROM ' + actor + ' WHERE actor_snapshot_version=0)',",
+    "      'INSERT INTO ' + history + '(version,id,label,image) SELECT (SELECT n FROM ' + seq + ' WHERE id=1),id,label,image FROM ' + actor + ' WHERE ' + pending,",
+    "      'UPDATE ' + actor + ' SET actor_snapshot_version=(SELECT n FROM ' + seq + ' WHERE id=1) WHERE ' + pending,",
+    "    ];",
+    "    const probePick = async () => {",
+    "      const r = await db.prepare(pick).all();",
+    "      if (!r.success || r.results.length !== 1 || r.results[0].rowid !== population-initialPending+1) throw Error('synthetic first pending locator mismatch');",
+    "      return metric(r.meta);",
+    "    };",
+    "    const beforePlan = await all(db, 'EXPLAIN QUERY PLAN ' + pick);",
+    "    const before = await probePick();",
+    "    const indexBuild = metric(await runMeta(db, 'CREATE INDEX ' + index + ' ON ' + actor + '(actor_snapshot_version) WHERE actor_snapshot_version=0'));",
+    "    const after = await probePick();",
+    "    const plans = await Promise.all([pick,...statements].map(sql=>all(db,'EXPLAIN QUERY PLAN '+sql)));",
+    "    const indexed = plans.every(plan=>plan.some(r=>String(r.detail).includes(index)) && !plan.some(r=>String(r.detail).includes('TEMP B-TREE')));",
+    "    const noIndexScan = beforePlan.some(r=>String(r.detail).includes('SCAN '+actor));",
+    "    async function bounded(limit) {",
+    "      const batches = [];",
+    "      for(let i=0;i<limit;i++){",
+    "        const result = await db.batch(statements.map(sql=>db.prepare(sql)));",
+    "        if(result.length!==3 || !result.every(r=>r.success===true))throw Error('partial backfill batch');",
+    "        const receipts = result.map(r=>({changes:Number(r.meta?.changes??-1),...metric(r.meta)}));",
+    "        if(!receipts.every(validMetaForBatch))throw Error('missing or invalid D1 backfill metadata');",
+    "        const changes = receipts.map(r=>r.changes).join(',');",
+    "        if(changes!=='0,0,0' && changes!=='1,1,1')throw Error('inconsistent backfill changes');",
+    "        batches.push(receipts);",
+    "        if(changes==='0,0,0')return {processed:i,attempted:i+1,stop:'EMPTY_OBSERVED',batches};",
+    "      }",
+    "      return {processed:limit,attempted:limit,stop:'BUDGET_STOP',batches};",
+    "    }",
+    "    function validMetaForBatch({changes,...meta}) { return Number.isSafeInteger(changes)&&changes>=0&&validMeta(meta); }",
+    "    const first = await bounded(2), resumed = await bounded(3);",
+    "    // Full counts are allowed only in these fixed, disposable fixtures, not in an operational runner.",
+    "    const count = async sql => Number((await all(db,sql))[0].n);",
+    "    const remaining = await count('SELECT COUNT(*) AS n FROM '+actor+' WHERE actor_snapshot_version=0');",
+    "    const historyRows = await count('SELECT COUNT(*) AS n FROM '+history);",
+    "    const rawMatches = await count('SELECT COUNT(*) AS n FROM '+history+' h JOIN '+actor+\" a ON a.actor_snapshot_version=h.version WHERE h.id=a.id AND h.label=a.label AND typeof(h.image)=typeof(a.image) AND hex(CAST(h.image AS BLOB))=hex(CAST(a.image AS BLOB))\");",
+    "    const sequence = await count('SELECT n FROM '+seq+' WHERE id=1');",
+    "    const allBatches = [...first.batches,...resumed.batches];",
+    "    const maxRead = Math.max(...allBatches.map(batch=>batch.reduce((sum,r)=>sum+r.rowsRead,0)));",
+    "    const maxWritten = Math.max(...allBatches.map(batch=>batch.reduce((sum,r)=>sum+r.rowsWritten,0)));",
+    "    cases.push({population,initialPending,noIndexScan,indexed,metadataAvailable:[before,indexBuild,after].every(validMeta),",
+    "      before,indexBuild,after,first,resumed,remaining,historyRows,rawMatches,sequence,maxRead,maxWritten});",
+    "  }",
+    "  return {cases,productionRowsScanned:0};",
     "}",
     "async function probe(db) {",
     "  await run(db, 'CREATE TABLE IF NOT EXISTS u04a_user (id TEXT PRIMARY KEY, discord_id TEXT, name TEXT, active_x_user_id TEXT, image TEXT, actor_snapshot_version INTEGER NOT NULL DEFAULT 0)');",
@@ -592,6 +658,7 @@ test("U04a-U04g: local workerd/D1 actor history, bounded reader, lease retention
     "  const metrics = { metadataAvailable: metricMetas.every(meta => Number.isFinite(Number(meta?.rows_written)) && Number.isFinite(Number(meta?.duration))), single: { user: { baseline: metricMeta(baselineUserMeta), triggered: metricMeta(triggeredUserMeta) }, x: { baseline: metricMeta(baselineXMeta), triggered: metricMeta(triggeredXMeta) } }, bulkX: { count: bulkRows.length, baseline: metricMeta(baselineBulkMeta), triggered: metricMeta(triggeredBulkMeta) }, concurrent: { count: concurrentMeta.length, sequenceDelta: Number(sequenceAfterConcurrent) - Number(sequenceBeforeConcurrent), rowsWritten: concurrentMeta.reduce((sum, meta) => sum + Number(meta?.rows_written ?? 0), 0), maxDurationMs: Math.max(...concurrentMeta.map(meta => Number(meta?.duration ?? 0))) }, historyPayloadBytes: userPayloadBytes + xPayloadBytes, syntheticBackfill: { source: 'synthetic-fixture-only', productionRowsScanned: 0, largeImageBytes: new TextEncoder().encode(largeImage).length, largeIconBytes: new TextEncoder().encode(largeIcon).length, userPayloadBytes, xPayloadBytes } };",
     "  const backfill = await probeBackfill(db);",
     "  const pendingBackfill = await probePendingBackfill(db);",
+    "  const pendingScale = await probePendingBackfillScale(db);",
     "  // Exhaustion is terminal for this disposable fixture. Explicit RAISE(ABORT)",
     "  // must not be weakened by an outer OR IGNORE or OR FAIL statement.",
     "  const allocatorOut = [];",
@@ -613,7 +680,7 @@ test("U04a-U04g: local workerd/D1 actor history, bounded reader, lease retention
     "  const missingFailed = await batchFailed([db.prepare(\"UPDATE OR IGNORE u04a_x_users SET x_name='after-missing' WHERE id='u04a-x'\")]);",
     "  const missing = { failed: missingFailed, versions: await getVersions(), name: (await all(db, sourceSql, ['admin-1']))[0]?.x_name, rows: (await all(db, 'SELECT n FROM u04a_actor_sequence')).length };",
     "  const allocator = { fractionalRejected, oldVersions, atMaxSeq, maxToken, allocatorOut, overflowBatch, missing };",
-    "return { cases: casesOut, blobCanonicalJson: blobCase?.sourceJson ?? null, blobJson1FixtureMatches, json1, json1Error, staleChanges, staleCount, rollbackFailed, rollbackCount, abandonedCount, successRef, fenceOut, positive, interleaving, interleavingFence, interleavingFailure, interleavingFailureFence, immutableHistory, immutableHistoryFailureOut, immutableHistoryLifecycle, cleanupRace: { noFk: cleanupNoFk, fk: cleanupFk }, reader, leaseLifecycle, leaseOrphan, leaseExpiry, lateRollback, allocator, metrics, backfill, pendingBackfill };",
+    "return { cases: casesOut, blobCanonicalJson: blobCase?.sourceJson ?? null, blobJson1FixtureMatches, json1, json1Error, staleChanges, staleCount, rollbackFailed, rollbackCount, abandonedCount, successRef, fenceOut, positive, interleaving, interleavingFence, interleavingFailure, interleavingFailureFence, immutableHistory, immutableHistoryFailureOut, immutableHistoryLifecycle, cleanupRace: { noFk: cleanupNoFk, fk: cleanupFk }, reader, leaseLifecycle, leaseOrphan, leaseExpiry, lateRollback, allocator, metrics, backfill, pendingBackfill, pendingScale };",
     "}",
     "export default {",
     "  async fetch(request, env) {",
@@ -817,6 +884,29 @@ test("U04a-U04g: local workerd/D1 actor history, bounded reader, lease retention
       productionRowsScanned: 0,
     });
     assert.equal(batchMetrics.length, 8);
+    const pendingScale = body.pendingScale;
+    console.log('U04H_PENDING_SCALE ' + JSON.stringify(pendingScale));
+    assert.equal(pendingScale.productionRowsScanned, 0);
+    assert.deepEqual(pendingScale.cases.map(c => [c.population,c.initialPending]), [[16,4],[256,4],[4096,4],[4096,4096]]);
+    for (const c of pendingScale.cases) {
+      assert.equal(c.noIndexScan, true);
+      assert.equal(c.indexed, true);
+      assert.equal(c.metadataAvailable, true);
+      assert.equal(c.first.processed, 2);
+      assert.equal(c.first.attempted, 2);
+      assert.equal(c.first.stop, "BUDGET_STOP");
+      const dense = c.initialPending === c.population;
+      assert.equal(c.resumed.processed, dense ? 3 : 2);
+      assert.equal(c.resumed.attempted, 3);
+      assert.equal(c.resumed.stop, dense ? "BUDGET_STOP" : "EMPTY_OBSERVED");
+      assert.equal(c.remaining, dense ? 4091 : 0);
+      assert.equal(c.historyRows, dense ? 5 : 4);
+      assert.equal(c.rawMatches, c.historyRows);
+      assert.equal(c.sequence, c.population-c.initialPending+c.historyRows);
+      assert.ok(c.after.rowsRead <= 2, "indexed single-row discovery must remain bounded");
+      assert.ok(c.maxRead <= 16, "each atomic backfill transaction has a bounded local D1 rows_read envelope");
+      assert.ok(c.maxWritten <= 3, "each atomic transaction has at most three logical D1 row writes");
+    }
     const allocator = body.allocator;
     assert.equal(allocator.fractionalRejected, true);
     assert.equal(allocator.atMaxSeq, Number.MAX_SAFE_INTEGER);
