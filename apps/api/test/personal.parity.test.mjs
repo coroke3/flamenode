@@ -616,6 +616,49 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+  test("MIG-0708 T02 / MIG-0702 T03: an approved manager-only X link has CURRENT settings parity and stays within S2", async () => {
+    // The user owns alice_x but is only a manager (never an owner) of this X identity.
+    // CURRENT reads link_role for its authority checks; the Settings DTO intentionally
+    // omits it. A manager link must nevertheless appear as an approved linked X.
+    const id = "manager_only_x";
+    sqlite.prepare("INSERT INTO x_users (id, x_name, approval_status) VALUES (?, ?, ?)").run(id, "Manager only", "approved");
+    sqlite.prepare(
+      "INSERT INTO x_user_account_links (x_user_id, auth_user_id, link_role, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    ).run(id, "u_alice", "manager", 1, 1);
+    try {
+      const currentLinks = await getLinkedXUsersForAuthUser(refDb, "u_alice");
+      const actualLink = currentLinks.find((link) => link.x_user_id === id);
+      assert.equal(actualLink?.link_role, "manager", "seed must exercise manager rather than owner");
+      assert.ok(!currentLinks.some((link) => link.x_user_id === id && link.link_role === "owner"));
+
+      const response = await call("/api/personal/settings?x=manager_only_x", "tok-alice");
+      assert.equal(response.status, 200);
+      const current = await refSettings("alice", { x: id });
+      // CURRENT's linked-X SELECT has no ORDER BY; synthetic late inserts can
+      // appear in an arbitrary position. Compare every row exactly by X ID,
+      // while preserving exact user, history, panel selection and candidates.
+      // Sorting only at the assertion boundary must not alter either DTO.
+      const stableRows = (dto) => ({
+        ...dto,
+        xIds: [...dto.xIds].sort((left, right) =>
+          left.id < right.id ? -1 : left.id > right.id ? 1 : 0),
+      });
+      assert.deepEqual(stableRows(response.body), stableRows(current),
+        "manager linked X must match CURRENT settings content and permissions");
+      assert.equal(response.body.panel.xId, id, "manager X is selectable in Personal settings");
+      assert.equal(response.body.user.active_x_user_id, "alice_x", "reading manager X does not switch Active X");
+      const manager = response.body.xIds.find((x) => x.id === id);
+      assert.equal(manager?.approval_status, "approved");
+      assert.equal(Object.hasOwn(manager, "link_role"), false,
+        "the public settings DTO must not leak internal link roles");
+      record("settings", response);
+      assert.equal(response.stats.statements, 3, "session + context + profile rows");
+    } finally {
+      sqlite.prepare("DELETE FROM x_user_account_links WHERE x_user_id = ? AND auth_user_id = ?").run(id, "u_alice");
+      sqlite.prepare("DELETE FROM x_users WHERE id = ?").run(id);
+    }
+  });
+
   test("T05 settings: normalisation and candidate rules", async () => {
     const { body } = await call("/api/personal/settings", "tok-alice");
     assert.equal(body.xIds.find((x) => x.id === "alice_x").portfolio_contact, null, "placeholder contact is dropped");
@@ -628,6 +671,72 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal((await call("/api/personal/settings", "tok-carol")).body.requestHistory.length, 50, "history is capped at 50");
     assert.equal((await call("/api/personal/settings?tab=link", "tok-alice")).body.panel.xId, null, "no candidates when a utility tab is shown");
     assert.ok(!JSON.stringify(body).includes("restore_snapshot_json"));
+  });
+
+  test("SEC-872 follow-up: Hono YouTube channel candidates preserve CURRENT URL normalization and S2 budget", async () => {
+    const { normalizeYoutubeChannelInput: current } = await import("../../../src/lib/utils/youtubeChannel.ts");
+    const { normalizeYoutubeChannelInput: target, buildChannelCandidates } = await import("../src/routes/personal/candidates.ts");
+    const prefix = "https://example.com/";
+    const canonical = "https://www.youtube.com/@";
+    const channel = "https://www.youtube.com/channel/";
+    const fixtures = [
+      null, "", "  https://example.com/path  ", "http://youtube.com/@creator?x=1",
+      "http://youtube.com/@", "http://youtube.com/@/videos",
+      "https://user:secret@youtube.com/@creator", "https://example.com/%09%0A%5C",
+      prefix + "\u96ea".repeat(55), prefix + "\u96ea".repeat(53) + "abc",
+      prefix + "\u96ea".repeat(53) + "abcd",
+      "http://youtube.com/@" + "a".repeat(500 - canonical.length),
+      "http://youtube.com/@" + "a".repeat(501 - canonical.length),
+      "http://youtube.com/channel/" + "a".repeat(501 - channel.length),
+      "javascript:alert(1)", " \nhttps://example.com/\t ",
+      "https://youtube.com.evil.test/@x", "https://m.youtube.com/user/creator/videos",
+    ];
+    for (const ch of [...Array.from({ length: 32 }, (_, n) => String.fromCharCode(n)), "\x7f", "\\"]) {
+      fixtures.push("https://exa" + ch + "mple.com/", "https://youtube.com/@a" + ch + "b");
+    }
+    for (const raw of fixtures) assert.equal(target(raw), current(raw), JSON.stringify(raw));
+    assert.equal(current("https://exa\nmple.com/"), null);
+    assert.equal(current(prefix + "\u96ea".repeat(55)), null);
+    assert.equal(current("http://youtube.com/@"), "http://youtube.com/@");
+    assert.equal(current("http://youtube.com/@" + "a".repeat(501 - canonical.length))?.length, 496);
+    const expected = [...new Set(fixtures.map(current).filter(Boolean))].slice(0, 24);
+    assert.deepEqual(buildChannelCandidates({ youtube_channel_url: fixtures[0] },
+      fixtures.slice(1).map(youtube_channel_url => ({ youtube_channel_url }))), expected);
+
+    const readProfile = sqlite.prepare("SELECT youtube_channel_url FROM x_users WHERE id = ?");
+    const readRaw = sqlite.prepare("SELECT typeof(youtube_channel_url) AS storage, hex(CAST(youtube_channel_url AS BLOB)) AS bytes FROM x_users WHERE id = ?");
+    const writeProfile = sqlite.prepare("UPDATE x_users SET youtube_channel_url = ? WHERE id = ?");
+    const original = readProfile.get("alice_x").youtube_channel_url;
+    // Real existing cookie + Hono/SQLite path; compare to the actual CURRENT loader.
+    const mounted = [
+      null, "https://exa\nmple.com/", "https://youtube.com/@a\x00b",
+      "https://youtube.com/@a\\b", prefix + "\u96ea".repeat(55),
+      prefix + "\u96ea".repeat(53) + "abc", prefix + "\u96ea".repeat(53) + "abcd",
+      "http://youtube.com/@", "http://youtube.com/@" + "a".repeat(500 - canonical.length),
+      "http://youtube.com/@" + "a".repeat(501 - canonical.length),
+      "https://user:secret@youtube.com/@creator", "http://youtube.com/@creator?x=1",
+    ];
+    try {
+      for (const raw of mounted) {
+        writeProfile.run(raw, "alice_x");
+        const response = await call("/api/personal/settings?x=alice_x", "tok-alice");
+        assert.equal(response.status, 200, JSON.stringify(raw));
+        assert.equal(response.headers.get("cache-control"), "private, no-store");
+        assert.equal(response.body.panel.xId, "alice_x");
+        assert.deepEqual(response.body.panel.channelCandidates,
+          await getYoutubeChannelCandidates(refDb, "alice_x", 24), JSON.stringify(raw));
+        assert.equal(response.stats.statements, 3);
+        assert.equal(response.stats.batches, 0);
+        assert.equal(response.stats.writes, 0);
+        assert.ok(response.stats.maxBinds <= 100);
+        // The native SQLite TEXT decoder may stop at an embedded NUL. Compare raw storage.
+        const stored = readRaw.get("alice_x");
+        assert.equal(stored.storage, raw === null ? "null" : "text");
+        assert.equal(stored.bytes, raw === null ? "" : Buffer.from(raw, "utf8").toString("hex").toUpperCase());
+      }
+    } finally {
+      writeProfile.run(original, "alice_x");
+    }
   });
 
   test("S2 budget: settings = session + context + 1 profile-rows statement (candidates ride along), always 3", async () => {

@@ -21,7 +21,7 @@ function deferred() {
   const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
   return { promise, resolve, reject };
 }
-function setup() {
+function setup({ strict = false } = {}) {
   const target = document.createElement("div");
   document.body.append(target);
   const root = createRoot(target);
@@ -39,7 +39,10 @@ function setup() {
     return React.createElement("p", null, content);
   };
   const render = (item, refreshKey = 0) =>
-    React.act(async () => { root.render(React.createElement(Probe, { item, refreshKey })); });
+    React.act(async () => {
+      const probe = React.createElement(Probe, { item, refreshKey });
+      root.render(strict ? React.createElement(React.StrictMode, null, probe) : probe);
+    });
   const cleanup = () => React.act(async () => { root.unmount(); target.remove(); });
   return { target, requests, render, cleanup, observed };
 }
@@ -152,6 +155,42 @@ test("MIG-0707 U05b: initial rejected fetch is unavailable; unmount aborts activ
     assert.equal(active.signal.aborted, true);
   }
 });
+
+for (const strict of [true, false]) {
+  test(`Ops initial read: ${strict ? "StrictMode replay" : "refresh before first result"} settles transient failure and can recover`, async () => {
+    for (const failure of ["unavailable", "rejected"]) {
+      const ui = setup({ strict });
+      try {
+        await ui.render("initial");
+        if (!strict) await ui.render("initial", 1);
+        assert.equal(ui.requests.length, 2);
+        assert.equal(ui.requests[0].signal.aborted, true);
+        assert.equal(ui.requests[1].signal.aborted, false);
+        assert.equal(ui.target.textContent, "loading");
+
+        await React.act(async () => {
+          if (failure === "unavailable") ui.requests[1].resolve({ status: "unavailable" });
+          else ui.requests[1].reject(new Error("offline"));
+        });
+        assert.equal(ui.target.textContent, "unavailable",
+          "an active failed read cannot retain loading when no result has completed");
+
+        await React.act(async () => {
+          ui.requests[0].resolve({ status: "ok", data: { id: "retired" } });
+        });
+        assert.equal(ui.target.textContent, "unavailable", "aborted success stays retired");
+
+        await ui.render("initial", strict ? 1 : 2);
+        await React.act(async () => {
+          ui.requests.at(-1).resolve({ status: "ok", data: { id: "recovered" } });
+        });
+        assert.equal(ui.target.textContent, "ok:recovered");
+      } finally {
+        await ui.cleanup();
+      }
+    }
+  });
+}
 
 test("MIG-0707 U05b: 404 mirrors CURRENT fixed EmptyState text, icon and root link", () => {
   const html = renderToStaticMarkup(React.createElement(NotFoundView));

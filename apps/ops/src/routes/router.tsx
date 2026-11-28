@@ -3,14 +3,23 @@ import { Outlet, Route, Routes, useParams } from "react-router-dom";
 import type { OpsApi } from "../api/account.js";
 import { CostGuardBanner } from "../components/layout/CostGuardBanner.js";
 import { AdminLayout } from "./admin/AdminLayout.js";
+import { AdminApiEndpointsPage } from "./admin/AdminApiEndpoints.js";
 import { AdminCostGuard } from "./admin/AdminCostGuard.js";
+import { AdminEvents } from "./admin/AdminEvents.js";
 import { AdminNotifications } from "./admin/AdminNotifications.js";
 import { AdminCompatRedirect } from "./admin/AdminRedirects.js";
 import { AdminTop } from "./admin/AdminTop.js";
 import { AdminXLinkRequests } from "./admin/AdminXLinkRequests.js";
 import { AdminXIdMerges } from "./admin/AdminXIdMerges.js";
+import { AnnouncementCreatePage, AnnouncementEditPage } from "./admin/AnnouncementEditor.js";
+import { AnnouncementsPage } from "./admin/Announcements.js";
+import { EventGroupCreatePage, EventGroupEditPage } from "./admin/EventGroupEdit.js";
+import { EventGroupsPage } from "./admin/EventGroups.js";
+import { EventTemplates } from "./admin/EventTemplates.js";
 import { PermissionSimulator } from "./admin/PermissionSimulator.js";
+import { AdminRulesPage } from "./admin/Rules.js";
 import { StaticBuilds } from "./admin/StaticBuilds.js";
+import { AdminRuleCreatePage, AdminRuleEditPage } from "./admin/TermsEditor.js";
 import { YoutubeSync } from "./admin/YoutubeSync.js";
 import { YoutubePlaylists } from "./admin/YoutubePlaylists.js";
 import { YoutubeQuota } from "./admin/YoutubeQuota.js";
@@ -92,6 +101,13 @@ export function OpsRoutes({ api }: { api: OpsApi }): React.ReactElement {
               <Route path="x-link-requests" element={<AdminXLinkRequests />} />
               <Route path="x-id-merges" element={<AdminXIdMerges />} />
               <Route path="permissions/simulator" element={<PermissionSimulator />} />
+              <Route path="announcements" element={<AnnouncementsPage />} />
+              <Route path="announcements/new" element={<AnnouncementCreatePage />} />
+              <Route path="announcements/:id/edit" element={<AnnouncementEditPage />} />
+              <Route path="api-endpoints" element={<AdminApiEndpointsPage />} />
+              <Route path="rules" element={<AdminRulesPage />} />
+              <Route path="rules/new" element={<AdminRuleCreatePage />} />
+              <Route path="rules/:id/edit" element={<AdminRuleEditPage />} />
               <Route path="cost-guard" element={<AdminCostGuard />} />
               <Route path="notifications" element={<AdminNotifications />} />
               <Route path="static-builds" element={<StaticBuilds />} />
@@ -99,8 +115,12 @@ export function OpsRoutes({ api }: { api: OpsApi }): React.ReactElement {
               <Route path="youtube-sync/playlists" element={<YoutubePlaylists />} />
               <Route path="youtube-quota" element={<YoutubeQuota />} />
               <Route path="history" element={<AdminCompatRedirect />} />
+              <Route path="event-groups" element={<EventGroupsPage />} />
+              <Route path="event-groups/new" element={<EventGroupCreatePage />} />
+              <Route path="event-groups/:id/edit" element={<EventGroupEditPage />} />
+              <Route path="events" element={<AdminEvents />} />
               <Route path="events/new" element={<UnmigratedView />} />
-              <Route path="events/templates" element={<UnmigratedView />} />
+              <Route path="events/templates" element={<EventTemplates />} />
               <Route path="events/:id" element={<AdminCompatRedirect />} />
               <Route path="events/:id/edit" element={<AdminCompatRedirect />} />
               <Route path="events/:id/slots" element={<AdminCompatRedirect />} />

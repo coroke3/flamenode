@@ -1,9 +1,35 @@
 # FlameNode Migration Decisions — adopted options & remaining evidence
 
 > Status: Active / 仕様上の採用方針と実行ゲートの正本
-> Last updated: 2026-10-26
+> Last updated: 2026-11-27
 > Decision owner: user (2026-10-09, this conversation)
 > Related: [STATUS.md](STATUS.md), [DB_PACKAGE_EXTRACTION_PLAN.md](DB_PACKAGE_EXTRACTION_PLAN.md), [ACTIVE_X_MIGRATION_PLAN.md](ACTIVE_X_MIGRATION_PLAN.md), [ROUTING_AND_DEPLOY_PLAN.md](ROUTING_AND_DEPLOY_PLAN.md), [PHASE_4_5_SPEC.md](PHASE_4_5_SPEC.md), [PHASE_7_SPEC.md](PHASE_7_SPEC.md)
+
+> **2026-11-27 owner policy update:** 本文の過去の「PRごとの人間承認」「個別squash merge承認」は歴史的記録。通常コード統合・既存Workers Builds自動実行は、`AGENT_PROTOCOL.md` の最終HEAD独立レビュー、必須CI、受入条件、最新main、rollbackのゲート合格後にagentが実施する。高リスクは独立Lead追加レビュー。非本番Gateも証拠に基づく独立Leadレビューで通過可能。本番切替、手動deploy、本番DB/データ移行、Route/Secrets、仕様・権限・可視性の意味変更の明示承認は維持する。既存テストを優先し、必要性を説明できない新規テストファイルは作らない。この方針は既存の設計決定を変更しない。
+
+## 2026-11-27 owner-delegated bottleneck recovery (approved direction; execution gates remain)
+
+The owner approved the recovery direction on 2026-11-27. This is an actionable Lead decision, not evidence that implementation, CPU, CI, review, or production acceptance passed. The following controls take precedence over older waiting-for-human wording for non-production technical decisions. No global S3 relaxation, production operation, feature-behavior change, or approval of an unreviewed PR.
+
+### P0 — shared write admission and D1 budget (#692, #724, #725, #893, #691)
+- Select the request-local fresh admission snapshot design, not a global cache and not a budget waiver. First consolidate session, identity/ToS/actor and CostGuard/audit settings into a bounded read where equivalence can be demonstrated; stage as 2 reads if the single-statement approach cannot preserve failure classification, then consolidate resource reads. Keep existing guard evaluation order, validated active-X membership and actor attribution, session expiry, fail-closed errors and 401/403/404/409/503 contracts. No eager admission fetch before Origin validation. A missing settings row must not erase a valid session. A combined query error must not silently become logout or an incorrect allow; preserve error provenance or retain the separate query until proven. No cached authorization across requests. Preserve CAS/audit/outbox/visibility/rollback and D1 50-query ceilings.
+- Shared follow-up ownership is a single dedicated Lead writer (not five independent endpoint writers). Before claiming, scan all open PR file paths and owner declarations, record the exact shared-file scope and create a narrowly scoped follow-up PR/Work Order. Existing #714 owns apps/api/src/auth/session.ts: do not modify that file until #714 is merged or its owner explicitly hands off. #727 follows the same auth semantics; align its integration and verify S4 CPU. Shared middleware candidates: apps/api/src/middleware/writeOrigin.ts and costGuard.ts, associated existing tests; scan and reserve before editing. Keep historical ownership unchanged and avoid duplicate MIG claims. Shared owner to coordinate with #523, #522, #512, #519, #690; those owners handle their own resource snapshot/query consolidation only.
+- Prioritize real-cookie Hono + SQLite/D1 statement accounting on allowed, denied, cold/warm, provider failure and CAS paths; for each S3 endpoint require <=3 pre-reads + <=1 atomic audited batch and actual workerd CPU evidence as specified. Start with #512 reservation (4 -> 3) and #522 X-ID pair lookup (5 -> <=3); #523 status, #519 spreadsheet and #690 audit restore require additional bounded resource snapshot design. Do not mount candidates before their acceptance. Green characterization of an over-budget path does not establish compliance.
+- Lead may decide implementation details within approved product semantics without another human response; record concrete query/ownership and tests in existing Issues/PRs. Do not declare a single-query architecture feasible until actual source and tests prove it.
+
+### P0 — merge throughput and CPU evidence
+- Focus current agents on 5–8 active priority writers total; do not close existing Draft PRs or take their locks. Remaining writers may finish an in-flight safe unit, checkpoint, or review; pause noncritical feature work and avoid opening additional speculative fixes. First protect shared prerequisites and finish #714/#727 (subject to S4), #456 (measurement), #512/#522/#523/#519/#690 (shared S3 integration), #696 (form split), then dependent UI. One integration coordinator serializes latest-main merges; high-risk independent Lead review and final exact-head CI still required. Ready PRs must be reviewed/merged rather than repeatedly adding unrelated tests. If a priority lane is blocked, use a free lane for the next dependency-unlocking task.
+- During implementation run the existing focused suite locally; group coherent source + necessary regression + checkpoint into one push where practical. Do not repeatedly push documentation-only checkpoints while a same-PR CI is running; wait for results or cancel only a clearly superseded head. No additional push merely to record a passing CI; record links in PR comments. Retain both mandatory final-head jobs and all existing required acceptance checks. Existing test files/fixtures first; no gratuitous test files.
+- Use existing #456 MIG-0639 and #685 MIG-0610 for a reproducible quiet Linux workerd measurement, #693 MIG-0804 for Auth.js. Record host, Node/wrangler versions, real-vs-synthetic bindings, warm/cold and normal/limit/invalid scenarios, raw p50/p95/max and baseline. Local SQLite statement traces do not substitute for CPU evidence, noisy maxima are not silently subtracted, and non-production remote measurements are separate. No new Cloudflare build/deploy until authorized; GitHub Actions Linux can run existing non-deploy local workerd measurements on a fixed source SHA when supported. Reuse existing benchmark scripts, no new redundant workflow or test file.
+
+### P1 — form decomposition and UI integration (#697, #890, #895, #896)
+- Approve the proposed bounded decomposition of MIG-0714 now: A = existing adapter and independently usable form state/content components, B = remaining form/Unslotted shell + CSS, C = whole form integration/parity. Existing #696 retains sole writer lock; lead can register exact child IDs, file ownership, dependency edges and Work Orders after inspecting its actual current diff, or sequential partial PRs under the explicit one-task/one-PR exception below. Do not claim parallel children on overlapping files. Each independently reviewable PR <=3000 changed lines (including tests/ledger); no artificial duplicate tests. Parent READY until all parts, T01–T04 and required 390/1440 browser evidence pass; no route mount prematurely. No further human split approval required.
+- #890/#895: choose host-owned opaque committed authorization generation (or equivalent verified full-document remount) as the pre-mount design. Invalidate old private data/controls and pending reads immediately on authority change; fail closed on ambiguous/absent authority; preserve per-request Hono authorization, no client proof or speculative background polling. Owners must establish actual trusted host signal and correct notification base from validated public config; do not use browser/request origin as a replacement. Coordinate shared paths before work.
+- #896: choose consistent reservation snapshot or explicit anchor equality/version check plus same-batch CAS; preserve existing deadline semantics (do not add a new deadline rejection), and evaluate bounded group projection with exact ordering and no silent truncation. If actual parity requires a new product rule or rejects formerly valid inputs, STOP for explicit decision rather than assuming approval. Existing #511 owner implements and verifies full action; no route mount before budget/contract pass.
+- #701 R2 remains an independent gate: preserve CURRENT reader/fallback until generation-consistent bounded projection (including >500 and exact search semantics) is verified, no premature cutover or anonymous D1 fallback. No 503 availability tradeoff approved here.
+
+### P1 — release separation
+- #773 build-minute limit is a production-release blocker, not an implementation stop. Continue local and GitHub CI, maintain rollback and complete source-level acceptance. Recheck actual quota before deployment; separate explicit approval for direct deploy/cutover, remote D1/R2/Queue, route, secrets or product changes. Do not use green CI as production evidence.
 
 ## State semantics (agent MUST read)
 
@@ -33,6 +59,7 @@
 | D-16 | **API 待ちの画面・Island を契約先行で着手できるようにする（Merge gate）。MIG-0702 / 0703 / 0513〜0515 を分割（MIG-0519, 0708〜0718）、CostGuardBanner の読み API（MIG-0661）、既存 Hono session の security review（MIG-0807）。個別の決定 D-16-1〜14 は §D-16** | DECIDED | MIG-0513〜0515, 0519, 0606, 0607, 0636, 0640, 0641, 0648, 0650, 0651, 0657, 0659, 0661, 0701〜0705, 0708〜0718, 0804, 0807 | 本番操作（Remote D1・secret・deploy・Route・Queue binding）と SPA の本番 Route 切替は従来どおり作業直前の明示承認 |
 | D-17 | **Ops SPA の画面を画面群に分割（MIG-0719〜0737）、SA-011 の API（MIG-0662）、Manage navigation の 2 field（MIG-0663）、Ops guard の degraded の写像（MIG-0664）。個別は §D-17** | DECIDED | MIG-0606, 0607, 0626, 0637, 0642〜0644, 0662〜0664, 0704〜0707, 0719〜0737 | 本番操作（Ops の Worker / Route / Custom Domain、Remote D1、secret）は従来どおり作業直前の明示承認 |
 | D-18 | **`/list` の event 名 parity: RH-032 `PublicVideoDto` に event title が無いため DTO は変えず CURRENT の title 欠落時 fallback（chip は event ID、index 行は `イベント`）を採る（Option A、accepted parity limitation）。個別は §D-18** | DECIDED | MIG-0510, 0634 | 公開 API field の追加は MIG-0634 owner の別 task。本番操作なし |
+| D-19 | **停滞 PR の判断・解除と次期タスク整備（MIG-0605 Option A、#524/#475/#519/#436/#505/#682 調整、MIG-0662 契約先行化、MIG-0627 → MIG-0665/0666 分割、MIG-0738 小型モデル分割、MIG-0610 行番号更新）。個別は §D-19** | DECIDED | MIG-0516, 0605, 0610, 0626, 0627, 0636, 0638, 0662, 0665, 0666, 0714, 0738, 0907 | 本番 deploy / Route / Remote D1 / R2 write token / 0065 確認 / PR squash merge 承認は従来どおり人間・owner の個別承認。決定者: Antigravity/Gemini（owner-delegate）2026-11-18 |
 
 ## D-01 — DB schemaをpackages/dbへ独立（A）
 
@@ -432,6 +459,7 @@ Option 4（hybrid）を採る。
   | MIG-0730 | MIG-0707, MIG-0726, MIG-0650, MIG-0648 |
   | MIG-0731 | MIG-0707, MIG-0726, MIG-0637, MIG-0642, MIG-0603 |
   | MIG-0732 | MIG-0707, MIG-0726, MIG-0605, MIG-0644 |
+  | MIG-0662 | MIG-0603 |
   | MIG-0733 | MIG-0707, MIG-0726, MIG-0662 |
   | MIG-0734 | MIG-0707, MIG-0726, MIG-0637, MIG-0642 |
   | MIG-0735 | MIG-0707, MIG-0726, MIG-0643 |
@@ -530,3 +558,36 @@ Option 4（hybrid）を採る。
 Decision adopted by owner authorization 2026-11-01: A。理由: 公開 API field の追加は MIG-0510 の owned paths 外で、MIG-0634 は DONE。A は CURRENT の fallback 文言と同じで、権限・公開範囲・D1 budget に影響しない。
 
 Follow-up（まだ MIG task ではない）: B を行う場合は MIG-0634 owner の小さな DTO 拡張 task を新設し、完了後に Island の chip / index 行の title を戻す。それまで Phase 5 Gate (MIG-0508) では accepted limitation として扱う。
+
+## D-19 — 停滞 PR 解除・契約先行化・次期タスク分割整備（DECIDED、2026-11-18）
+
+決定者: Antigravity/Gemini（owner-delegate、2026-11-18、ベース `main` `61463174f`）。
+
+### D-19-1: MIG-0605（PR #524 `U05x-B` scope gate）→ Option A 採用（DECIDED）
+
+PR #524 が `U05x-B` で停止していた SA-090/091 承認サービス依存について、別 task 切り出し（Option B）ではなく **Option A（`MIG-0605` Owned paths の狭い拡張）** を採る。
+- 追加許可: `+packages/server-core/src/xid/linkRequestReview.ts`, `+packages/server-core/test/xidLinkRequestReview.test.mjs`, `packages/server-core/package.json`（`./xid/linkRequestReview`）, `src/lib/actions/xid-admin.ts`（SA-090/091 実行部の server-core 委譲 bridge のみ。他 export・予約紐付け・署名ルール・CAS 不変）。
+- `apps/api/src/routes/xid/linkRequests.ts` は薄い HTTP adapter に留め、D-10 server-core 境界・独立セキュリティ/権限レビュー・人間の個別の squash merge 承認を維持する。
+
+### D-19-2: 既存 Open PR 間の競合整理と解消済み blocker の記録（調整方針、STATUS は未合流のため維持）
+
+- **`#524` vs `#475` / `#519`:** `docs/migration/work-items/MIG-0605.md` の単独所有は PR #524（`MIG-0605`）とする。`#475`（MIG-0636）と `#519`（MIG-0638）は `main` 同期・rebase 時に `work-items/MIG-0605.md` への歴史的明確化差分を取り下げる（権限移管は D-13-56 と `PHASE_6_SPEC.md` が保持済み）。`apps/api/src/env.ts` は `xidLinkRequestActorXUserId`（`#524`）と `xidSelected`（`#475`）の両フィールドを保持する。
+- **PR `#436`（MIG-0516）:** `main`（`61463174f`）上で `#668`・`#670` が合流済みであり、`src/lib/xid/mergeBudget.execution.test.mjs`（3/3 PASS）が 100-target merge plan 48/50 文（`#436` 予約マーカー込み 50/50 文）を確認したため、旧 52/50 D1 budget STOP blocker は技術的に解消済み。`main` 同期・最終 Head CI・独立レビュー・owner による本番 `0065` read-only 確認は引き続き merge 条件。
+- **PR `#505`（MIG-0626）:** PR branch（`22e2f309b`）上で `checkAuditLogsRetentionCandidates` は既に `COUNT(*) OVER () ... LIMIT 5`（`result.stats.statements === 3`）へ統合済み。`main` 同期・`like_count_drift` workerd CPU 実測 / CI・独立レビューが残る。
+- **PR `#682`（`fix/manage-staff-icon-parity-clock-681`）:** `apps/api/test/manage.parity.test.mjs` と `FILE_MIGRATION_MATRIX.md` のみを変更した test-only PR。旧HEAD `d9b33ad26f182d0133e1f4310073468ea7be43b9` に対する `Actions #43415695985`（`migration-contract` / `migration-workspaces`）と独立 `APPROVE` レビュー（detached worktree の 37/37 subtest PASS、`check:project-docs` PASS）を経て、**2026-11-18 02:46:44 UTC に squash merge 済み**（現main commit `87a16047abac5b75d4509acbba0cd8b3076d78aa`、[PR #682](https://github.com/coroke3/flamenode/pull/682)）。旧「人間の個別 squash merge 承認待ち」は判断時点の履歴であり、現在のブロッカーではない。
+
+### D-19-3: MIG-0662（SA-011 `/api/admin/audit/restore`）を契約先行（D-16-1）で `READY` 化（DECIDED）
+
+- `MIG-0616`・`MIG-0629` は DONE。`MIG-0603`（PR #523）待ちだった可変部（`auditRestoreHost.ts` が参照する R2 visibility manifest / public cache keys）を `Depends on:` から **`Merge gate: MIG-0603`**（D-16-1 / `merge-gates` 表）へ移す。
+- 着手時は `main` に存在する `packages/server-core/src/visibility/{manifestR2,fenceStore}.ts` と `packages/server-core/src/publicCache/{delete,eventExportKeys}.ts` を用いて `// MIG-0662 / D-16-1 provisional` adapter を実装し、`MIG-0603` DONE 後に `U04` で `videoTransitionHost.ts` / `publicCacheKeys.ts` へ置換してから merge する。高リスクデータ整合性操作のため `Model: lead`・独立セキュリティレビュー必須は変えない。
+
+### D-19-4: MIG-0627 の分割（`MIG-0665` / `MIG-0666` + 読手置換 `MIG-0627`）（DECIDED）
+
+- **`MIG-0665`:** `/admin/static-builds` shared-input diagnostics の build snapshot 連携（D-13-52、旧 MIG-0627 DONE 条件）。PR #505（MIG-0626）と `apps/api/src/routes/adminRead/ops.ts` / `packages/contracts/src/adminReadOps.ts` が競合するため `Depends on: MIG-0626, MIG-0509`（`BLOCKED`）とする。
+- **`MIG-0666`:** build 時 R2 API artifact（`events/index.json`、`events/<id>/release.v1.json`）の差分 PUT と完全性検査・`BUILD_TIME_DATA.md` §6 Class A 月間見積り（旧 MIG-0627 U04/U05）。依存は `MIG-0509`（DONE）のみで **`READY`**（実 R2 write credential / 本番 PUT は承認まで停止）。
+- **`MIG-0627`:** 残存 runtime R2 artifact 読み手の置換と `R2_ARTIFACT_CONSUMERS.md` 完了管理へ責務を絞り、`READY` を維持する。`MIG-0907`（旧 `json-generator` 退役）の依存を `MIG-0904, MIG-0610, MIG-0627, MIG-0665, MIG-0666` に更新する。
+
+### D-19-5: `MIG-0738` 分割（`READY_FOR_SMALL_MODEL` 整備）と `MIG-0714` / `MIG-0610` 更新（DECIDED）
+
+- `MIG-0714` は 3,757 行の `VideoForm.tsx` 等を含み STOP 上限（3,000 行）を超えるため、旧 U01 に相当する 12 本の純粋ヘルパー群と `ErrorCallout` / `PublicReflectionDelayNotice`（計 14 ソース + テスト、既存 41 本の Open PR とのファイル重複 0 件、依存 `MIG-0701, MIG-0713` DONE）を **`MIG-0738`** として分離し、`Model: small` + `Readiness: READY_FOR_SMALL_MODEL` として登録する。
+- `MIG-0714` は `Depends on: MIG-0712, MIG-0713, MIG-0738` として差分規模を抑制し、`MIG-0610` の `Source snapshot` を `61463174f` の実ファイル行番号（`createCronWorker.ts:128` 等）へ更新した。

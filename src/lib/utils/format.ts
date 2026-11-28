@@ -95,8 +95,8 @@ export function formatDuration(sec: number): string {
 }
 
 export function formatCount(n: number | null | undefined): string {
-  // Invalid telemetry/aggregates should not leak "NaNM" or "InfinityM" into UI.
-  if (n == null || !Number.isFinite(n)) return "0";
+  // Counts must not be negative or non-finite; malformed aggregates display zero.
+  if (n == null || !Number.isFinite(n) || n < 0) return "0";
   if (n < 1000) return String(n);
   if (n < 10000) return `${(n / 1000).toFixed(1)}k`;
   if (n < 1000000) return `${Math.floor(n / 1000)}k`;
