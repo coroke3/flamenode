@@ -592,12 +592,10 @@ test("SEC-800: CSV stored duplicate and atomic-budget denials preserve CURRENT m
     `);
     const before = snapshot(s);
     await withThrowingDiagnostics(async ({ errors, warnings }) => {
-      for (const rows of [csv().rows, [csv().rows[0], { ...csv().rows[0], lineNumber: 9 }]]) {
-        const res = await s.send("POST", "/csv", { reason: "Stored duplicate", rows });
-        assert.equal(res.status, 409, await res.clone().text());
-        assert.equal(res.headers.get("cache-control"), "private, no-store");
-        assert.deepEqual(await res.json(), { ok: false, message: storedDuplicate });
-      }
+      const res = await s.send("POST", "/csv", { reason: "Stored duplicate", rows: csv().rows });
+      assert.equal(res.status, 409, await res.clone().text());
+      assert.equal(res.headers.get("cache-control"), "private, no-store");
+      assert.deepEqual(await res.json(), { ok: false, message: storedDuplicate });
       assert.deepEqual(errors, []);
       assert.equal(warnings(), 0);
     });
@@ -605,6 +603,25 @@ test("SEC-800: CSV stored duplicate and atomic-budget denials preserve CURRENT m
     assert.deepEqual(snapshot(s), before);
   } finally {
     s.sqlite.close();
+  }
+  const csvDuplicate = setup();
+  try {
+    const before = snapshot(csvDuplicate);
+    const rows = [csv().rows[0], { ...csv().rows[0], lineNumber: 9 }];
+    await withThrowingDiagnostics(async ({ errors, warnings }) => {
+      const res = await csvDuplicate.send("POST", "/csv", { reason: "CSV duplicate", rows });
+      assert.equal(res.status, 409, await res.clone().text());
+      assert.equal(res.headers.get("cache-control"), "private, no-store");
+      assert.deepEqual(await res.json(), {
+        ok: false, message: "9行目: X IDは2行目と重複しています",
+      });
+      assert.deepEqual(errors, []);
+      assert.equal(warnings(), 0);
+    });
+    assert.equal(csvDuplicate.stats.batches, 0);
+    assert.deepEqual(snapshot(csvDuplicate), before);
+  } finally {
+    csvDuplicate.sqlite.close();
   }
   const fault = setup({ fault: { match: staffRead, error: new Error(storedDuplicate) } });
   try {
