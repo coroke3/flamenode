@@ -1891,6 +1891,12 @@ test("MIG-0645 U02al Hono: new video rows, provenance, queue and receipt are ato
     cloneAnswerProof.run("competing-answer-proof", answerProofId);
     const tiedPrepared = await prepareLegacyVideoReplacementAnswers(changedInput);
     assert.deepEqual(tiedPrepared.proofs, prepared.proofs, "preloaded proof is checked by the atomic assertion after read-time races");
+    const tiedSnapshot = await readLegacyVideoReplacementSnapshot(
+      serverDb, video.id, ["created-video:ev-1:question-0"],
+    );
+    await assert.rejects(prepareLegacyVideoReplacementAnswers({
+      ...changedInput, snapshot: tiedSnapshot,
+    }), "a freshly read tied latest proof must refuse replacement");
     const answerGuardedBatch = async () => runBoundTestBatch(serverDb, [
       buildLegacyVideoReplacementAssertion(serverDb, snapshot),
       buildLegacyAnswerReplacementAssertion(serverDb, prepared),
@@ -2023,7 +2029,7 @@ test("MIG-0645 U02al Hono: new video rows, provenance, queue and receipt are ato
     assert.equal(result.result.replaced.videos, 1);
     assert.equal(result.result.complete, true);
     assert.equal(stats.batches - beforeReplace, 1);
-    assert.equal(stats.reads - beforeReplaceReads, 4, "video and answer proofs share one bounded snapshot read");
+    assert.equal(stats.reads - beforeReplaceReads, 3, "receipt, support, entity and answer proofs share one D1 read");
     const replacedVideo = sqlite.prepare("SELECT * FROM videos WHERE id = ?").get(video.id);
     assert.equal(replacedVideo.title, "Replaced video");
     assert.equal(replacedVideo.created_at, saved.created_at);

@@ -670,26 +670,13 @@ const VIDEO_REPLACEMENT_SNAPSHOT_SETS = [
   { kind: "answers", table: "video_custom_answers", columns: getTableColumns(videoCustomAnswers), lookup: "video_id", sort1: "event_id", sort2: "question_id", cap: MAX_LEGACY_CUSTOM_ANSWERS_PER_VIDEO },
 ] as const;
 
-/**
- * U02am: read-only provenance check for an existing imported video.
- * Retain raw SQL JSON as the future same-batch full-row CAS input, but hash
- * CURRENT's managed projection and ordered related-row JSON objects. All
- * identifiers below are static schema metadata. No caller-controlled SQL.
- */
-export async function readLegacyVideoReplacementSnapshot(
-  db: ServerCoreDb,
+function buildLegacyVideoReplacementSnapshotSources(
   videoId: string,
-  answerTargetIds: readonly string[] = [],
+  answerTargetIds: readonly string[],
+  kindPrefix = "",
+  guard = sql`1 = 1`,
 ) {
   const targetId = entitySnapshotTargetId("video", videoId);
-  const error = "旧形式インポートの作品置換snapshotを確認できません。";
-  if (!Array.isArray(answerTargetIds) ||
-      answerTargetIds.length > MAX_LEGACY_CUSTOM_ANSWERS_PER_VIDEO ||
-      answerTargetIds.some((id) => typeof id !== "string" || id.length === 0) ||
-      new Set(answerTargetIds).size !== answerTargetIds.length ||
-      new TextEncoder().encode(JSON.stringify(answerTargetIds)).byteLength > MAX_LEGACY_IMPORT_STEP_BYTES) {
-    return fixedFailure(error);
-  }
   const answerTargetsPayload = JSON.stringify(answerTargetIds);
   const sets = VIDEO_REPLACEMENT_SNAPSHOT_SETS;
   // ORDER BY uses SQLite BINARY ordering, the same as CURRENT's support read.
@@ -697,19 +684,19 @@ export async function readLegacyVideoReplacementSnapshot(
   // the proof and unmanaged video columns used by the later CAS.
   const sources = sets.map((set) => sql`
     SELECT * FROM (
-      SELECT ${set.kind} AS kind,
+      SELECT ${kindPrefix + set.kind} AS kind,
         ${canonicalRowJson(set.columns, set.table)} AS payload,
         ${sql.raw(set.sort1)} AS sort1,
         ${set.sort2 ? sql.raw(set.sort2) : sql`''`} AS sort2
       FROM ${sql.raw(set.table)}
-      WHERE ${sql.raw(set.lookup)} = ${videoId}
+      WHERE ${sql.raw(set.lookup)} = ${videoId} AND (${guard})
       ORDER BY sort1, sort2
       LIMIT ${set.cap + 1}
     )
   `);
   const proofSource = sql`
     SELECT * FROM (
-      SELECT 'proof' AS kind,
+      SELECT ${kindPrefix + "proof"} AS kind,
         json_object('id', id, 'target_id', target_id, 'context', context,
           'after_json', after_json, 'created_at', created_at) AS payload,
         id AS sort1, '' AS sort2
@@ -717,6 +704,7 @@ export async function readLegacyVideoReplacementSnapshot(
       WHERE table_name = ${ENTITY_SNAPSHOT_AUDIT_TABLE}
         AND target_id = ${targetId}
         AND context = ${ENTITY_SNAPSHOT_AUDIT_CONTEXT}
+        AND (${guard})
         AND created_at = (
           SELECT MAX(created_at) FROM audit_logs
           WHERE table_name = ${ENTITY_SNAPSHOT_AUDIT_TABLE}
@@ -729,13 +717,14 @@ export async function readLegacyVideoReplacementSnapshot(
   `;
   const answerProofSource = answerTargetIds.length === 0 ? null : sql`
     SELECT * FROM (
-      SELECT 'answer_proof' AS kind,
+      SELECT ${kindPrefix + "answer_proof"} AS kind,
         json_object('id', a.id, 'target_id', a.target_id, 'context', a.context,
           'after_json', a.after_json, 'created_at', a.created_at) AS payload,
         a.target_id AS sort1, a.id AS sort2
       FROM audit_logs AS a
       WHERE a.table_name = 'video_custom_answers'
         AND a.target_id IN (SELECT value FROM json_each(${answerTargetsPayload}))
+        AND (${guard})
         AND a.created_at = (
           SELECT MAX(b.created_at) FROM audit_logs AS b
           WHERE b.table_name = a.table_name AND b.target_id = a.target_id
@@ -744,9 +733,29 @@ export async function readLegacyVideoReplacementSnapshot(
       LIMIT ${MAX_LEGACY_CUSTOM_ANSWERS_PER_VIDEO * 2 + 1}
     )
   `;
+  return [...sources, proofSource, ...(answerProofSource ? [answerProofSource] : [])];
+}
+
+function validVideoAnswerTargetIds(answerTargetIds: readonly string[]): boolean {
+  return Array.isArray(answerTargetIds) &&
+    answerTargetIds.length <= MAX_LEGACY_CUSTOM_ANSWERS_PER_VIDEO &&
+    answerTargetIds.every((id) => typeof id === "string" && id.length > 0) &&
+    new Set(answerTargetIds).size === answerTargetIds.length &&
+    new TextEncoder().encode(JSON.stringify(answerTargetIds)).byteLength <= MAX_LEGACY_IMPORT_STEP_BYTES;
+}
+
+/** U02am/U02av: bounded standalone provenance read for diagnostics and tests. */
+export async function readLegacyVideoReplacementSnapshot(
+  db: ServerCoreDb,
+  videoId: string,
+  answerTargetIds: readonly string[] = [],
+) {
+  if (!validVideoAnswerTargetIds(answerTargetIds)) {
+    return fixedFailure("旧形式インポートの作品置換snapshotを確認できません。");
+  }
   const readRows = await db.all(sql`
     WITH snapshot AS (
-      ${sql.join([...sources, proofSource, ...(answerProofSource ? [answerProofSource] : [])], sql` UNION ALL `)}
+      ${sql.join(buildLegacyVideoReplacementSnapshotSources(videoId, answerTargetIds), sql` UNION ALL `)}
     )
     SELECT kind,
       CASE WHEN SUM(length(CAST(payload AS BLOB))) OVER () <= ${MAX_LEGACY_IMPORT_STEP_BYTES}
@@ -755,6 +764,19 @@ export async function readLegacyVideoReplacementSnapshot(
     ORDER BY kind, sort1, sort2
   `) as unknown as ReadRow[];
 
+  return parseLegacyVideoReplacementSnapshot(videoId, answerTargetIds, readRows);
+}
+
+/** U02aw: validate preloaded evidence without another D1 operation. */
+async function parseLegacyVideoReplacementSnapshot(
+  videoId: string,
+  answerTargetIds: readonly string[],
+  readRows: ReadRow[],
+) {
+  const targetId = entitySnapshotTargetId("video", videoId);
+  const error = "旧形式インポートの作品置換snapshotを確認できません。";
+  if (!validVideoAnswerTargetIds(answerTargetIds)) return fixedFailure(error);
+  const sets = VIDEO_REPLACEMENT_SNAPSHOT_SETS;
   const proofRows = readRows.filter((row) => row.kind === "proof");
   const answerProofRows = readRows.filter((row) => row.kind === "answer_proof");
   const knownKinds = new Set<string>(["proof", ...sets.map((set) => set.kind),
@@ -1349,8 +1371,43 @@ export async function legacyImportD1ApplyStep(
       .map((row) => normalizeSoftwareName(row.label)))]
     : [];
   const videoNamesPayload = JSON.stringify(videoSoftwareNames);
+  // Precompute bounded answer targets only for possible replacement. An
+  // invalid target must not prevent recovery of an already committed receipt.
+  let videoAnswerTargetIds: string[] = [];
+  let videoAnswerTargetsValid = true;
+  if (plannedVideo && allowExistingVideoReplacement && !expectedExistingForSkip) {
+    const answerRows = input.plan.videoCustomAnswers.filter((row) => row.video_id === plannedVideo.id);
+    if (answerRows.length > MAX_LEGACY_CUSTOM_ANSWERS_PER_VIDEO) {
+      videoAnswerTargetsValid = false;
+    } else {
+      try {
+        videoAnswerTargetIds = answerRows.map(answerAuditTarget);
+        videoAnswerTargetsValid = validVideoAnswerTargetIds(videoAnswerTargetIds);
+      } catch {
+        videoAnswerTargetsValid = false;
+      }
+    }
+  }
   const videoSupportInputValid = videoSoftwareNames.length <= MAX_LEGACY_VIDEO_SOFTWARES_PER_VIDEO &&
-    new TextEncoder().encode(videoNamesPayload).byteLength <= MAX_LEGACY_IMPORT_STEP_BYTES;
+    new TextEncoder().encode(videoNamesPayload).byteLength <= MAX_LEGACY_IMPORT_STEP_BYTES &&
+    videoAnswerTargetsValid;
+  // Only include canonical related tables in SQL when replacement is an
+  // eligible strategy; every source also checks existence and marker absence.
+  const videoReplacementSources = plannedVideo && allowExistingVideoReplacement &&
+      !expectedExistingForSkip && videoSupportInputValid
+    ? buildLegacyVideoReplacementSnapshotSources(
+        plannedVideo.id, videoAnswerTargetIds, "video_replacement_",
+        sql`EXISTS (SELECT 1 FROM video_rows) AND NOT EXISTS (SELECT 1 FROM marker_rows)`,
+      )
+    : [];
+  const videoReplacementCte = videoReplacementSources.length > 0
+    ? sql`, video_replacement AS (
+        ${sql.join(videoReplacementSources, sql` UNION ALL `)}
+      )`
+    : sql``;
+  const videoReplacementUnion = videoReplacementSources.length > 0
+    ? sql`UNION ALL SELECT kind, payload, sort1, sort2 FROM video_replacement`
+    : sql``;
 
   // One bounded D1 read: receipt plus the stage-specific existing-state
   // snapshot. Video support rows are only selected for a fresh candidate write.
@@ -1393,15 +1450,20 @@ export async function legacyImportD1ApplyStep(
                 SELECT value FROM json_each(${videoSupportInputValid ? videoNamesPayload : "[]"})
               ) AND EXISTS (SELECT 1 FROM eligible_support)
             LIMIT ${MAX_LEGACY_VIDEO_SOFTWARES_PER_VIDEO + 2}
+          )${videoReplacementCte},
+          all_video_rows AS (
+            SELECT 'marker' AS kind, payload, '' AS sort1, '' AS sort2 FROM marker_rows
+            UNION ALL
+            SELECT 'video' AS kind, payload, '' AS sort1, '' AS sort2 FROM video_rows
+            UNION ALL
+            SELECT kind, payload, '' AS sort1, '' AS sort2 FROM video_support
+            ${videoReplacementUnion}
           )
-          SELECT 'marker' AS kind, payload FROM marker_rows
-          UNION ALL
-          SELECT 'video' AS kind, payload FROM video_rows
-          UNION ALL
           SELECT kind,
             CASE WHEN SUM(length(CAST(payload AS BLOB))) OVER () <= ${MAX_LEGACY_IMPORT_STEP_BYTES}
               THEN payload ELSE NULL END AS payload
-            FROM video_support
+          FROM all_video_rows
+          ORDER BY kind, sort1, sort2
         `) as unknown as ReadRow[]
     : stage === "custom_questions"
     ? questions.length === 0
@@ -1616,6 +1678,12 @@ export async function legacyImportD1ApplyStep(
   const creatorRows = readRows.filter((row) => row.kind === "creator");
   const catalogRows = readRows.filter((row) => row.kind === "software");
   const videoSupportCount = creatorRows.length + catalogRows.length;
+  const videoReplacementKinds = new Set([
+    ...VIDEO_REPLACEMENT_SNAPSHOT_SETS.map((set) => "video_replacement_" + set.kind),
+    "video_replacement_proof",
+    ...(videoAnswerTargetIds.length > 0 ? ["video_replacement_answer_proof"] : []),
+  ]);
+  const videoReplacementRows = readRows.filter((row) => videoReplacementKinds.has(row.kind));
   const eventStaffSnapshotRows = readRows.filter((row) => row.kind === "staff");
   const replacementEventRows = readRows.filter((row) => row.kind === "replacement_event");
   const replacementStaffRows = readRows.filter((row) => row.kind === "replacement_staff");
@@ -1631,7 +1699,7 @@ export async function legacyImportD1ApplyStep(
         : 0;
   if (
     markerRows.length + principalRows.length + existingRows.length +
-      eventRows.length + videoRows.length + videoSupportCount +
+      eventRows.length + videoRows.length + videoSupportCount + videoReplacementRows.length +
       eventStaffSnapshotRows.length + replacementRowCount !== readRows.length
   ) {
     return fixedFailure("旧形式インポートのステップ監査を確認できません。");
@@ -1649,6 +1717,14 @@ export async function legacyImportD1ApplyStep(
       expectedExistingForSkip || !videoSupportInputValid ||
       (videoRows.length > 0 && !allowExistingVideoReplacement)
     )) ||
+    (videoReplacementRows.length > 0 && (
+      stage !== "videos" || !plannedVideo || videoRows.length !== 1 ||
+      markerRows.length !== 0 || expectedExistingForSkip ||
+      !allowExistingVideoReplacement || !videoSupportInputValid
+    )) ||
+    (stage === "videos" && plannedVideo && markerRows.length === 0 &&
+      (readRows.some((row) => typeof row.payload !== "string") ||
+       new TextEncoder().encode(JSON.stringify(readRows)).byteLength > MAX_LEGACY_IMPORT_STEP_BYTES)) ||
     (videoRows.length > 0 && (stage !== "videos" || !plannedVideo || markerRows.length > 0 || videoRows[0].payload !== plannedVideo.id)) ||
     eventStaffSnapshotRows.length > 1 ||
     replacementEventRows.length > 1 ||
@@ -2420,10 +2496,15 @@ export async function legacyImportD1ApplyStep(
           if (input.strategy !== "replace_imported" || video.visibility_status !== "private") {
             return fixedFailure("既存作品の置換条件を満たしていません。");
           }
-          const answerTargetIds = input.plan.videoCustomAnswers
-            .filter((row) => row.video_id === video.id)
-            .map(answerAuditTarget);
-          replacement = await readLegacyVideoReplacementSnapshot(input.db, video.id, answerTargetIds);
+          if (!videoSupportInputValid) {
+            return fixedFailure("旧形式インポートの作品置換snapshotを確認できません。");
+          }
+          replacement = await parseLegacyVideoReplacementSnapshot(
+            video.id, videoAnswerTargetIds,
+            videoReplacementRows.map((row) => ({
+              kind: row.kind.slice("video_replacement_".length), payload: row.payload,
+            })),
+          );
           if (replacement.video.visibility_status !== "private") {
             return fixedFailure("公開状態を変更する作品置換はHono側でまだ利用できません。");
           }
@@ -2745,7 +2826,7 @@ export async function legacyImportD1ApplyStep(
             })),
             buildMarkerAudit(nextProgress, outcome),
           ],
-          callerQueryCount: 3 + (replacement ? 1 : 0) + (answerChanges?.proofs.length ? 1 : 0),
+          callerQueryCount: 3,
           preloaded: input.preloaded,
           staticRebuildWakeSource: "import",
           wakeSentKinds: sentKinds,
