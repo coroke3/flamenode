@@ -541,7 +541,7 @@ test("MIG-0645 U02x Hono: x_users mutation, rebuild queue and receipt commit ato
     assert.equal(replay.status, 200, JSON.stringify(await replay.clone().json()));
     const recovered = await replay.json();
     assert.equal(recovered.progress.stage, "softwares");
-    assert.equal(recovered.progress.counts.createdXUsers, 1);
+    assert.equal(recovered.result.created.xUsers, 1);
     assert.equal(record().progress.stage, "softwares");
     assert.equal(stats.reads, 9, "each stage/replay request uses three pre-reads");
     assert.equal(stats.batches, 2, "replaying the durable receipt never duplicates the D1 batch");
