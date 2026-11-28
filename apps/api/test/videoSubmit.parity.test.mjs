@@ -1366,6 +1366,10 @@ if (runUnderRootTsx(import.meta.url)) {
         mutate: (sqlite) => sqlite.prepare("UPDATE events SET title='Changed' WHERE id='ev_open'").run(),
       },
       {
+        name: "secondary event policy changes",
+        mutate: (sqlite) => sqlite.prepare("UPDATE events SET title='Changed secondary' WHERE id='ev_closed'").run(),
+      },
+      {
         name: "event deletion invalidates the receipt",
         mutate: (sqlite) => sqlite.prepare("DELETE FROM events WHERE id='ev_open'").run(),
       },
@@ -1396,7 +1400,7 @@ if (runUnderRootTsx(import.meta.url)) {
         const receipt = await readSlotSubmissionReceipt(db, "part_anchor");
         assert.ok(receipt, scenario.name);
         assert.equal(receipt.partResolution.kind, scenario.fallback ? "fallback" : "bounded", scenario.name);
-        const videoEventReceipt = await readSlotSubmissionVideoEventReceipt(db, receipt.anchor, null);
+        const videoEventReceipt = await readSlotSubmissionVideoEventReceipt(db, receipt.anchor, null, ["ev_open", "ev_closed"]);
         assert.equal(videoEventReceipt.event?.id, "ev_open", scenario.name);
         assert.equal(w.d1.stats.reads, 2, scenario.name);
         const assertions = buildSlotSubmissionPartAndEventAssertions(receipt, videoEventReceipt);
@@ -1429,6 +1433,200 @@ if (runUnderRootTsx(import.meta.url)) {
             1,
             scenario.name,
           );
+        } else {
+          await assert.rejects(write, /malformed JSON/i, scenario.name);
+          assert.deepEqual(snapshotDb(w.sqlite), before, scenario.name);
+        }
+        assert.equal(w.d1.stats.batches, 1, scenario.name);
+        assert.ok(w.d1.stats.maxBinds <= 100, scenario.name);
+      } finally {
+        w.sqlite.close();
+      }
+    }
+  });
+
+test("U03a SA-088: multi-event stage/general policy receipt is one read and matches CURRENT", async () => {
+    const {
+      readSlotSubmissionVideoEventReceipt,
+      decodeSlotSubmissionGeneralQuestions,
+      resolveSlotSubmissionStagePermissionFields,
+      buildSlotSubmissionStagePermissionSubmission,
+      buildSlotSubmissionQuestionPolicyAssertions,
+    } = await import("@flamenode/server-core/video/requiredVideoFields");
+    const { validateSlotSubmissionPolicies } = await import("../src/routes/videos/submit.ts");
+    const { getStagePermissionFieldsForEvents, buildStagePermissionSubmission } =
+      await import("../../../src/lib/video/stagePermissionSubmission.ts");
+    const { validateCustomAnswersForEvents } =
+      await import("../../../src/lib/video/submissionValidation.ts");
+    const eventIds = ["ev_open", "ev_closed"];
+    const w = seedWorld();
+    try {
+      const addQuestion = (id, event_id, question_key, label, extra = {}) => insert(w.sqlite, "event_custom_questions", {
+        id, event_id, question_key, label, description: null, type: "textarea",
+        required: 0, options_json: null, placeholder: null, max_length: 1000,
+        sort_order: 0, is_active: 1, visibility: "review", created_at: 100,
+        updated_at: 100, ...extra,
+      });
+      addQuestion("stage_open", "ev_open", "stage_permission", "ステージ許諾", {
+        description: "Open description", placeholder: "Open placeholder", required: 1,
+      });
+      addQuestion("stage_open_2", "ev_open", "stage_permission_2", "素材許諾", {
+        sort_order: 1, description: "Second description",
+      });
+      addQuestion("stage_closed", "ev_closed", "stage_permission", "別イベントの表記", {
+        description: "Closed description", required: 0,
+      });
+      addQuestion("stage_inactive", "ev_open", "stage_permission_legacy", "Inactive", {
+        sort_order: 2, is_active: 0, required: 1,
+      });
+      addQuestion("general_open", "ev_open", "general_open", "一般質問", {
+        type: "text", required: 1, max_length: 30,
+      });
+      addQuestion("general_closed", "ev_closed", "general_closed", "別イベント質問", {
+        type: "select", options_json: '["A","B"]', sort_order: 1,
+      });
+      addQuestion("general_inactive", "ev_open", "general_inactive", "Inactive general", {
+        is_active: 0, sort_order: 2,
+      });
+
+      const db = drizzle(w.d1);
+      const readsBefore = w.d1.stats.reads;
+      const receipt = await readSlotSubmissionVideoEventReceipt(
+        db, { event_id: "ev_open", video_id: null }, null, eventIds,
+      );
+      assert.equal(w.d1.stats.reads - readsBefore, 1);
+      assert.deepEqual(receipt.events.map((event) => event.id), eventIds);
+      assert.equal(receipt.event?.id, "ev_open");
+
+      const candidateStageFields = resolveSlotSubmissionStagePermissionFields(
+        eventIds, receipt.stageQuestions,
+      );
+      const currentStageFields = await getStagePermissionFieldsForEvents(db, eventIds);
+      assert.deepEqual(candidateStageFields, currentStageFields);
+
+      const candidateGeneral = decodeSlotSubmissionGeneralQuestions(receipt);
+      const formData = new FormData();
+      formData.append("custom_question_answer_id", "stage_permission");
+      formData.append("custom_question_answer_value", "自作");
+      formData.append("custom_question_answer_id", "stage_permission_2");
+      formData.append("custom_question_answer_value", "");
+      formData.append("custom_answer:ev_open:general_open", "answer");
+
+      const currentGeneral = await validateCustomAnswersForEvents(db, formData, eventIds);
+      assert.equal(currentGeneral.ok, true);
+      assert.equal(candidateGeneral.length, 2);
+      assert.deepEqual(
+        candidateGeneral.map((question) => [
+          question.id, question.event_id, question.question_key, question.label,
+          question.type, question.required, question.options, question.max_length,
+        ]),
+        [
+          ["general_closed", "ev_closed", "general_closed", "別イベント質問", "select", false, ["A", "B"], 1000],
+          ["general_open", "ev_open", "general_open", "一般質問", "text", true, [], 30],
+        ],
+      );
+
+      const candidateStage = buildSlotSubmissionStagePermissionSubmission(formData, candidateStageFields);
+      const currentStage = buildStagePermissionSubmission(formData, currentStageFields);
+      assert.deepEqual(candidateStage, currentStage);
+      assert.equal(candidateStage.ok, true);
+
+      const validated = validateSlotSubmissionPolicies(
+        receipt,
+        formData,
+        { display_name: "Owner", title: "Title" },
+        "First",
+        null,
+      );
+      assert.equal(validated.ok, true);
+      if (validated.ok) {
+        assert.deepEqual(validated.stagePermission, currentStage.value);
+        assert.deepEqual(validated.customAnswerDrafts, currentGeneral.drafts);
+        assert.equal(validated.event.id, "ev_open");
+      }
+
+      const assertions = buildSlotSubmissionQuestionPolicyAssertions(receipt);
+      assert.equal(assertions.length, 2);
+      assert.equal(w.d1.stats.batches, 0);
+    } finally {
+      w.sqlite.close();
+    }
+  });
+
+  test("U03a SA-088: stage/general question policy changes fail the same audited batch", async () => {
+    const {
+      readSlotSubmissionVideoEventReceipt,
+      buildSlotSubmissionQuestionPolicyAssertions,
+    } = await import("@flamenode/server-core/video/requiredVideoFields");
+    const { mutateWithAudit } = await import("@flamenode/server-core/audit/mutate");
+    const { sql } = await import("drizzle-orm");
+    const cases = [
+      { name: "unchanged stage/general policies", accept: true },
+      {
+        name: "general question label changes",
+        mutate: (sqlite) => sqlite.prepare("UPDATE event_custom_questions SET label='Changed general' WHERE id='general_cas'").run(),
+      },
+      {
+        name: "stage required flag changes",
+        mutate: (sqlite) => sqlite.prepare("UPDATE event_custom_questions SET required=1 WHERE id='stage_cas'").run(),
+      },
+      {
+        name: "stage question is added",
+        mutate: (sqlite) => insert(sqlite, "event_custom_questions", {
+          id: "stage_added", event_id: "ev_open", question_key: "stage_permission_2",
+          label: "Added", type: "textarea", required: 0, sort_order: 1, is_active: 1,
+          visibility: "review", created_at: 100, updated_at: 100,
+        }),
+      },
+      {
+        name: "general question is removed",
+        mutate: (sqlite) => sqlite.prepare("DELETE FROM event_custom_questions WHERE id='general_cas'").run(),
+      },
+    ];
+    for (const scenario of cases) {
+      const w = seedWorld();
+      try {
+        insert(w.sqlite, "videos", {
+          id: "v_policy", creator_x_user_id: "x_owner", submitted_by_user_id: "u_owner",
+          creator_display_name: "Owner", title: "Before", visibility_status: "pending",
+          created_at: 100, updated_at: 100,
+        });
+        insert(w.sqlite, "event_custom_questions", {
+          id: "stage_cas", event_id: "ev_open", question_key: "stage_permission",
+          label: "Stage", description: "desc", placeholder: "placeholder", type: "textarea",
+          required: 0, sort_order: 0, is_active: 1, visibility: "review",
+          created_at: 100, updated_at: 100,
+        });
+        insert(w.sqlite, "event_custom_questions", {
+          id: "general_cas", event_id: "ev_open", question_key: "general",
+          label: "General", type: "text", required: 0, max_length: 30,
+          sort_order: 0, is_active: 1, visibility: "review", created_at: 100, updated_at: 100,
+        });
+        const db = drizzle(w.d1);
+        const receipt = await readSlotSubmissionVideoEventReceipt(
+          db, { event_id: "ev_open", video_id: "v_policy" }, null, ["ev_open"],
+        );
+        const assertions = buildSlotSubmissionQuestionPolicyAssertions(receipt);
+        assert.equal(assertions.length, 2, scenario.name);
+        if (scenario.mutate) scenario.mutate(w.sqlite);
+        const before = snapshotDb(w.sqlite);
+        const video = { ...w.sqlite.prepare("SELECT * FROM videos WHERE id='v_policy'").get() };
+        const write = () => mutateWithAudit(db, {
+          preMutationAssertions: assertions.map((condition) => db.run(condition)),
+          mutationStatements: [db.run(sql\`UPDATE videos SET title='After' WHERE id='v_policy'\`)],
+          expectedMutationChanges: [1],
+          audits: [{
+            table_name: "videos", target_id: "v_policy", operation: "UPDATE",
+            before: video, after: { ...video, title: "After" }, actor_user_id: "u_owner",
+            context: "video-save:submit-slot", retention_class: "normal", strict: true,
+          }],
+          callerQueryCount: 1,
+        });
+        if (scenario.accept) {
+          const ids = await write();
+          assert.equal(ids.length, 1, scenario.name);
+          assert.equal(w.sqlite.prepare("SELECT title FROM videos WHERE id='v_policy'").get().title, "After", scenario.name);
+          assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE target_id='v_policy' AND table_name='videos'").get().n, 1, scenario.name);
         } else {
           await assert.rejects(write, /malformed JSON/i, scenario.name);
           assert.deepEqual(snapshotDb(w.sqlite), before, scenario.name);
