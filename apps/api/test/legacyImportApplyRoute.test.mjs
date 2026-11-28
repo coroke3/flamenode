@@ -241,6 +241,7 @@ function previewBucket({ failAdvanceOnce = false, failAdvanceStage = "x_users", 
     },
     record: () => JSON.parse([...objects.values()][0].data),
     writes: () => version,
+    failNextCompletion: () => { failCompleteOnce = true; },
     // Model a previous HTTP request that committed the last D1 step while its
     // R2 receipt is still in the "ready / complete" position. No D1 write here.
     markProgressComplete: () => {
@@ -1612,7 +1613,7 @@ function extendLegacyImportVideoCreateSchema(sqlite) {
 }
 
 test("MIG-0645 U02al Hono: new video rows, provenance, queue and receipt are atomic; final R2 replay does not repeat wakes", async () => {
-  const { bucket } = previewBucket({ failCompleteOnce: true });
+  const { bucket, failNextCompletion } = previewBucket({ failCompleteOnce: true });
   const wakes = [];
   let race = false;
   let creatorRace = false;
@@ -2015,6 +2016,52 @@ test("MIG-0645 U02al Hono: new video rows, provenance, queue and receipt are ato
     const ready = await request(replacement.form());
     assert.equal(ready.status, 200, JSON.stringify(await ready.clone().json()));
     const beforeReplaceWakes = wakes.length;
+    // U02ax: route-level pre-read refusals must not reach an audited batch.
+    // Unlike the standalone helper tests, this exercises the combined stage
+    // query and the exact same preview credential that is retried below.
+    const beforeRejectedBatches = stats.batches;
+    const beforeRejectedAudits = sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n;
+    const queueBeforeRejection = sqlite.prepare(
+      "SELECT * FROM static_rebuild_queue ORDER BY id",
+    ).all();
+    async function expectReplacementReadRefusal(label) {
+      const reads = stats.reads;
+      const response = await request(replacement.form());
+      assert.equal(response.status, 409, label + ": " + JSON.stringify(await response.clone().json()));
+      assert.equal(stats.reads - reads, 3, label + ": one stage read plus two preloads");
+      assert.equal(stats.batches, beforeRejectedBatches, label + ": no batch");
+      assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n,
+        beforeRejectedAudits + extraProofRows, label + ": no new audit or receipt");
+      assert.deepEqual(sqlite.prepare("SELECT * FROM static_rebuild_queue ORDER BY id").all(),
+        queueBeforeRejection, label + ": no queue mutation");
+      assert.equal(wakes.length, beforeReplaceWakes, label + ": no wake");
+      assert.equal(sqlite.prepare("SELECT title FROM videos WHERE id = ?").get(video.id).title,
+        "New video", label + ": no video overwrite");
+      assert.equal(sqlite.prepare("SELECT answer_text FROM video_custom_answers WHERE video_id = ?").get(video.id).answer_text,
+        "Answer", label + ": no answer overwrite");
+    }
+    let extraProofRows = 0;
+    // An oversized related snapshot is rejected in the consolidated read.
+    sqlite.prepare("UPDATE video_members SET name = ? WHERE id = ?")
+      .run("x".repeat(128 * 1024), "member-video");
+    await expectReplacementReadRefusal("oversized related snapshot");
+    sqlite.prepare("UPDATE video_members SET name = ? WHERE id = ?").run("Creator", "member-video");
+    // A bounded row count sentinel must also reject a fresh replacement.
+    const addRelation = sqlite.prepare("INSERT INTO video_events(video_id, event_id) VALUES (?, ?)");
+    for (let i = 0; i < 16; i++) addRelation.run(video.id, "extra-relation-" + i);
+    await expectReplacementReadRefusal("17 existing relations");
+    sqlite.prepare("DELETE FROM video_events WHERE video_id = ? AND event_id LIKE 'extra-relation-%'").run(video.id);
+    // Fresh reads must reject both tied and later non-import proofs, not
+    // merely rely on a transaction-time check for after-read races.
+    cloneAnswerProof.run("replacement-read-competing-proof", answerProofId);
+    extraProofRows = 1;
+    await expectReplacementReadRefusal("tied latest answer proof");
+    sqlite.prepare("UPDATE audit_logs SET created_at = created_at + 1, context = ? WHERE id = ?")
+      .run("manual-edit", "replacement-read-competing-proof");
+    await expectReplacementReadRefusal("newer non-import answer proof");
+    sqlite.prepare("DELETE FROM audit_logs WHERE id = ?").run("replacement-read-competing-proof");
+    extraProofRows = 0;
+
     replacementRace = true;
     const refused = await request(replacement.form());
     assert.equal(refused.status, 409, "concurrent unmanaged edit must refuse replacement");
@@ -2023,9 +2070,13 @@ test("MIG-0645 U02al Hono: new video rows, provenance, queue and receipt are ato
     assert.equal(wakes.length, beforeReplaceWakes);
     const beforeReplace = stats.batches;
     const beforeReplaceReads = stats.reads;
+    // A failed final R2 CAS must leave the committed D1 receipt available
+    // for recovery without rereading or reapplying canonical data.
+    failNextCompletion();
     const accepted = await request(replacement.form());
-    assert.equal(accepted.status, 200, JSON.stringify(await accepted.clone().json()));
+    assert.equal(accepted.status, 503, JSON.stringify(await accepted.clone().json()));
     const result = await accepted.json();
+    assert.equal(result.kind, "committed_progress_pending");
     assert.equal(result.result.replaced.videos, 1);
     assert.equal(result.result.complete, true);
     assert.equal(stats.batches - beforeReplace, 1);
@@ -2045,6 +2096,27 @@ test("MIG-0645 U02al Hono: new video rows, provenance, queue and receipt are ato
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE table_name = 'video_custom_answers' AND operation = 'UPDATE'").get().n, 1);
     assert.equal((await readLegacyVideoReplacementSnapshot(serverDb, video.id)).beforeAnswers[0].answer_text, "Replacement answer");
     assert.deepEqual(wakes.slice(beforeReplaceWakes).map((message) => message.kind), ["static_rebuild_available", "youtube_sync_pending"]);
+    // A replay must ignore current support and replacement snapshots even
+    // if they now exceed the fresh-write cap or no longer match the proof.
+    const queueAfterCommit = sqlite.prepare("SELECT * FROM static_rebuild_queue ORDER BY id").all();
+    const auditCountAfterCommit = sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n;
+    sqlite.prepare("UPDATE video_members SET name = ? WHERE id = ?")
+      .run("x".repeat(128 * 1024), "member-video");
+    sqlite.prepare("UPDATE x_users SET profile_text = ? WHERE id = ?")
+      .run("x".repeat(128 * 1024), "creator-video");
+    const replacementReplayReads = stats.reads;
+    const recovered = await request(replacement.form());
+    assert.equal(recovered.status, 200, JSON.stringify(await recovered.clone().json()));
+    const recoveredBody = await recovered.json();
+    assert.equal(recoveredBody.result.replaced.videos, 1);
+    assert.equal(recoveredBody.result.complete, true);
+    assert.equal(stats.reads - replacementReplayReads, 3, "replacement receipt recovery uses one stage read");
+    assert.equal(stats.batches - beforeReplace, 1, "committed replacement must not repeat");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, auditCountAfterCommit);
+    assert.deepEqual(sqlite.prepare("SELECT * FROM static_rebuild_queue ORDER BY id").all(), queueAfterCommit);
+    assert.equal(wakes.length, beforeReplaceWakes + 2);
+    sqlite.prepare("UPDATE video_members SET name = ? WHERE id = ?").run("Creator", "member-video");
+    sqlite.prepare("UPDATE x_users SET profile_text = ? WHERE id = ?").run("Fallback profile", "creator-video");
     assert.equal((await request(replacement.form())).status, 200);
     assert.equal(stats.batches - beforeReplace, 1, "completed replacement must not repeat");
     assert.equal(wakes.length, beforeReplaceWakes + 2);
