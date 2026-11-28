@@ -675,6 +675,70 @@ test("SEC-800: CSV stored duplicate and atomic-budget denials preserve CURRENT m
   }
 });
 
+test("SEC-800: SA-031 canonical lookup blocks ambiguous legacy aliases and adopts one alias", async () => {
+  const snapshot = (s) => ["event_staff", "x_users", "audit_logs", "static_rebuild_queue", "public_build_state"]
+    .map((table) => s.sqlite.prepare('SELECT * FROM "' + table + '" ORDER BY id').all());
+  const duplicateCases = [
+    ["alias-only collision", [["s-alias-a", "@CSV_STAFF"], ["s-alias-b", "@csv_staff"]]],
+    ["exact plus legacy alias collision", [["s-canonical", "csv_staff"], ["s-alias", "@CSV_STAFF"]]],
+  ];
+  for (const [label, rows] of duplicateCases) {
+    const s = setup();
+    try {
+      s.sqlite.exec("INSERT INTO x_users (id, x_name, approval_status) VALUES ('csv_staff', 'CSV Staff', 'pending')");
+      const insert = s.sqlite.prepare(
+        "INSERT INTO event_staff (id, event_id, x_user_id, display_name, permission_preset, is_public, created_at, updated_at) VALUES (?, 'ev-1', ?, ?, 'public_staff', 0, 1, 1)",
+      );
+      for (const [id, xUserId] of rows) insert.run(id, xUserId, id);
+      const before = snapshot(s);
+      await withThrowingDiagnostics(async ({ errors, warnings }) => {
+        const result = await s.send("POST", "/", { ...upsert, x_user_id: "csv_staff" });
+        assert.equal(result.status, 409, label + ": " + await result.clone().text());
+        assert.equal(result.headers.get("cache-control"), "private, no-store", label);
+        assert.deepEqual(await result.json(), {
+          ok: false, message: "同じX IDを指す既存スタッフ行が複数あります。",
+        }, label);
+        assert.deepEqual(errors, [], label);
+        assert.equal(warnings(), 0, label);
+      });
+      assert.equal(s.receipt.readFaults, 0, label);
+      assert.equal(s.stats.batches, 0, label);
+      assert.deepEqual(snapshot(s), before, label);
+    } finally {
+      s.sqlite.close();
+    }
+  }
+
+  const legacy = setup();
+  try {
+    legacy.sqlite.exec(`
+      INSERT INTO x_users (id, x_name, approval_status)
+      VALUES ('csv_staff', 'CSV Staff', 'pending');
+      INSERT INTO event_staff (id, event_id, x_user_id, display_name, permission_preset, is_public, created_at, updated_at)
+      VALUES ('s-legacy', 'ev-1', '@CSV_STAFF', 'Legacy', 'public_staff', 0, 1, 1);
+    `);
+    const before = snapshot(legacy);
+    await withThrowingDiagnostics(async ({ errors, warnings }) => {
+      const result = await legacy.send("POST", "/", { ...upsert, x_user_id: "csv_staff" });
+      assert.equal(result.status, 200, await result.clone().text());
+      assert.equal(result.headers.get("cache-control"), "private, no-store");
+      assert.deepEqual(await result.json(), { ok: true, pendingPublicReflection: true });
+      assert.deepEqual(errors, []);
+      assert.equal(warnings(), 0);
+    });
+    const row = legacy.sqlite.prepare("SELECT id, x_user_id, display_name FROM event_staff WHERE id = 's-legacy'").get();
+    assert.deepEqual(row, { id: "s-legacy", x_user_id: "csv_staff", display_name: "Added" });
+    assert.equal(legacy.count("event_staff"), 2);
+    assert.equal(legacy.count("x_users"), 2);
+    assert.equal(legacy.count("audit_logs"), before[2].length + 1);
+    assert.ok(legacy.count("static_rebuild_queue") > before[3].length);
+    assert.equal(legacy.receipt.readFaults, 0);
+    assert.ok(legacy.stats.batches >= 1);
+  } finally {
+    legacy.sqlite.close();
+  }
+});
+
 test("SEC-800: SA-031 blank public role labels preserve CURRENT storage and audit snapshots", async () => {
   const cases = [
     [undefined, null],
