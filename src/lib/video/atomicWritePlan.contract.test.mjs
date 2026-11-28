@@ -9,6 +9,7 @@ const submit = read("../actions/video/submitSlotVideo.ts");
 const updateVideoAction = read("../actions/video/updateVideo.ts");
 const update = read("./videoSavePlan.ts");
 const adminMembers = read("../actions/video/adminMembers.ts");
+const adminMemberTargets = read("../../../packages/server-core/src/video/adminMemberRebuildTargets.ts");
 const helperSources = [
   read("./syncVideoEvents.ts"),
   read("./replaceVideoMembers.ts"),
@@ -112,9 +113,10 @@ test("更新・削除planはscalar CASまたは集合CASを利用する", () => 
 test("大規模合作はJSON1一括INSERTでbind上限を回避する", () => {
   const limits = read("../../../packages/domain/src/video/atomicLimits.ts");
   const members =
-    read("./replaceVideoMembers.ts");
+    read("../../../packages/server-core/src/video/replaceVideoMembers.ts");
   const memberSet =
     read("../../../packages/server-core/src/video/memberSetSnapshot.ts");
+  const mutation = read("../../../packages/server-core/src/video/memberWriteMutationBatch.ts");
 
   assert.match(
     limits,
@@ -122,6 +124,10 @@ test("大規模合作はJSON1一括INSERTでbind上限を回避する", () => {
   );
   assert.match(
     members,
+    /buildVideoMemberWriteMutationBatch/,
+  );
+  assert.match(
+    mutation,
     /buildVideoMemberBulkInsertSql/,
   );
   assert.match(
@@ -156,8 +162,10 @@ test("作品保存は x_users プロフィール更新 plan を呼ばない", ()
 });
 
 test("メンバー更新は users_index を enqueue する", () => {
-  assert.match(adminMembers, /targetType: "users_index"/);
-  assert.match(adminMembers, /reason: "video_members_update"/);
+  assert.match(adminMembers, /adminVideoMembersRebuildTargets\(\{/);
+  assert.match(adminMembers, /buildStaticRebuildQueueBatch\(db, queueItems\)/);
+  assert.match(adminMemberTargets, /targetType: "users_index"/);
+  assert.match(adminMemberTargets, /reason: "video_members_update"/);
   assert.match(update, /creatorAggregationChanged/);
   assert.match(update, /video_members_update/);
 });
@@ -196,4 +204,16 @@ test("主要行の監査は投影ではなく完全なbefore/after rowを保持�
   assert.match(submit, /after: \{ \.\.\.videoAfter \}/);
   assert.match(update, /before: \{ \.\.\.plan\.target \}/);
   assert.match(update, /const after = \{ \.\.\.plan\.target, \.\.\.payload \}/);
+});
+
+test("MIG-0650 U03w Next video atomic budget uses the shared server-core inspector", () => {
+  const next = read("./atomicWritePlan.ts");
+  const core = read("../../../packages/server-core/src/video/videoAtomicBudget.ts");
+  const pkg = JSON.parse(read("../../../packages/server-core/package.json"));
+  assert.match(next, /from "@flamenode\/server-core\/video\/videoAtomicBudget"/);
+  assert.match(next, /export \{ inspectVideoAtomicWritePlanBudget \}/);
+  assert.match(next, /const budget = inspectVideoAtomicWritePlanBudget\(plan\)/);
+  assert.match(core, /planD1AuditMutationBudget\(\{/);
+  assert.match(core, /callerQueryCount: options\.callerQueryCount/);
+  assert.equal(pkg.exports["./video/videoAtomicBudget"], "./src/video/videoAtomicBudget.ts");
 });

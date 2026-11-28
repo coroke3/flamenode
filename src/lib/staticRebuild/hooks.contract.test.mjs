@@ -109,29 +109,32 @@ test("本人X IDプロフィール・アイコン更新成功時に静的再生�
 });
 
 test("member_suggestions再生成フックは必須mutationへ接続されている", async () => {
-  const [merge, adminMembers, videoSavePlan, createFreeVideo, submitSlotVideo, collabPerms] =
+  const [merge, adminMembers, adminMemberTargets, videoSavePlan, createFreeVideo, submitSlotVideo, collabPerms, permissionRebuild] =
     await Promise.all([
       readFile(new URL("../../../packages/server-core/src/xid/merge.ts", import.meta.url), "utf8"),
       readFile(new URL("../actions/video/adminMembers.ts", import.meta.url), "utf8"),
+      readFile(new URL("../../../packages/server-core/src/video/adminMemberRebuildTargets.ts", import.meta.url), "utf8"),
       readFile(new URL("../video/videoSavePlan.ts", import.meta.url), "utf8"),
       readFile(new URL("../actions/video/createFreeVideo.ts", import.meta.url), "utf8"),
       readFile(new URL("../actions/video/submitSlotVideo.ts", import.meta.url), "utf8"),
       readFile(new URL("../actions/video-collab-perms.ts", import.meta.url), "utf8"),
+      readFile(new URL("../../../packages/server-core/src/video/permissionRebuildTargets.ts", import.meta.url), "utf8"),
     ]);
   // hooks側のhelperと各mutation site。
   assert.match(hooks, /export function memberSuggestionsTarget/);
   assert.match(hooks, /targetType: "member_suggestions"/);
   assert.match(merge, /targetType: "member_suggestions"/);
-  assert.match(adminMembers, /"member_suggestions"/);
-  assert.match(adminMembers, /targetType: "event_release"/);
+  assert.match(adminMembers, /adminVideoMembersRebuildTargets\(\{/);
+  assert.match(adminMemberTargets, /targetType: "member_suggestions"/);
+  assert.match(adminMemberTargets, /targetType: "event_release"/);
   assert.match(videoSavePlan, /memberSuggestionsTarget\(/);
   assert.match(createFreeVideo, /"member_suggestions"/);
   assert.match(submitSlotVideo, /"member_suggestions"/);
   // 権限single/batch actionは同一atomic write内でindex再生成をenqueueする。
-  assert.match(collabPerms, /async function applyPermissionIntentsToVideo[\s\S]*memberSuggestionsTarget\("video_permissions_batch"\)/);
-  assert.match(collabPerms, /memberSuggestionsTarget\("video_permissions_batch"\)/);
+  assert.match(collabPerms, /async function applyPermissionIntentsToVideo[\s\S]*permissionRebuildTargets\(\{/);
+  assert.match(permissionRebuild, /memberSuggestionsTarget\("video_permissions_batch"\)/);
   assert.match(collabPerms, /loadVideoRebuildEventIds/);
-  assert.match(collabPerms, /targetType: "event_release"/);
+  assert.match(permissionRebuild, /targetType: "event_release"/);
 });
 
 test("member_suggestions targetIdは常にglobalでqueue dedupeに任せる", () => {
