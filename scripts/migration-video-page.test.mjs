@@ -72,6 +72,16 @@ function build(videos, over = {}) {
     fs.writeFileSync(path.join(dir, key), JSON.stringify(envelope(key, p, o)));
     keys.push(key);
   }
+  for (const [eventId, eventPayload] of over.events ?? []) {
+    const eventKey = `snapshot/event-detail/${eventId}.json`;
+    fs.mkdirSync(path.dirname(path.join(dir, eventKey)), { recursive: true });
+    fs.writeFileSync(path.join(dir, eventKey), JSON.stringify(envelope(eventKey, eventPayload)));
+    keys.push(eventKey);
+  }
+  for (const id of over.manifestOnlyEventIds ?? []) keys.push(`snapshot/event-detail/${id}.json`);
+  // Model an already-withdrawn public detail entry: in the same generation's
+  // manifest but deny-listed, so no new HTML is built for that video.
+  for (const id of over.manifestOnlyVideoIds ?? []) keys.push(keyOf(id));
   fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify({ schemaVersion: 1, generation: "g1", allowedKeys: keys, blockedKeys: over.blocked ?? [] }));
   const env = { ...process.env, FLAMENODE_SNAPSHOT_DIR: dir, FLAMENODE_SNAPSHOT_MANIFEST_FILE: path.join(dir, "manifest.json"), FLAMENODE_SNAPSHOT_GENERATION: "g1" };
   try {
@@ -87,7 +97,24 @@ const dom = (r, file) => new JSDOM(fs.readFileSync(path.join(r.out, file), "utf-
 test("snapshot build: YouTube-id and internal-id pages, head, JSON-LD and body follow CURRENT", { skip: skipUi }, () => {
   // The other pages of the build need no snapshot unless the env is set; the video build alone must be accepted
   // by every page, so give the site's other readers an empty-by-design environment (about-stats is optional).
-  const r = build([["vid1", payload()]]);
+  const mainPayload = payload();
+  // The complete public manifest explicitly allows each related detail page.
+  // A stale reference with no page in the manifest must not be exposed.
+  const related = mainPayload.related_videos.map((item) => [item.id, payload({
+    video: {
+      id: item.id, title: item.title, creator_display_name: item.display_name,
+      youtube_video_id: item.youtube_video_id, primary_event_id: null,
+    },
+    top: { related_videos: [], related_reserve: [], related_random_reserve: [] },
+  })]);
+  const r = build([["vid1", mainPayload], ...related], {
+    // Both public event references have current verified detail snapshots.
+    // Without these, the SSG must no longer trust the old video's event labels.
+    events: [
+      ["ev1", { event: { id: "ev1", title: "イベント1", visibility_status: "public" } }],
+      ["ev2", { event: { id: "ev2", title: "イベント2", visibility_status: "public" } }],
+    ],
+  });
   try {
     assert.equal(r.error, null, r.error ?? "");
     const doc = dom(r, "AAAAAAAAA01/index.html");
@@ -121,7 +148,17 @@ test("snapshot build: YouTube-id and internal-id pages, head, JSON-LD and body f
     assert.match(text(main), /公開 \d{4}\/\d{2}\/\d{2}/);
     assert.match(text(main), /曲名 \/ 歌手/);
     assert.match(text(main), /After Effects, Blender/);
-    assert.equal(main.querySelectorAll(".vd-mrow").length, 2);
+    // T10: member-present visual fixture must preserve public-profile privacy and chapter ownership.
+    const memberRows = [...main.querySelectorAll(".vd-mrow")];
+    assert.equal(memberRows.length, 2, "both published members render");
+    const memberOne = memberRows.find((row) => text(row).includes("メンバー1"));
+    const memberTwo = memberRows.find((row) => text(row).includes("メンバー2"));
+    assert.ok(memberOne, "public-profile member is visible");
+    assert.ok(memberTwo, "member without a published profile is still credited");
+    assert.ok(memberOne.querySelector('a[href="/user/member_one"]'), "public profile remains navigable");
+    assert.equal(memberTwo.querySelector('a[href^="/user/"]'), null, "private profile is never linked");
+    assert.match(text(memberOne), /映像/);
+    assert.match(text(memberTwo), /音/);
     assert.deepEqual([...doc.querySelectorAll(".vd-chapter-time")].map(text), ["0:24", "1:10"]);
     assert.equal(doc.querySelectorAll(".vd-related a").length, 12, "CURRENT shows 12 related");
     assert.match(text(main.querySelector(".vd-like-count")), /7/);
@@ -145,6 +182,7 @@ test("T01: a video id equal to a fixed route or asset path fails the build (rout
 test("T02: non-public, tampered or blocked snapshots fail the build instead of publishing", { skip: skipUi }, () => {
   for (const [name, videos, over] of [
     ["private video", [["vid1", payload({ video: { visibility_status: "private" } })]], {}],
+    ["valid-digest mismatched video id", [["vid1", payload({ video: { id: "different-video" } })]], {}],
     ["hash mismatch", [["vid1", payload(), { sha256: "a".repeat(64) }]], {}],
     ["nonpublic envelope", [["vid1", payload(), { visibility: "private" }]], {}],
     ["blocked key", [["vid1", payload()]], { blocked: [keyOf("vid1")] }],
@@ -156,6 +194,7 @@ test("T02: non-public, tampered or blocked snapshots fail the build instead of p
         assert.equal(fs.existsSync(path.join(r.out, "AAAAAAAAA01/index.html")), false);
       } else {
         assert.notEqual(r.error, null, `${name} must fail`);
+        if (name === "valid-digest mismatched video id") assert.match(r.error, /Video snapshot|VIDEO_DETAIL_INVALID/);
       }
     } finally {
       clean(r);
@@ -181,5 +220,430 @@ test("snapshot env: a partly set env fails the build instead of falling back to 
     }
   } finally {
     fs.rmSync(out, { recursive: true, force: true });
+  }
+});
+
+const playlistEvent = (visibility = "public", playlistId = "PLabcdefghijklmnop", id = "ev1") => ({
+  event: { id, title: `イベント${id}`, visibility_status: visibility, youtube_playlist_id: playlistId },
+});
+const playlistLinks = (r) => [...dom(r, "AAAAAAAAA01/index.html").querySelectorAll('main a[href^="https://www.youtube.com/playlist?list="]')]
+  .map((a) => a.getAttribute("href"));
+
+test("T08: future scheduled public primary event exposes the verified playlist; past video does not", { skip: skipUi }, () => {
+  for (const [scheduledTime, expected] of [
+    [NOW + 7 * D, ["https://www.youtube.com/playlist?list=PLabcdefghijklmnop"]],
+    [String(NOW + 7 * D), ["https://www.youtube.com/playlist?list=PLabcdefghijklmnop"]],
+    [NOW - 7 * D, []],
+  ]) {
+    const r = build([["vid1", payload({ video: { scheduled_time: scheduledTime } })]], {
+      events: [["ev1", playlistEvent()]],
+    });
+    try {
+      assert.equal(r.error, null, r.error ?? "");
+      assert.deepEqual(playlistLinks(r), expected);
+      assert.deepEqual(
+        [...dom(r, "vid1/index.html").querySelectorAll('main a[href^="https://www.youtube.com/playlist?list="]')].map((a) => a.getAttribute("href")),
+        expected,
+        "canonical and internal-id alias display the same playlist",
+      );
+      assert.equal(page.includes("loadPublicEventYoutubePlaylistIdR2Only"), true, "CURRENT uses verified event-base R2 reader");
+    } finally {
+      clean(r);
+    }
+  }
+});
+
+test("T09: missing, non-public, mismatched and invalid event playlist never leaks a link", { skip: skipUi }, () => {
+  for (const [label, events] of [
+    ["missing", []],
+    ["manifest lists missing object", []],
+    ["non-public", [["ev1", playlistEvent("private")]]],
+    ["wrong event ID", [["ev1", playlistEvent("public", "PLabcdefghijklmnop", "another")]]],
+    ["invalid playlist ID", [["ev1", playlistEvent("public", "INVALID!")]]],
+  ]) {
+    const r = build([["vid1", payload({ video: { scheduled_time: NOW + 7 * D } })]], {
+      events,
+      manifestOnlyEventIds: label === "manifest lists missing object" ? ["ev1"] : [],
+    });
+    try {
+      assert.equal(r.error, null, `${label}: ${r.error ?? ""}`);
+      assert.deepEqual(playlistLinks(r), [], label);
+    } finally {
+      clean(r);
+    }
+  }
+});
+
+test("T09 privacy: a stale video cannot publish a withdrawn event title, icon or link", { skip: skipUi }, () => {
+  const stale = payload({ video: { scheduled_time: NOW + 7 * D } });
+  stale.public_events[0].title = "PRIVATE_EVENT_CANARY";
+  stale.public_events[0].icon_url = "https://example.com/private-event-icon-canary.png";
+  stale.public_events[1].title = "ALLOWED_EVENT_CANARY";
+  const allowed = ["ev2", playlistEvent("public", null, "ev2")];
+  const scenarios = [
+    ["blocked manifest key", {
+      events: [["ev1", playlistEvent()], allowed],
+      blocked: ["snapshot/event-detail/ev1.json"],
+    }],
+    ["not in public allowlist", { events: [allowed] }],
+    ["allowed manifest key with missing body", {
+      events: [allowed],
+      manifestOnlyEventIds: ["ev1"],
+    }],
+    ["non-public event detail", {
+      events: [["ev1", playlistEvent("private")], allowed],
+    }],
+    ["event detail ID mismatch", {
+      events: [["ev1", playlistEvent("public", "PLabcdefghijklmnop", "another-event")], allowed],
+    }],
+    ["invalid public event shape", {
+      events: [["ev1", { event: { id: "ev1", visibility_status: "public" } }], allowed],
+    }],
+  ];
+  for (const [label, settings] of scenarios) {
+    const r = build([["vid1", stale]], settings);
+    try {
+      assert.equal(r.error, null, `${label}: ${r.error ?? ""}`);
+      for (const file of ["AAAAAAAAA01/index.html", "vid1/index.html"]) {
+        const doc = dom(r, file);
+        const markup = doc.body.innerHTML;
+        assert.doesNotMatch(markup, /PRIVATE_EVENT_CANARY|private-event-icon-canary/, label);
+        assert.equal(doc.querySelector('a[href="/event/ev1"]'), null, label);
+        assert.ok(doc.querySelector('a[href="/event/ev2"]'), `${label}: surviving public event remains linked`);
+        assert.match(doc.querySelector("main").textContent, /ALLOWED_EVENT_CANARY/, label);
+        assert.equal(
+          doc.querySelector('main a[href^="https://www.youtube.com/playlist?list="]'),
+          null,
+          `${label}: a fallback display event cannot inherit the withdrawn primary playlist`,
+        );
+      }
+    } finally {
+      clean(r);
+    }
+  }
+});
+
+test("T09: the playlist gate uses the normalized public video fields", { skip: skipUi }, () => {
+  for (const [label, fields, expected] of [
+    ["trimmed primary ID", { primary_event_id: " ev1 ", scheduled_time: NOW + 7 * D },
+      ["https://www.youtube.com/playlist?list=PLabcdefghijklmnop"]],
+    ["invalid schedule", { primary_event_id: "ev1", scheduled_time: "not-a-date" }, []],
+    ["missing primary ID", { primary_event_id: "   ", scheduled_time: NOW + 7 * D }, []],
+    ["numeric primary ID is absent", { primary_event_id: 12345, scheduled_time: NOW + 7 * D }, []],
+    ["array primary ID is absent", { primary_event_id: ["ev1"], scheduled_time: NOW + 7 * D }, []],
+    ["object primary ID is absent", { primary_event_id: { id: "ev1" }, scheduled_time: NOW + 7 * D }, []],
+    ["array schedule is invalid", { primary_event_id: "ev1", scheduled_time: [NOW + 7 * D] }, []],
+    ["object schedule is invalid", { primary_event_id: "ev1", scheduled_time: { value: NOW + 7 * D } }, []],
+    ["nonfinite schedule", { primary_event_id: "ev1", scheduled_time: "Infinity" }, []],
+    ["past float schedule", { primary_event_id: "ev1", scheduled_time: NOW - 0.4 }, []],
+    ["same-second past fractional schedule", { primary_event_id: "ev1", scheduled_time: NOW - 0.0001 }, []],
+    ["fractional timestamp in current second is not scheduled", { primary_event_id: "ev1", scheduled_time: NOW + 0.0001 }, []],
+    ["fractional timestamp beyond the next second is scheduled", { primary_event_id: "ev1", scheduled_time: NOW + 7 * D + 0.25 },
+      ["https://www.youtube.com/playlist?list=PLabcdefghijklmnop"]],
+    ["overflow timestamp is not a release", { primary_event_id: "ev1", scheduled_time: 1e16 }, []],
+  ]) {
+    const r = build([["vid1", payload({ video: fields })]], { events: [["ev1", playlistEvent()]] });
+    try {
+      assert.equal(r.error, null, `${label}: ${r.error ?? ""}`);
+      assert.deepEqual(playlistLinks(r), expected, label);
+    } finally { clean(r); }
+  }
+});
+
+test("T09: a fallback display event must never inherit an unmatched primary-event playlist", { skip: skipUi }, () => {
+  for (const primaryEventId of ["unavailable-primary-event", null]) {
+    const r = build([["vid1", payload({ video: {
+      primary_event_id: primaryEventId,
+      scheduled_time: NOW + 7 * D,
+    } })]], { events: [["ev1", playlistEvent()]] });
+    try {
+      assert.equal(r.error, null, r.error ?? "");
+      assert.deepEqual(playlistLinks(r), [], "only the video-selected public primary event may supply a playlist");
+      assert.equal(dom(r, "AAAAAAAAA01/index.html").querySelector('a[href="/event/ev1"]') !== null, true,
+        "the display fallback remains available without a playlist");
+    } finally {
+      clean(r);
+    }
+  }
+});
+
+test("T09: an allowed event snapshot with invalid UTF-8 or malformed JSON fails closed", { skip: skipUi }, () => {
+  const r = build([["vid1", payload({ video: { scheduled_time: NOW + 7 * D } })]], {
+    events: [["ev1", playlistEvent()]],
+  });
+  try {
+    assert.equal(r.error, null, r.error ?? "");
+    const eventKey = "snapshot/event-detail/ev1.json";
+    const file = path.join(r.dir, eventKey);
+    const out = fs.mkdtempSync(path.join(os.tmpdir(), "fn-vid-invalid-"));
+    try {
+      // Source corruption must not be mistaken for an optional missing or withdrawn public event.
+      for (const bytes of [Buffer.from([0xc3, 0x28]), Buffer.from("{broken-json")]) {
+        fs.writeFileSync(file, bytes);
+        let error = null;
+        try {
+          execFileSync(process.execPath, [path.resolve("node_modules/astro/astro.js"), "build", "--outDir", out], {
+            cwd: path.resolve("apps/site"),
+            env: {
+              ...process.env, FLAMENODE_SNAPSHOT_DIR: r.dir,
+              FLAMENODE_SNAPSHOT_MANIFEST_FILE: path.join(r.dir, "manifest.json"),
+              FLAMENODE_SNAPSHOT_GENERATION: "g1",
+            },
+            stdio: "pipe",
+          });
+        } catch (e) { error = `${e.stdout ?? ""}${e.stderr ?? ""}`; }
+        assert.notEqual(error, null, "corrupt event payload cannot publish a partial page");
+        assert.match(error, /snapshot|JSON|UTF-8|INVALID_JSON/i);
+      }
+    } finally { fs.rmSync(out, { recursive: true, force: true }); }
+  } finally { clean(r); }
+});
+
+test("T09: a manifest-allowed but digest-tampered event snapshot fails closed", { skip: skipUi }, () => {
+  const r = build([["vid1", payload({ video: { scheduled_time: NOW + 7 * D } })]], {
+    events: [["ev1", playlistEvent()]],
+    // Tampering is modeled by overwriting an already verified event object in its own snapshot.
+  });
+  try {
+    assert.equal(r.error, null, r.error ?? "");
+    const eventKey = "snapshot/event-detail/ev1.json";
+    const file = path.join(r.dir, eventKey);
+    const envelopeData = JSON.parse(fs.readFileSync(file, "utf-8"));
+    envelopeData.payload.event.youtube_playlist_id = "DIFFERENT_PLAYLIST_ID";
+    fs.writeFileSync(file, JSON.stringify(envelopeData));
+    // A fresh build with the tampered envelope must reject the snapshot rather than expose stale data.
+    const out = fs.mkdtempSync(path.join(os.tmpdir(), "fn-vid-tamper-"));
+    try {
+      let error = null;
+      try {
+        execFileSync(process.execPath, [path.resolve("node_modules/astro/astro.js"), "build", "--outDir", out], {
+          cwd: path.resolve("apps/site"),
+          env: {
+            ...process.env, FLAMENODE_SNAPSHOT_DIR: r.dir, FLAMENODE_SNAPSHOT_MANIFEST_FILE: path.join(r.dir, "manifest.json"),
+            FLAMENODE_SNAPSHOT_GENERATION: "g1",
+          },
+          stdio: "pipe",
+        });
+      } catch (e) { error = `${e.stdout ?? ""}${e.stderr ?? ""}`; }
+      assert.notEqual(error, null);
+      assert.match(error, /digest|hash|checksum|sha256|snapshot/i);
+    } finally { fs.rmSync(out, { recursive: true, force: true }); }
+  } finally { clean(r); }
+});
+
+
+test("U12: built default video fixture contains linked and unlinked members for responsive evidence", { skip: skipUi }, () => {
+  // This checks the same HTML served to the local Playwright screenshot tool;
+  // it is NOT a screenshot/visual comparison with the approved design.
+  const file = path.resolve("apps/site/dist/dKw1xV41f8s/index.html");
+  assert.ok(fs.existsSync(file), "fixture Astro site must be built for U12 preflight");
+  const doc = new JSDOM(fs.readFileSync(file, "utf-8")).window.document;
+  const rows = [...doc.querySelectorAll("tr.vd-mrow")];
+  assert.equal(rows.length, 2, "the public video fixture must have both types of member");
+  assert.match(text(rows[0]), /映像担当（公開）/);
+  assert.match(text(rows[1]), /音楽担当（非公開）/);
+  assert.ok(rows[0].querySelector('a[href="/user/minimal_user"]'),
+    "public-profile member is linked");
+  assert.equal(rows[1].querySelector('a[href^="/user/"]'), null,
+    "member without an approved profile must not get an internal user link");
+  assert.match(text(rows[0]), /0:24/, "member chapter is present in rendered SSR markup");
+  assert.deepEqual(
+    [...doc.querySelectorAll(".vd-chapter-time")].map(text),
+    ["0:24", "1:10", "1:36"],
+    "member and public chapters are sorted in the real SSR snapshot shape",
+  );
+  const related = doc.querySelectorAll('.vd-related a[href="/vid-bbb"]');
+  assert.equal(related.length, 1, "public related item points to the built no-YouTube sibling");
+  assert.equal(text(related[0].querySelector(".fn-row__title")), "模範囚");
+  assert.match(text(doc.querySelector(".vd-about")), /After Effects, Blender/);
+  assert.ok(fs.existsSync(path.resolve("apps/site/dist/vid-bbb/index.html")),
+    "related public-video link must resolve to a built fixture route");
+  // A no-YouTube video must not become a fabricated video player merely
+  // because the representative YouTube fixture has public collaborators.
+  const noYoutube = new JSDOM(
+    fs.readFileSync(path.resolve("apps/site/dist/vid-bbb/index.html"), "utf-8"),
+  ).window.document;
+  assert.match(text(noYoutube.querySelector(".vd-player-empty")), /YouTube動画は未登録/);
+  assert.equal(noYoutube.querySelector(".vd-members"), null);
+});
+
+
+test("U12: forged public-profile flags cannot make malformed X handles into navigable links", { skip: skipUi }, () => {
+  const data = payload({
+    video: { creator_x_user_id: "../admin", creator_has_public_profile: true,
+      creator_youtube_channel_url: "https://www.youtube.com.evil.example/@fake",
+      music_reference_url: "javascript:alert(1)" },
+    top: {
+      public_members: [
+        { id: "member-bad", display_name: "不正ID", x_user_id: "../dashboard", role_label: "動画", has_public_profile: true },
+        { id: "member-valid", display_name: "有効ID", x_user_id: "@VALID_MEMBER", role_label: "音楽", has_public_profile: true },
+      ],
+      member_chapters: [],
+    },
+  });
+  const r = build([["vid1", data]]);
+  try {
+    assert.equal(r.error, null, r.error ?? "");
+    const doc = dom(r, "AAAAAAAAA01/index.html");
+    const creator = doc.querySelector(".vd-creator");
+    assert.ok(creator, "creator display is preserved when its X handle is invalid");
+    assert.equal(creator.tagName, "SPAN", "malformed creator X handle cannot authorize /user/ href");
+    assert.equal(doc.querySelector('.vd-creator-row a[href^="https://x.com/"]'), null,
+      "malformed creator handle cannot generate an external X URL");
+    assert.equal(doc.querySelector('a[href="https://www.youtube.com.evil.example/@fake"]'), null,
+      "a forged YouTube channel host cannot appear in an outgoing link");
+    assert.equal(doc.querySelector('a[href^="javascript:"]'), null,
+      "music reference text cannot create a javascript URL in SSR output");
+    assert.match(text(doc.querySelector(".vd-about")), /曲名/,
+      "invalid music reference must not remove the visible attribution");
+    const ld = [...doc.querySelectorAll('script[type="application/ld+json"]')]
+      .map((script) => JSON.parse(script.textContent))
+      .find((item) => item["@type"] === "VideoObject");
+    assert.deepEqual(ld.author, { "@type": "Person", name: "作者" },
+      "structured VideoObject author cannot publish a malformed internal profile URL");
+
+    const members = [...doc.querySelectorAll("tr.vd-mrow")];
+    assert.equal(members.length, 2, "invalid handles must not hide public member attribution");
+    assert.match(text(members[0]), /不正ID/);
+    assert.equal(members[0].querySelector('a[href^="/user/"]'), null,
+      "public-profile flag cannot authorize a traversal-like member handle");
+    assert.equal(members[0].querySelector('a[href^="https://x.com/"]'), null,
+      "invalid member handle must not generate an external X URL");
+    assert.ok(members[1].querySelector('a[href="/user/valid_member"]'),
+      "valid legacy @-prefixed handle is normalized for a public profile route");
+    assert.ok(members[1].querySelector('a[href="https://x.com/valid_member"]'),
+      "canonical valid member still gets an external X link");
+    assert.equal(doc.querySelector('a[href^="/user/.."]'), null,
+      "no traversal-like public profile link survives projection");
+  } finally {
+    clean(r);
+  }
+});
+
+
+test("U12 privacy and navigation: related cards require public targets and use their built canonical routes", { skip: skipUi }, () => {
+  const withdrawn = {
+    id: "withdrawn-video", title: "非公開へ変更した作品", youtube_video_id: "ZZZZZZZZZ00",
+    display_name: "非公開作成者",
+  };
+  const active = {
+    id: "public-related", title: "公開中の関連作品", youtube_video_id: "YYYYYYYYY00",
+    display_name: "公開作成者",
+  };
+  const omitted = {
+    id: "missing-video", title: "許可一覧にない作品", youtube_video_id: "XXXXXXXXX00",
+    display_name: "非公開に戻した作成者",
+  };
+  const noYoutube = {
+    id: "related-no-youtube", title: "動画IDを削除した関連作品",
+    youtube_video_id: "AAAAAAAAA01", display_name: "関連作成者",
+  };
+  const stable = {
+    id: "related-stable", title: "変更なしの関連作品",
+    youtube_video_id: "YYYYYYYYY00", display_name: "既存作成者",
+  };
+  const r = build([
+    ["vid1", payload({ top: {
+      related_videos: [withdrawn, omitted, active, noYoutube, stable],
+      related_reserve: [withdrawn, omitted],
+      related_random_ids: [withdrawn.id, omitted.id],
+      related_random_reserve: [omitted, withdrawn],
+    } })],
+    // The stale alias of active now belongs to stable. The no-YouTube
+    // card's old alias points to the source page itself.
+    ...[[active, "NNNNNNNNN00"], [noYoutube, null], [stable, stable.youtube_video_id]].map(([card, youtubeId]) => [
+      card.id, payload({
+        video: { id: card.id, title: card.title, youtube_video_id: youtubeId,
+          creator_display_name: card.display_name, primary_event_id: null },
+        top: { related_videos: [], related_reserve: [], related_random_reserve: [] },
+      }),
+    ]),
+  ], {
+    manifestOnlyVideoIds: [withdrawn.id],
+    blocked: [keyOf(withdrawn.id)],
+  });
+  try {
+    assert.equal(r.error, null, r.error ?? "");
+    for (const slug of ["AAAAAAAAA01", "vid1"]) {
+      const doc = dom(r, slug + "/index.html");
+      const related = [...doc.querySelectorAll(".vd-related a")];
+      assert.deepEqual(related.map((card) => card.getAttribute("href")),
+        ["/NNNNNNNNN00", "/related-no-youtube", "/YYYYYYYYY00"],
+        "the verified target's canonical alias, including the internal fallback, wins over stale card aliases");
+      assert.deepEqual(related.map((card) => text(card.querySelector(".fn-row__title"))),
+        [active.title, noYoutube.title, stable.title], "selection and attribution are preserved");
+      assert.deepEqual(related.map((card) => card.querySelector("img")?.getAttribute("src") ?? null),
+        ["/api/youtube-thumbnail/NNNNNNNNN00/mqdefault", null, "/api/youtube-thumbnail/YYYYYYYYY00/mqdefault"]);
+      for (const [index, card] of related.entries()) {
+        const target = dom(r, card.getAttribute("href").slice(1) + "/index.html");
+        assert.equal(text(target.querySelector("main h1")), [active.title, noYoutube.title, stable.title][index],
+          "each link resolves to the same intended entity, never the stale alias owner");
+      }
+      assert.doesNotMatch(doc.body.textContent, /非公開へ変更した作品|非公開作成者|許可一覧にない作品|非公開に戻した作成者/,
+        "blocked or not-allowed title/creator cannot leak into generated HTML");
+      assert.equal(doc.querySelector('a[href="/ZZZZZZZZZ00"]'), null,
+        "no related-card link may target a deny-listed video");
+      assert.equal(doc.querySelector('a[href="/XXXXXXXXX00"]'), null,
+        "an absent public manifest entry also blocks a stale related target");
+    }
+  } finally {
+    clean(r);
+  }
+});
+
+test("U12: public video external links use the CURRENT URL boundary in both built aliases", { skip: skipUi }, () => {
+  const music = "https://example.com/m";
+  const channel = "https://www.youtube.com/@creator";
+  const pad = (url, length) => url + "a".repeat(length - url.length);
+  const expand = (url) => url + "界".repeat(500 - url.length);
+  const cases = [
+    ["leading tab", "\t" + music, "\t" + channel, null, null],
+    ["trailing newline", music + "\n", channel + "\n", null, null],
+    ["surrounding CR", "\r" + music + "\r", "\r" + channel + "\r", null, null],
+    ["singleton array", [music], [channel], null, null],
+    ["malformed object", { toString: null }, { toString: null }, null, null],
+    ["absent URL", null, null, null, null],
+    ["leading NUL", "\u0000" + music, "\u0000" + channel, null, null],
+    ["trailing C0", music + "\u001f", channel + "\u001f", null, null],
+    ["embedded tab", "https://exa\tmple.com/m", "https://www.you\ttube.com/@creator", null, null],
+    ["embedded newline", "https://exa\nmple.com/m", "https://www.you\ntube.com/@creator", null, null],
+    ["backslash", "https://example.com\\m", "https://www.youtube.com\\@creator", null, null],
+    ["DEL", music + "\u007f", channel + "\u007f", null, null],
+    ["input above 500", pad(music, 501), pad(channel, 501), null, null],
+    ["serialized above 500", expand(music), expand(channel), null, null],
+    ["userinfo", "https://user@example.com/m", "https://user@www.youtube.com/@creator", null, null],
+    ["channel constraints", "http://example.com/m", "http://www.youtube.com/@creator", "http://example.com/m", null],
+    ["channel host", music, "https://www.youtube.com.evil.example/@creator", music, null],
+    ["valid surrounding space", "  " + music + "  ", "  " + channel + "  ", music, channel],
+    ["exactly 500", pad(music, 500), pad(channel, 500), pad(music, 500), pad(channel, 500)],
+    ["escaped path", "https://example.com/a%20b", "https://music.youtube.com/@creator", "https://example.com/a%20b", "https://music.youtube.com/@creator"],
+  ];
+  const inputs = cases.map(([, musicUrl, channelUrl], i) => {
+    const id = "url-case-" + i;
+    const youtubeId = "URLCASE" + String(i).padStart(4, "0");
+    return [id, payload({
+      video: {
+        id, youtube_video_id: youtubeId, primary_event_id: null,
+        music_reference_url: musicUrl, creator_youtube_channel_url: channelUrl,
+      },
+      top: { event_ids: [], public_events: [], related_videos: [], related_reserve: [], related_random_reserve: [] },
+    })];
+  });
+  const r = build(inputs);
+  try {
+    assert.equal(r.error, null, r.error ?? "");
+    for (const [i, [label, , , expectedMusic, expectedChannel]] of cases.entries()) {
+      for (const slug of ["url-case-" + i, "URLCASE" + String(i).padStart(4, "0")]) {
+        const doc = dom(r, slug + "/index.html");
+        const musicAnchor = [...doc.querySelectorAll(".vd-about a")].find((a) => text(a).includes("曲名"));
+        const channelAnchor = doc.querySelector('a[aria-label="YouTube チャンネルを開く"]');
+        assert.equal(musicAnchor?.getAttribute("href") ?? null, expectedMusic, label + " music " + slug);
+        assert.equal(channelAnchor?.getAttribute("href") ?? null, expectedChannel, label + " channel " + slug);
+        assert.match(text(doc.querySelector(".vd-about")), /曲名/, label + " keeps the music credit");
+        assert.match(text(doc.querySelector(".vd-creator")), /作者/, label + " keeps the creator credit");
+      }
+    }
+  } finally {
+    clean(r);
   }
 });
