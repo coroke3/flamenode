@@ -38,7 +38,7 @@ function stopTree(child) {
   });
 }
 
-test("U04a: local workerd/D1 preserves raw actor snapshot bytes and version-fenced batch semantics", { timeout: 120_000 }, async () => {
+test("U04a: local workerd/D1 preserves actor history and bounded reference-reader semantics", { timeout: 120_000 }, async () => {
   const loggerSource = fs.readFileSync(path.join(REPO_ROOT, "packages/server-core/src/audit/logger.ts"), "utf8");
   assert.match(loggerSource, /discord_id: row\.discord_id \?\? null,[\s\S]*discord_name: row\.discord_name \?\? null,[\s\S]*x_user_id: row\.active_x_user_id \?\? null,[\s\S]*x_name: row\.x_name \?\? null,[\s\S]*icon_url: row\.x_icon_url \|\| row\.user_image \|\| null/);
 
@@ -62,6 +62,8 @@ test("U04a: local workerd/D1 preserves raw actor snapshot bytes and version-fenc
     "const sourceSql = 'SELECT u.discord_id AS discord_id, u.name AS discord_name, u.active_x_user_id, u.image AS user_image, x.x_name, x.icon_url AS x_icon_url FROM u04a_user u LEFT JOIN u04a_x_users x ON x.id = u.active_x_user_id WHERE u.id = ?';",
     "const versionsSql = 'SELECT u.actor_snapshot_version AS user_version, COALESCE(x.actor_snapshot_version, -1) AS x_version FROM u04a_user u LEFT JOIN u04a_x_users x ON x.id = u.active_x_user_id WHERE u.id = ?';",
     "const historySql = 'SELECT u.discord_id AS discord_id, u.name AS discord_name, u.active_x_user_id, u.image AS user_image, x.x_name, x.icon_url AS x_icon_url FROM u04a_user_history u LEFT JOIN u04a_x_users_history x ON x.id = u.active_x_user_id AND x.version = ? WHERE u.id = ? AND u.version = ?';",
+    "const historyByRefSql = 'SELECT u.discord_id AS discord_id, u.name AS discord_name, u.active_x_user_id, u.image AS user_image, x.x_name, x.icon_url AS x_icon_url FROM u04a_actor_history_refs r JOIN u04a_user_history u ON u.version = r.user_version LEFT JOIN u04a_x_users_history x ON x.version = r.x_version AND x.id = u.active_x_user_id WHERE r.id = ?';",
+    "const historyListSql = 'SELECT r.id AS actor_ref_id, u.name AS discord_name, u.active_x_user_id AS x_user_id, x.x_name AS x_name FROM u04a_actor_history_refs r JOIN u04a_user_history u ON u.version = r.user_version LEFT JOIN u04a_x_users_history x ON x.version = r.x_version AND x.id = u.active_x_user_id WHERE r.id = ?';",
     "const historyBytesSql = 'SELECT typeof(u.discord_id) AS discord_id_type, hex(CAST(u.discord_id AS BLOB)) AS discord_id_hex, typeof(u.name) AS discord_name_type, hex(CAST(u.name AS BLOB)) AS discord_name_hex, typeof(u.active_x_user_id) AS active_x_user_id_type, hex(CAST(u.active_x_user_id AS BLOB)) AS active_x_user_id_hex, typeof(u.image) AS user_image_type, hex(CAST(u.image AS BLOB)) AS user_image_hex, typeof(x.x_name) AS x_name_type, hex(CAST(x.x_name AS BLOB)) AS x_name_hex, typeof(x.icon_url) AS x_icon_url_type, hex(CAST(x.icon_url AS BLOB)) AS x_icon_url_hex FROM u04a_user_history u LEFT JOIN u04a_x_users_history x ON x.id = u.active_x_user_id AND x.version = ? WHERE u.id = ? AND u.version = ?';",
     "const captureSql = 'INSERT INTO audit_actor_snapshots_u04a (id, discord_id, discord_name, active_x_user_id, user_image, x_name, x_icon_url, user_version, x_version) SELECT ?, u.discord_id, u.name, u.active_x_user_id, u.image, x.x_name, x.icon_url, u.actor_snapshot_version, COALESCE(x.actor_snapshot_version, -1) FROM u04a_user u LEFT JOIN u04a_x_users x ON x.id = u.active_x_user_id WHERE u.id = ? AND u.actor_snapshot_version = ? AND COALESCE(x.actor_snapshot_version, -1) = ?';",
     "const sourceBytesSql = 'SELECT typeof(u.discord_id) AS discord_id_type, hex(CAST(u.discord_id AS BLOB)) AS discord_id_hex, typeof(u.name) AS discord_name_type, hex(CAST(u.name AS BLOB)) AS discord_name_hex, typeof(u.active_x_user_id) AS active_x_user_id_type, hex(CAST(u.active_x_user_id AS BLOB)) AS active_x_user_id_hex, typeof(u.image) AS user_image_type, hex(CAST(u.image AS BLOB)) AS user_image_hex, typeof(x.x_name) AS x_name_type, hex(CAST(x.x_name AS BLOB)) AS x_name_hex, typeof(x.icon_url) AS x_icon_url_type, hex(CAST(x.icon_url AS BLOB)) AS x_icon_url_hex FROM u04a_user u LEFT JOIN u04a_x_users x ON x.id = u.active_x_user_id WHERE u.id = ?';",
@@ -313,6 +315,36 @@ test("U04a: local workerd/D1 preserves raw actor snapshot bytes and version-fenc
     "  ]);",
     "  const cleanupFk = { failed: cleanupFkFailed, refCount: Number((await all(db, 'SELECT COUNT(*) AS n FROM u04a_actor_history_refs_fk WHERE id=?', ['cleanup-fk']))[0].n), resource: await getResource() };",
     "  await resetActor();",
+    "  const readerImage = '🙂'.repeat(20000);",
+    "  await run(db, 'UPDATE u04a_user SET image = ? WHERE id = ?', [readerImage, 'admin-1']);",
+    "  await run(db, \"UPDATE u04a_x_users SET icon_url=NULL WHERE id='u04a-x'\");",
+    "  const readerVersions = await getVersions();",
+    "  const readerAdmissionJson = JSON.stringify(actorSnapshotFromRow((await all(db, sourceSql, ['admin-1']))[0]));",
+    "  const readerBatch = await db.batch([",
+    "    db.prepare('UPDATE u04a_resource SET value=? WHERE id=?').bind('reader-success', 'target'),",
+    "    db.prepare('INSERT INTO u04a_actor_history_refs (id, user_version, x_version) VALUES (?, ?, ?)').bind('reader-1', readerVersions.user_version, readerVersions.x_version),",
+    "  ]);",
+    "  await updateUser(['d-live', 'Live name', 'u04a-x', 'live-image']);",
+    "  await updateX(['X live', 'https://i/live.png']);",
+    "  const readerHistoryRow = (await all(db, historyByRefSql, ['reader-1']))[0];",
+    "  const readerHistoryJson = JSON.stringify(actorSnapshotFromRow(readerHistoryRow));",
+    "  const readerListRow = (await all(db, historyListSql, ['reader-1']))[0];",
+    "  const readerListResponseBytes = new TextEncoder().encode(JSON.stringify({ rows: [readerListRow], operators: [] })).byteLength;",
+    "  const readerSnapshotBytes = new TextEncoder().encode(readerHistoryJson).byteLength;",
+    "  const readerCodePoints = Array.from(readerHistoryJson);",
+    "  const readerChunks = [];",
+    "  for (let offset = 0; offset < readerCodePoints.length; offset += 12000) {",
+    "    const chunk = readerCodePoints.slice(offset, offset + 12000).join('');",
+    "    readerChunks.push({ offset, total: readerCodePoints.length, chunk, nextOffset: offset + 12000 < readerCodePoints.length ? offset + 12000 : null });",
+    "  }",
+    "  const readerChunkBytes = readerChunks.map(item => new TextEncoder().encode(item.chunk).byteLength);",
+    "  const readerChunkOffsetsValid = readerChunks.every((item, i) => {",
+    "    const expectedNextOffset = (i + 1) * 12000 < readerCodePoints.length ? (i + 1) * 12000 : null;",
+    "    return item.offset === i * 12000 && item.total === readerCodePoints.length && item.nextOffset === expectedNextOffset;",
+    "  });",
+    "  const reader = { allSuccess: readerBatch.every(r => r.success === true), admissionJson: readerAdmissionJson, historyJson: readerHistoryJson, liveJson: JSON.stringify(actorSnapshotFromRow((await all(db, sourceSql, ['admin-1']))[0])), listRow: readerListRow, listResponseBytes: readerListResponseBytes, snapshotBytes: readerSnapshotBytes, chunkCount: readerChunks.length, maxChunkBytes: Math.max(...readerChunkBytes), chunkOffsetsValid: readerChunkOffsetsValid, reassembledJson: readerChunks.map(item => item.chunk).join('') };",
+    "  await resetActor();",
+    "  await resetActor();",
     "  await resetActor();",
     "  const beforeRollback = await getVersions();",
     "  const seqBefore = await getSeq();",
@@ -341,7 +373,7 @@ test("U04a: local workerd/D1 preserves raw actor snapshot bytes and version-fenc
     "  const missingFailed = await batchFailed([db.prepare(\"UPDATE OR IGNORE u04a_x_users SET x_name='after-missing' WHERE id='u04a-x'\")]);",
     "  const missing = { failed: missingFailed, versions: await getVersions(), name: (await all(db, sourceSql, ['admin-1']))[0]?.x_name, rows: (await all(db, 'SELECT n FROM u04a_actor_sequence')).length };",
     "  const allocator = { fractionalRejected, oldVersions, atMaxSeq, maxToken, allocatorOut, overflowBatch, missing };",
-    "return { cases: casesOut, blobCanonicalJson: blobCase?.sourceJson ?? null, blobJson1FixtureMatches, json1, json1Error, staleChanges, staleCount, rollbackFailed, rollbackCount, abandonedCount, successRef, fenceOut, positive, interleaving, interleavingFence, interleavingFailure, interleavingFailureFence, immutableHistory, immutableHistoryFailureOut, immutableHistoryLifecycle, cleanupRace: { noFk: cleanupNoFk, fk: cleanupFk }, lateRollback, allocator };",
+    "return { cases: casesOut, blobCanonicalJson: blobCase?.sourceJson ?? null, blobJson1FixtureMatches, json1, json1Error, staleChanges, staleCount, rollbackFailed, rollbackCount, abandonedCount, successRef, fenceOut, positive, interleaving, interleavingFence, interleavingFailure, interleavingFailureFence, immutableHistory, immutableHistoryFailureOut, immutableHistoryLifecycle, cleanupRace: { noFk: cleanupNoFk, fk: cleanupFk }, reader, lateRollback, allocator };",
     "}",
     "export default {",
     "  async fetch(request, env) {",
@@ -469,6 +501,16 @@ test("U04a: local workerd/D1 preserves raw actor snapshot bytes and version-fenc
     assert.deepEqual({ refCount: body.immutableHistoryLifecycle.refCount, userHistoryCount: body.immutableHistoryLifecycle.userHistoryCount, xHistoryCount: body.immutableHistoryLifecycle.xHistoryCount }, { refCount: 1, userHistoryCount: 1, xHistoryCount: 1 });
     assert.deepEqual(body.cleanupRace.noFk, { allSuccess: true, refCount: 1, historyAvailable: false, resource: "cleanup-no-fk" });
     assert.deepEqual(body.cleanupRace.fk, { failed: true, refCount: 0, resource: "before" });
+    assert.equal(body.reader.allSuccess, true);
+    assert.equal(body.reader.historyJson, body.reader.admissionJson);
+    assert.notEqual(body.reader.liveJson, body.reader.admissionJson);
+    assert.deepEqual(body.reader.listRow, { actor_ref_id: "reader-1", discord_name: "Before", x_user_id: "u04a-x", x_name: "X before" });
+    assert.ok(body.reader.listResponseBytes <= 48 * 1024, "reference-only list projection must remain under the current 48 KiB list budget");
+    assert.ok(body.reader.snapshotBytes > 48 * 1024, "full historical actor JSON fixture must exceed the list budget");
+    assert.ok(body.reader.chunkCount > 1);
+    assert.ok(body.reader.maxChunkBytes <= 48 * 1024, "each 12,000-code-point detail chunk must fit the 48 KiB payload budget");
+    assert.equal(body.reader.chunkOffsetsValid, true);
+    assert.equal(body.reader.reassembledJson, body.reader.admissionJson, "chunked detail must reassemble exact decoder-produced JSON without truncation");
     const late = body.lateRollback;
     assert.equal(late.failed, true);
     assert.equal(late.snapshotCount, 0);
