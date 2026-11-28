@@ -726,7 +726,10 @@ if (runUnderRootTsx(import.meta.url)) {
         const result = await callHono(method, path, payload);
         assert.equal(result.status, 400, method + " " + path);
         assert.deepEqual(result.body, { error });
-        assert.equal(result.headers.get("cache-control"), "private, no-store");
+        const cacheControl = new Set((result.headers.get("cache-control") ?? "")
+          .split(",").map((value) => value.trim().toLowerCase()));
+        assert.ok(cacheControl.has("private"), "future system-owned cell denial stays private");
+        assert.ok(cacheControl.has("no-store"), "future system-owned cell denial is never shared-cached");
         assert.deepEqual(snapshot(), before, "no actor/audit/queue/nonce side effects");
         assert.equal(honoD1.stats.writes, stats.writes);
         assert.equal(honoD1.stats.batches, stats.batches);
