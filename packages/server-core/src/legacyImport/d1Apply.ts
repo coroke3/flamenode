@@ -1328,9 +1328,23 @@ export async function legacyImportD1ApplyStep(
     return fixedFailure("旧形式インポートのカスタム質問planが不正または上限超過です。");
   }
 
-  // One bounded D1 read per request: receipt plus the reserved principal or a
-  // 40-row X/software normalized-name existence snapshot.
-  // One bounded D1 read per request: receipt plus the stage-specific existing-state snapshot.
+  // Resolve the support request without issuing a second D1 read for a video.
+  // A malformed support plan must not prevent recovery of an already-committed
+  // step. Bind an empty array on invalid input and reject it only on the
+  // fresh-write branch, after receipt validation.
+  const expectedExistingForSkip = !!plannedVideo && input.strategy === "skip_existing" &&
+    input.progress.skipExistingVideoIds.includes(plannedVideo.id);
+  const allowExistingVideoReplacement = readReplacement && plannedVideo?.visibility_status === "private";
+  const videoSoftwareNames = plannedVideo && !expectedExistingForSkip
+    ? [...new Set(input.plan.videoSoftwares.filter((row) => row.video_id === plannedVideo.id)
+      .map((row) => normalizeSoftwareName(row.label)))]
+    : [];
+  const videoNamesPayload = JSON.stringify(videoSoftwareNames);
+  const videoSupportInputValid = videoSoftwareNames.length <= MAX_LEGACY_VIDEO_SOFTWARES_PER_VIDEO &&
+    new TextEncoder().encode(videoNamesPayload).byteLength <= MAX_LEGACY_IMPORT_STEP_BYTES;
+
+  // One bounded D1 read: receipt plus the stage-specific existing-state
+  // snapshot. Video support rows are only selected for a fresh candidate write.
   const readRows = stage === "videos"
     ? !plannedVideo
       ? await input.db.all(sql`
@@ -1352,10 +1366,33 @@ export async function legacyImportD1ApplyStep(
              WHERE id = ${plannedVideo.id}
                AND NOT EXISTS (SELECT 1 FROM marker_rows)
              LIMIT 2
+          ), eligible_support AS (
+            SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM marker_rows)
+              AND ${!expectedExistingForSkip && videoSupportInputValid ? 1 : 0} = 1
+              AND (NOT EXISTS (SELECT 1 FROM video_rows) OR ${allowExistingVideoReplacement ? 1 : 0} = 1)
+          ), video_support AS (
+            SELECT 'creator' AS kind,
+              json_object('id', id, 'profile_text', profile_text,
+                'other_social_links', other_social_links) AS payload
+              FROM x_users WHERE id = ${plannedVideo.creator_x_user_id}
+                AND EXISTS (SELECT 1 FROM eligible_support)
+            UNION ALL
+            SELECT 'software' AS kind,
+              json_object('id', id, 'normalized_name', normalized_name) AS payload
+              FROM software_catalog
+              WHERE normalized_name IN (
+                SELECT value FROM json_each(${videoSupportInputValid ? videoNamesPayload : "[]"})
+              ) AND EXISTS (SELECT 1 FROM eligible_support)
+            LIMIT ${MAX_LEGACY_VIDEO_SOFTWARES_PER_VIDEO + 2}
           )
           SELECT 'marker' AS kind, payload FROM marker_rows
           UNION ALL
           SELECT 'video' AS kind, payload FROM video_rows
+          UNION ALL
+          SELECT kind,
+            CASE WHEN SUM(length(CAST(payload AS BLOB))) OVER () <= ${MAX_LEGACY_IMPORT_STEP_BYTES}
+              THEN payload ELSE NULL END AS payload
+            FROM video_support
         `) as unknown as ReadRow[]
     : stage === "custom_questions"
     ? questions.length === 0
@@ -1567,6 +1604,9 @@ export async function legacyImportD1ApplyStep(
   const existingRows = readRows.filter((row) => row.kind === "existing");
   const eventRows = readRows.filter((row) => row.kind === "event");
   const videoRows = readRows.filter((row) => row.kind === "video");
+  const creatorRows = readRows.filter((row) => row.kind === "creator");
+  const catalogRows = readRows.filter((row) => row.kind === "software");
+  const videoSupportCount = creatorRows.length + catalogRows.length;
   const eventStaffSnapshotRows = readRows.filter((row) => row.kind === "staff");
   const replacementEventRows = readRows.filter((row) => row.kind === "replacement_event");
   const replacementStaffRows = readRows.filter((row) => row.kind === "replacement_staff");
@@ -1582,7 +1622,8 @@ export async function legacyImportD1ApplyStep(
         : 0;
   if (
     markerRows.length + principalRows.length + existingRows.length +
-      eventRows.length + videoRows.length + eventStaffSnapshotRows.length + replacementRowCount !== readRows.length
+      eventRows.length + videoRows.length + videoSupportCount +
+      eventStaffSnapshotRows.length + replacementRowCount !== readRows.length
   ) {
     return fixedFailure("旧形式インポートのステップ監査を確認できません。");
   }
@@ -1592,6 +1633,13 @@ export async function legacyImportD1ApplyStep(
     existingRows.length > maxExistingRows ||
     eventRows.length > 1 ||
     videoRows.length > 1 ||
+    creatorRows.length > 1 ||
+    catalogRows.length > MAX_LEGACY_VIDEO_SOFTWARES_PER_VIDEO ||
+    (videoSupportCount > 0 && (
+      stage !== "videos" || !plannedVideo || markerRows.length !== 0 ||
+      expectedExistingForSkip || !videoSupportInputValid ||
+      (videoRows.length > 0 && !allowExistingVideoReplacement)
+    )) ||
     (videoRows.length > 0 && (stage !== "videos" || !plannedVideo || markerRows.length > 0 || videoRows[0].payload !== plannedVideo.id)) ||
     eventStaffSnapshotRows.length > 1 ||
     replacementEventRows.length > 1 ||
@@ -2352,9 +2400,6 @@ export async function legacyImportD1ApplyStep(
   }
 
   if (stage === "videos") {
-    const expectedExistingForSkip = plannedVideo &&
-      input.strategy === "skip_existing" &&
-      input.progress.skipExistingVideoIds.includes(plannedVideo.id);
     if (plannedVideo) {
       if (input.strategy === "skip_existing" && expectedExistingForSkip !== (videoRows.length === 1)) {
         return fixedFailure("作品の存在状態がプレビュー時点から変更されたため、再プレビューが必要です。");
@@ -2371,38 +2416,11 @@ export async function legacyImportD1ApplyStep(
             return fixedFailure("公開状態を変更する作品置換はHono側でまだ利用できません。");
           }
         }
-        // The marker/existence read remains cheap for skip and replay.
-        // Creation and proven replacement resolve the same creator/catalog support.
-        const softwareNames = [...new Set(input.plan.videoSoftwares
-          .filter((row) => row.video_id === video.id)
-          .map((row) => normalizeSoftwareName(row.label)))];
-        if (softwareNames.length > MAX_LEGACY_VIDEO_SOFTWARES_PER_VIDEO) {
-          return fixedFailure("旧形式インポートの使用ソフトsnapshotが上限超過です。");
-        }
-        const namesPayload = JSON.stringify(softwareNames);
-        if (new TextEncoder().encode(namesPayload).byteLength > MAX_LEGACY_IMPORT_STEP_BYTES) {
-          return fixedFailure("旧形式インポートの使用ソフトsnapshotが上限超過です。");
-        }
-        const supportRows = await input.db.all(sql`
-          WITH support AS (
-            SELECT 'creator' AS kind,
-              json_object('id', id, 'profile_text', profile_text,
-                'other_social_links', other_social_links) AS payload
-              FROM x_users WHERE id = ${video.creator_x_user_id}
-            UNION ALL
-            SELECT 'software' AS kind,
-              json_object('id', id, 'normalized_name', normalized_name) AS payload
-              FROM software_catalog
-              WHERE normalized_name IN (SELECT value FROM json_each(${namesPayload}))
-            LIMIT ${MAX_LEGACY_VIDEO_SOFTWARES_PER_VIDEO + 2}
-          )
-          SELECT kind, CASE WHEN SUM(length(CAST(payload AS BLOB))) OVER ()
-            <= ${MAX_LEGACY_IMPORT_STEP_BYTES} THEN payload ELSE NULL END AS payload
-          FROM support
-        `) as unknown as ReadRow[];
-        const creatorRows = supportRows.filter((row) => row.kind === "creator");
-        const catalogRows = supportRows.filter((row) => row.kind === "software");
-        if (creatorRows.length + catalogRows.length !== supportRows.length ||
+        // The creator/catalog snapshot came from the same query as the
+        // receipt and video ID. All consumed fields are still rechecked by
+        // stateAssertion in the atomic D1 batch.
+        const softwareNames = videoSoftwareNames;
+        if (!videoSupportInputValid ||
             creatorRows.length !== (video.creator_x_user_id ? 1 : 0) ||
             catalogRows.length !== softwareNames.length) {
           return fixedFailure("旧形式インポートの作成者または使用ソフトsnapshotが不正です。");
@@ -2715,7 +2733,7 @@ export async function legacyImportD1ApplyStep(
             })),
             buildMarkerAudit(nextProgress, outcome),
           ],
-          callerQueryCount: 4 + (replacement ? 1 : 0) + (answerChanges?.proofs.length ? 1 : 0),
+          callerQueryCount: 3 + (replacement ? 1 : 0) + (answerChanges?.proofs.length ? 1 : 0),
           preloaded: input.preloaded,
           staticRebuildWakeSource: "import",
           wakeSentKinds: sentKinds,

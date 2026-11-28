@@ -1615,6 +1615,7 @@ test("MIG-0645 U02al Hono: new video rows, provenance, queue and receipt are ato
   const { bucket } = previewBucket({ failCompleteOnce: true });
   const wakes = [];
   let race = false;
+  let creatorRace = false;
   let replacementRace = false;
   let serverDb;
   const { request, sqlite, stats } = setup({
@@ -1628,6 +1629,10 @@ test("MIG-0645 U02al Hono: new video rows, provenance, queue and receipt are ato
       YOUTUBE_SYNC_WAKE_QUEUE: { send: async (message) => { wakes.push(message); } },
     },
     beforeBatch: (db) => {
+      if (creatorRace) {
+        creatorRace = false;
+        db.prepare("UPDATE x_users SET profile_text = ? WHERE id = ?").run("Concurrent profile", "creator-video");
+      }
       if (replacementRace) {
         replacementRace = false;
         db.prepare("UPDATE videos SET app_like_count = 11 WHERE id = ?").run("created-video");
@@ -1682,6 +1687,16 @@ test("MIG-0645 U02al Hono: new video rows, provenance, queue and receipt are ato
     assert.equal(wakes.length, wakesBefore);
     sqlite.prepare("UPDATE event_custom_questions SET label = ? WHERE id = ?").run("Question 0", "question-0");
 
+    // U02au: merging the support read must not weaken the D1 CAS for
+    // creator-derived fallback data.
+    creatorRace = true;
+    const staleCreator = await request(form());
+    assert.equal(staleCreator.status, 409, "creator snapshot race refuses the atomic batch");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM videos").get().n, 0);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE table_name = 'videos'").get().n, 0);
+    assert.equal(wakes.length, wakesBefore);
+    sqlite.prepare("UPDATE x_users SET profile_text = ? WHERE id = ?").run("Fallback profile", "creator-video");
+
     const readsBefore = stats.reads;
     const batchesBefore = stats.batches;
     const pending = await request(form());
@@ -1690,7 +1705,7 @@ test("MIG-0645 U02al Hono: new video rows, provenance, queue and receipt are ato
     assert.equal(pendingBody.kind, "committed_progress_pending");
     assert.equal(pendingBody.progress.stage, "complete");
     assert.equal(pendingBody.result.created.videos, 1);
-    assert.equal(stats.reads - readsBefore, 4, "only create uses the additional bounded creator/catalog read");
+    assert.equal(stats.reads - readsBefore, 3, "creator/catalog share the receipt and video-ID query");
     assert.equal(stats.batches, batchesBefore + 1);
     const saved = sqlite.prepare("SELECT * FROM videos WHERE id = ?").get(video.id);
     assert.equal(saved.creator_profile_text, "Fallback profile");
@@ -1713,11 +1728,18 @@ test("MIG-0645 U02al Hono: new video rows, provenance, queue and receipt are ato
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE table_name = 'video_custom_answers' AND operation = 'CREATE'").get().n, 1);
     assert.deepEqual(wakes.slice(wakesBefore).map((message) => message.kind),
       ["static_rebuild_available", "youtube_sync_pending"]);
+    // A durable receipt must replay even when current support data is no
+    // longer admissible for a fresh write. The combined query selects no
+    // support rows on the receipt branch.
+    sqlite.prepare("UPDATE x_users SET profile_text = ? WHERE id = ?").run("x".repeat(128 * 1024), "creator-video");
+    const replayReads = stats.reads;
     const replay = await request(form());
     assert.equal(replay.status, 200, JSON.stringify(await replay.clone().json()));
     assert.equal((await replay.json()).result.created.videos, 1);
+    assert.equal(stats.reads - replayReads, 3);
     assert.equal(stats.batches, batchesBefore + 1);
     assert.equal(wakes.length, wakesBefore + 2);
+    sqlite.prepare("UPDATE x_users SET profile_text = ? WHERE id = ?").run("Fallback profile", "creator-video");
 
     // U02am: exact CURRENT proof from the actual persisted rows, not just
     // the input projection. Read-only until replacement/CAS is implemented.
@@ -1995,7 +2017,7 @@ test("MIG-0645 U02al Hono: new video rows, provenance, queue and receipt are ato
     assert.equal(result.result.replaced.videos, 1);
     assert.equal(result.result.complete, true);
     assert.equal(stats.batches - beforeReplace, 1);
-    assert.equal(stats.reads - beforeReplaceReads, 6);
+    assert.equal(stats.reads - beforeReplaceReads, 5, "replacement adds only entity and changed-answer proof reads");
     const replacedVideo = sqlite.prepare("SELECT * FROM videos WHERE id = ?").get(video.id);
     assert.equal(replacedVideo.title, "Replaced video");
     assert.equal(replacedVideo.created_at, saved.created_at);
