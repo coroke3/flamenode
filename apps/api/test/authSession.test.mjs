@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
+import { Hono } from "hono";
 import {
   extractSessionToken,
   parseCookieHeader,
@@ -10,6 +11,8 @@ import {
   MAX_SESSION_COOKIE_CHUNKS,
   MAX_SESSION_TOKEN_LENGTH,
   MAX_SESSION_COOKIE_NAMES,
+  MAX_LEGACY_SESSION_ACTIVE_X_ID_CODEPOINTS,
+  MAX_LEGACY_SESSION_ACTIVE_X_ID_BYTES,
 } from "../src/auth/session.ts";
 import {
   USERS,
@@ -95,6 +98,8 @@ function createTestD1() {
     resetQueryCount: () => {
       queryCount = 0;
     },
+    setActiveX: (userId, xId) => sqlite.prepare('UPDATE "user" SET active_x_user_id = ? WHERE id = ?').run(xId, userId),
+    setActiveXTextBytes: (userId, bytes) => sqlite.prepare('UPDATE "user" SET active_x_user_id = CAST(? AS TEXT) WHERE id = ?').run(bytes, userId),
     close: () => sqlite.close(),
   };
 
@@ -183,6 +188,53 @@ test("Cookie extraction and parsing", async (t) => {
     assert.equal(extractSessionToken(`${name}.0=${half}; ${name}.1=${half}b`, { secure: true }), null);
   });
 
+  await t.test("URI decoding is bounded by the remaining joined-token budget without changing Auth.js parity", () => {
+    const cap = MAX_SESSION_TOKEN_LENGTH;
+    for (const secure of [true, false]) {
+      const name = secure ? "__Secure-authjs.session-token" : "authjs.session-token";
+      for (const unit of ["a", "é", "あ", "🚀", "\u0000", "%", " ", "\t"]) {
+        for (const size of [cap - 1, cap, cap + 1]) {
+          const value = unit.repeat(Math.floor(size / unit.length)) + "a".repeat(size % unit.length);
+          const encoded = encodeURIComponent(value);
+          const header = name + "=" + encoded;
+          assert.equal(parseCookieHeader(header)[name], value);
+          assert.equal(extractSessionToken(header, { secure }), size <= cap ? value : null);
+        }
+      }
+      // Percent encoding can legitimately shrink nine raw units to one.
+      const bmp = "%E3%81%82";
+      const half = cap / 2;
+      assert.equal(extractSessionToken(name + ".1=" + bmp.repeat(half) + "; " + name + ".0=" + "a".repeat(half), { secure }), "a".repeat(half) + "あ".repeat(half));
+      assert.equal(extractSessionToken(name + ".0=" + "a".repeat(half) + "; " + name + ".1=" + bmp.repeat(half + 1), { secure }), null);
+      assert.equal(extractSessionToken(name + ".0=" + "a".repeat(cap) + "; " + name + ".1= \t", { secure }), "a".repeat(cap));
+      for (const raw of ["%GG", "%E3%81", "%ED%A0%80", "%41%GG", "%", "%00%GG"]) {
+        assert.equal(extractSessionToken(name + "=" + raw, { secure }), raw);
+      }
+      // Do not decode rejected large values or any duplicate-cookie value.
+      const decode = globalThis.decodeURIComponent;
+      const decodedLengths = [];
+      globalThis.decodeURIComponent = (value) => { decodedLengths.push(value.length); return decode(value); };
+      try {
+        const oversized = "%41".repeat(40000);
+        assert.equal(extractSessionToken(name + "=" + oversized, { secure }), null);
+        assert.deepEqual(decodedLengths, []);
+        assert.equal(extractSessionToken(name + ".0=%61; " + name + ".0=" + oversized + "; " + name + ".1=%62", { secure }), "ab");
+        assert.deepEqual(decodedLengths, [3, 3]);
+        assert.equal(extractSessionToken(name + ".0=" + "a".repeat(cap - 1) + "; " + name + ".1=" + bmp, { secure }), "a".repeat(cap - 1) + "あ");
+        assert.equal(decodedLengths.at(-1), 9);
+        assert.equal(extractSessionToken(name + ".0=" + "a".repeat(cap - 1) + "; " + name + ".1=" + bmp + "%61", { secure }), null);
+        assert.equal(decodedLengths.at(-1), 9);
+      } finally {
+        globalThis.decodeURIComponent = decode;
+      }
+      // Preserve parseInt suffix semantics, including NaN and a final dot,
+      // without splitting a potentially header-sized dotted name.
+      const dotted = name + ".".repeat(60000);
+      assert.equal(extractSessionToken(dotted + "2=c; " + name + ".0=a; " + name + ".1=b", { secure }), "abc");
+      assert.equal(extractSessionToken(dotted + "=a; " + name + ".1=b", { secure }), "ab");
+    }
+  });
+
   await t.test("a 32KB header of ~900 shuffled chunks fails closed", () => {
     const name = "__Secure-authjs.session-token";
     const count = 900;
@@ -265,6 +317,322 @@ test("T01: valid Next session cookie resolves to the same user", async (t) => {
   assert.equal(user.role, "user");
   assert.equal(user.is_banned, 0);
   assert.equal(user.active_x_user_id, USERS.valid.active_x_user_id);
+});
+
+test("SEC-713: legacy Active X storage and decoded identity are bounded, without changing normal sessions", async (t) => {
+  const d1 = createTestD1();
+  t.after(() => d1.close());
+
+  const token = SESSIONS.valid.sessionToken;
+  const opts = { now: BASELINE_NOW_MS };
+  const bound = MAX_LEGACY_SESSION_ACTIVE_X_ID_CODEPOINTS;
+  const byteBound = MAX_LEGACY_SESSION_ACTIVE_X_ID_BYTES;
+  assert.equal(bound, 128);
+  assert.equal(byteBound, 512, "128 four-byte Unicode codepoints must remain allowed");
+  const projected = [];
+  const inspectingD1 = {
+    prepare(sql) {
+      const prepared = d1.prepare(sql);
+      return {
+        bind(...args) {
+          const statement = prepared.bind(...args);
+          return {
+            async first() {
+              const row = await statement.first();
+              projected.push(row);
+              return row;
+            },
+          };
+        },
+      };
+    },
+  };
+
+  // Preserve CURRENT's valid selected identity, including legacy Unicode
+  // values that may be longer than 128 UTF-8 bytes but <=128 codepoints.
+  d1.resetQueryCount();
+  const normal = await resolveSessionUser(inspectingD1, token, opts);
+  assert.equal(normal?.active_x_user_id, USERS.valid.active_x_user_id);
+  assert.equal(projected.at(-1).user_active_x_id_invalid, 0);
+  assert.equal(d1.getQueryCount(), 1);
+
+  const edge = "x".repeat(bound);
+  d1.setActiveX(USERS.valid.id, edge);
+  d1.resetQueryCount();
+  const atBoundary = await resolveSessionUser(inspectingD1, token, opts);
+  assert.equal(atBoundary?.active_x_user_id, edge, "legacy IDs at the cap preserve their value");
+  assert.equal(projected.at(-1).user_active_x_id_invalid, 0);
+  assert.equal(d1.getQueryCount(), 1);
+
+  // Validate CURRENT's full Unicode boundary against real D1 SQLite rows.
+  // 128 Japanese codepoints use 384 UTF-8 bytes; 128 emoji use exactly 512.
+  for (const [label, accepted] of [
+    ["43 Japanese (129 bytes)", "あ".repeat(43)],
+    ["128 Japanese (384 bytes)", "あ".repeat(bound)],
+    ["128 emoji (512 bytes)", "🌀".repeat(bound)],
+    ["128 valid replacement characters (384 bytes)", "\uFFFD".repeat(bound)],
+    ["unchanged legacy spelling", "@" + "C".repeat(bound - 1)],
+    ["empty persisted selection", ""],
+  ]) {
+    assert.ok(Array.from(accepted).length <= bound, label);
+    assert.ok(Buffer.byteLength(accepted, "utf8") <= byteBound, label);
+    d1.setActiveX(USERS.valid.id, accepted);
+    projected.length = 0;
+    d1.resetQueryCount();
+    const valid = await resolveSessionUser(inspectingD1, token, opts);
+    assert.equal(valid?.active_x_user_id, accepted, label + " survives session resolution");
+    assert.equal(projected.at(-1).user_active_x_id_invalid, 0, label);
+    assert.equal(d1.getQueryCount(), 1, label);
+  }
+
+  // SQLite length(TEXT) can count one malformed UTF-8 sequence while D1
+  // decodes several replacement characters. The decoded identity must also
+  // meet the limit, without rejecting genuine U+FFFD or rewriting spelling.
+  for (const [label, hex, decodedCodepoints] of [
+    ["surrogate sequence", "eda080".repeat(43), 129],
+    ["overlong sequence", "c080".repeat(65), 130],
+    ["out-of-range sequence", "f4908080".repeat(128), 512],
+  ]) {
+    d1.setActiveXTextBytes(USERS.valid.id, Buffer.from(hex, "hex"));
+    projected.length = 0;
+    d1.resetQueryCount();
+    await assert.rejects(
+      () => resolveSessionUser(inspectingD1, token, opts),
+      (error) => error.name === "SessionUnavailableError" && error.code === "database_unavailable",
+      label + " must not grant a session with an oversized decoded identity",
+    );
+    assert.equal(d1.getQueryCount(), 1, label);
+    assert.equal(projected.length, 1, label);
+    const row = projected[0];
+    assert.equal(row.user_active_x_id_invalid, 0, label + " passes the SQL storage bounds");
+    assert.equal(Array.from(row.user_active_x_user_id).length, decodedCodepoints, label);
+    assert.ok(decodedCodepoints > bound, label);
+    assert.ok(Buffer.from(hex, "hex").length <= byteBound, label);
+  }
+
+  // length(TEXT) counts Unicode codepoints but stops at the first embedded
+  // NUL; the independent NUL/type and CAST(... AS BLOB) checks remain mandatory.
+  for (const oversized of [
+    "x".repeat(bound + 1), "あ".repeat(bound + 1), "🌀".repeat(bound + 1),
+    "\0" + "x".repeat(180_000), "x".repeat(180_000),
+  ]) {
+    d1.setActiveX(USERS.valid.id, oversized);
+    projected.length = 0;
+    d1.resetQueryCount();
+    await assert.rejects(
+      () => resolveSessionUser(inspectingD1, token, opts),
+      (error) => error.name === "SessionUnavailableError" && error.code === "database_unavailable",
+      "an invalid selected X must never become a successful session with null/other Active X",
+    );
+    assert.equal(d1.getQueryCount(), 1, "no extra D1 lookup to validate selected X");
+    assert.equal(projected.length, 1);
+    const row = projected[0];
+    assert.equal(row.user_active_x_id_invalid, 1);
+    assert.equal(row.user_active_x_user_id, null, "D1 must remove the giant field before transport");
+    assert.ok(Buffer.byteLength(JSON.stringify(row)) < 2048,
+      "actual SQLite projection must stay small even for the 180K legacy row");
+  }
+
+  // SQLite permits BLOB values inside a TEXT-affinity column. A small BLOB
+  // passes a byte-length-only check, but must never become SessionUser's
+  // declared string Active X identity. Embedded NUL is likewise not a valid
+  // X identifier even when its byte length is below the legacy cap.
+  for (const invalidTypedValue of [
+    new Uint8Array([0x00, 0xff, 0x41]),
+    new Uint8Array([0x78, 0x2d, 0x31]),
+    "\0x-short",
+  ]) {
+    d1.setActiveX(USERS.valid.id, invalidTypedValue);
+    projected.length = 0;
+    d1.resetQueryCount();
+    await assert.rejects(
+      () => resolveSessionUser(inspectingD1, token, opts),
+      (error) => error.name === "SessionUnavailableError" && error.code === "database_unavailable",
+    );
+    assert.equal(d1.getQueryCount(), 1);
+    assert.equal(projected.length, 1);
+    assert.equal(projected[0].user_active_x_id_invalid, 1);
+    assert.equal(projected[0].user_active_x_user_id, null,
+      "invalid storage types and NUL-terminated text must be rejected by the SQL projection");
+  }
+
+  const utf8WithinByteLimit = "あ".repeat(42); // 126 bytes
+  d1.setActiveX(USERS.valid.id, utf8WithinByteLimit);
+  d1.resetQueryCount();
+  const unicodeAtBoundary = await resolveSessionUser(inspectingD1, token, opts);
+  assert.equal(unicodeAtBoundary?.active_x_user_id, utf8WithinByteLimit);
+  assert.equal(projected.at(-1).user_active_x_id_invalid, 0);
+  assert.equal(d1.getQueryCount(), 1);
+
+  d1.setActiveX(USERS.valid.id, null);
+  d1.resetQueryCount();
+  const noSelection = await resolveSessionUser(inspectingD1, token, opts);
+  assert.equal(noSelection?.active_x_user_id, null, "a genuinely null Active X stays null");
+  assert.equal(projected.at(-1).user_active_x_id_invalid, 0);
+  assert.equal(d1.getQueryCount(), 1);
+});
+
+test("SEC-713: invalid persisted Active X is logged with a fixed code, not as a D1 outage or secret", async (t) => {
+  const d1 = createTestD1();
+  t.after(() => d1.close());
+  const malformedId = "x".repeat(180_000) + "SENSITIVE_SUFFIX";
+  d1.setActiveX(USERS.valid.id, malformedId);
+
+  const originalConsoleError = console.error;
+  const messages = [];
+  console.error = (...args) => { messages.push(args.join(" ")); };
+  try {
+    await assert.rejects(
+      () => resolveSessionUser(d1, SESSIONS.valid.sessionToken, { now: BASELINE_NOW_MS }),
+      (error) => error.name === "SessionUnavailableError" && error.code === "database_unavailable",
+    );
+  } finally {
+    console.error = originalConsoleError;
+  }
+
+  assert.deepEqual(messages, ["[auth:session] INVALID_ACTIVE_X_ID_VALUE"],
+    "distinguish malformed persisted identity from a genuine D1 lookup failure");
+  assert.ok(!messages.join(" ").includes("SENSITIVE_SUFFIX"));
+  assert.ok(!messages.join(" ").includes(malformedId));
+});
+
+test("SEC-713: corrupt Active X causes private 503, not anonymous 401 or an authorization grant", async (t) => {
+  const d1 = createTestD1();
+  t.after(() => d1.close());
+  d1.setActiveX(USERS.valid.id, "x".repeat(180_000));
+  d1.resetQueryCount();
+
+  const values = new Map();
+  const headers = new Map();
+  const context = {
+    req: {
+      url: "https://flamenode.net/api/me",
+      header(name) {
+        return name.toLowerCase() === "cookie"
+          ? `${BASELINE_COOKIES.sessionToken.name}=${SESSIONS.valid.sessionToken}`
+          : undefined;
+      },
+    },
+    env: { DB: d1 },
+    set: (key, val) => values.set(key, val),
+    get: (key) => values.get(key),
+    header: (key, val) => headers.set(key.toLowerCase(), val),
+    json: (body, status) => ({ body, status }),
+  };
+  await sessionMiddleware({ now: () => BASELINE_NOW_MS })(context, async () => {});
+  assert.equal(values.get("sessionState"), "unavailable");
+  assert.equal(values.get("user"), null);
+  assert.equal(values.get("session"), null);
+  assert.equal(d1.getQueryCount(), 1, "middleware must use the existing single session read");
+  let reached = false;
+  const denied = await requireAuth()(context, async () => { reached = true; });
+  assert.equal(reached, false);
+  assert.equal(denied.status, 503);
+  assert.equal(denied.body.error, "database_unavailable");
+  assert.equal(headers.get("cache-control"), "private, no-store");
+});
+
+test("SEC-713: throwing diagnostics cannot replace mounted private authentication responses", async (t) => {
+  const d1 = createTestD1();
+  t.after(() => d1.close());
+  const app = new Hono();
+  let grants = 0;
+  let state;
+  app.use("*", sessionMiddleware({ now: () => BASELINE_NOW_MS }));
+  app.use("*", async (c, next) => {
+    state = { sessionState: c.get("sessionState"), user: c.get("user"), session: c.get("session") };
+    await next();
+  });
+  app.get("/api/me", requireAuth(), (c) => {
+    grants++;
+    return c.json({ id: c.get("user").id });
+  });
+
+  // Provider rejection may itself be a hostile proxy: never inspect it.
+  const hostile = new Proxy(new Error("SENSITIVE_PROVIDER_VALUE"), {
+    get() { throw new Error("provider property inspected"); },
+    getPrototypeOf() { throw new Error("provider prototype inspected"); },
+  });
+  let failedReads = 0;
+  let bindingReads = 0;
+  const failingDb = {
+    prepare() {
+      return {
+        bind() {
+          return {
+            async first() {
+              failedReads++;
+              throw hostile;
+            },
+          };
+        },
+      };
+    },
+  };
+  const brokenBinding = {
+    get DB() {
+      bindingReads++;
+      throw hostile;
+    },
+  };
+
+  const logs = [];
+  const originalConsoleError = console.error;
+  console.error = (...args) => {
+    logs.push(args);
+    throw new Error("diagnostic sink unavailable");
+  };
+  const request = (token, env) =>
+    app.request("https://flamenode.net/api/me", {
+      headers: { Cookie: `${BASELINE_COOKIES.sessionToken.name}=${token}` },
+    }, env);
+
+  try {
+    for (const [label, env, code, expectedReads, prepare] of [
+      ["invalid identity", { DB: d1 }, "INVALID_ACTIVE_X_ID_VALUE", 1,
+        () => d1.setActiveX(USERS.valid.id, "x".repeat(129))],
+      ["oversized decoded identity", { DB: d1 }, "INVALID_ACTIVE_X_ID_VALUE", 1,
+        () => d1.setActiveXTextBytes(USERS.valid.id, Buffer.from("eda080".repeat(43), "hex"))],
+      ["rejected lookup", { DB: failingDb }, "D1_LOOKUP_FAILED", 0],
+      ["missing binding", {}, "D1_BINDING_MISSING", 0],
+      ["throwing binding", brokenBinding, "D1_BINDING_FAILED", 0],
+    ]) {
+      prepare?.();
+      logs.length = 0;
+      d1.resetQueryCount();
+      const response = await request(SESSIONS.valid.sessionToken, env);
+      assert.equal(response.status, 503, label);
+      assert.equal(response.headers.get("cache-control"), "private, no-store", label);
+      assert.deepEqual(await response.json(), { error: "database_unavailable" }, label);
+      assert.deepEqual(state, { sessionState: "unavailable", user: null, session: null }, label);
+      assert.equal(grants, 0, label);
+      assert.equal(d1.getQueryCount(), expectedReads, label);
+      assert.deepEqual(logs, [[`[auth:session] ${code}`]], label);
+    }
+    assert.equal(failedReads, 1);
+    assert.equal(bindingReads, 1);
+
+    logs.length = 0;
+    d1.setActiveX(USERS.valid.id, USERS.valid.active_x_user_id);
+    d1.resetQueryCount();
+    const valid = await request(SESSIONS.valid.sessionToken, { DB: d1 });
+    assert.equal(valid.status, 200);
+    assert.deepEqual(await valid.json(), { id: USERS.valid.id });
+    assert.equal(state.sessionState, "user");
+    assert.equal(grants, 1);
+    assert.equal(d1.getQueryCount(), 1);
+
+    d1.resetQueryCount();
+    const expired = await request(SESSIONS.expired.sessionToken, { DB: d1 });
+    assert.equal(expired.status, 401);
+    assert.equal(expired.headers.get("cache-control"), "private, no-store");
+    assert.equal(state.sessionState, "none");
+    assert.equal(grants, 1);
+    assert.equal(d1.getQueryCount(), 1);
+    assert.deepEqual(logs, []);
+  } finally {
+    console.error = originalConsoleError;
+  }
 });
 
 test("T02: expired session resolves to null (unauthenticated)", async (t) => {

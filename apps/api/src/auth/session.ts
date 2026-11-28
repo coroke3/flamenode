@@ -94,16 +94,37 @@ function trimCookieSpacesEnd(text: string): string {
   return last ? text.slice(0, last.index + 1) : "";
 }
 
-// The value between `=` and the segment end, trimmed, and URI-decoded only when it
-// contains `%` and decodes cleanly. Quotes are kept, as in Auth.js parse.
-function readCookieValue(header: string, eqIdx: number, endIdx: number): string {
-  const val = trimCookieSpacesEnd(header.slice(skipCookieSpaces(header, eqIdx + 1), endIdx));
+// Trim exactly the same spaces/tabs as Auth.js; keep quotes and malformed
+// URI encoding unchanged. The reference full parser remains unbounded.
+function readCookieRawValue(header: string, eqIdx: number, endIdx: number): string {
+  return trimCookieSpacesEnd(header.slice(skipCookieSpaces(header, eqIdx + 1), endIdx));
+}
+
+function decodeCookieValue(val: string): string {
   if (!val.includes("%")) return val;
   try {
     return decodeURIComponent(val);
   } catch {
     return val;
   }
+}
+
+function readCookieValue(header: string, eqIdx: number, endIdx: number): string {
+  return decodeCookieValue(readCookieRawValue(header, eqIdx, endIdx));
+}
+
+// Each decoded UTF-16 unit can consume at most nine raw code units:
+// a percent-encoded three-byte BMP character is %XX%XX%XX; an astral
+// character consumes twelve raw units for two decoded units. Unescaped
+// input and the malformed-escape fallback cannot shrink more than this.
+// Check the remaining joined-token budget before allocating a decoded value.
+const MAX_URI_UNITS_PER_DECODED_UNIT = 9;
+function readBoundedCookieValue(header: string, eqIdx: number, endIdx: number, remaining: number): string | null {
+  const raw = readCookieRawValue(header, eqIdx, endIdx);
+  if (raw.length > remaining * MAX_URI_UNITS_PER_DECODED_UNIT) return null;
+  if (!raw.includes("%")) return raw.length <= remaining ? raw : null;
+  const decoded = decodeCookieValue(raw);
+  return decoded.length <= remaining ? decoded : null;
 }
 
 /**
@@ -155,6 +176,7 @@ function readPrefixedCookies(
   prefix: string,
   onNew: (key: string, value: string) => boolean,
   maxMatches: number,
+  remaining: () => number,
 ): boolean {
   if (header.length < 2) return true;
   const seen: Record<string, true> = Object.create(null);
@@ -187,7 +209,8 @@ function readPrefixedCookies(
       const key = trimCookieSpacesEnd(header.slice(m, eqIdx));
       if (seen[key] === undefined) {
         seen[key] = true;
-        if (!onNew(key, readCookieValue(header, eqIdx, endIdx))) return false;
+        const value = readBoundedCookieValue(header, eqIdx, endIdx, remaining());
+        if (value === null || !onNew(key, value)) return false;
       }
     }
     from = endIdx + 1;
@@ -219,10 +242,13 @@ export function extractSessionToken(
       length += value.length;
       if (chunks.length === MAX_SESSION_COOKIE_CHUNKS || length > MAX_SESSION_TOKEN_LENGTH) return false;
       // Same index as the SessionStore comparator, computed once per chunk.
-      chunks.push({ index: parseInt(name.split(".").pop() || "0"), value });
+      // Only the final suffix matters. Avoid allocating an array for every
+      // dot in a large attacker-controlled name.
+      chunks.push({ index: parseInt(name.slice(name.lastIndexOf(".") + 1) || "0"), value });
       return true;
     },
     MAX_SESSION_COOKIE_NAMES,
+    () => MAX_SESSION_TOKEN_LENGTH - length,
   );
   if (!complete || chunks.length === 0) return null;
   if (chunks.length === 1) return chunks[0].value;
@@ -231,6 +257,29 @@ export function extractSessionToken(
     .sort((a, b) => a.index - b.index)
     .map((chunk) => chunk.value)
     .join("");
+}
+
+/**
+ * SEC-713 / MIG-0657 parity: legacy X identity accepts up to 128 Unicode
+ * codepoints (max 512 UTF-8 bytes), not merely 128 ASCII bytes. Check both
+ * limits inside SQLite before the first D1 response; an embedded NUL makes
+ * SQLite length(TEXT) unsafe, so reject it separately.
+ */
+export const MAX_LEGACY_SESSION_ACTIVE_X_ID_CODEPOINTS = 128;
+export const MAX_LEGACY_SESSION_ACTIVE_X_ID_BYTES = 512;
+
+type SessionDiagnostic =
+  | "INVALID_ACTIVE_X_ID_VALUE"
+  | "D1_LOOKUP_FAILED"
+  | "D1_BINDING_FAILED"
+  | "D1_BINDING_MISSING";
+
+function logSessionDiagnostic(code: SessionDiagnostic): void {
+  try {
+    console.error(`[auth:session] ${code}`);
+  } catch {
+    // A failing diagnostic sink must not replace the authentication outcome.
+  }
 }
 
 export interface ResolveSessionOptions {
@@ -271,7 +320,18 @@ export async function resolveSessionUser(
           u."image" AS user_image,
           u."role" AS user_role,
           u."is_banned" AS user_is_banned,
-          u."active_x_user_id" AS user_active_x_user_id
+          CASE WHEN u."active_x_user_id" IS NOT NULL
+            AND (typeof(u."active_x_user_id") <> 'text'
+              OR instr(u."active_x_user_id", char(0)) > 0
+              OR length(u."active_x_user_id") > ${MAX_LEGACY_SESSION_ACTIVE_X_ID_CODEPOINTS}
+              OR length(CAST(u."active_x_user_id" AS BLOB)) > ${MAX_LEGACY_SESSION_ACTIVE_X_ID_BYTES})
+            THEN NULL ELSE u."active_x_user_id" END AS user_active_x_user_id,
+          CASE WHEN u."active_x_user_id" IS NOT NULL
+            AND (typeof(u."active_x_user_id") <> 'text'
+              OR instr(u."active_x_user_id", char(0)) > 0
+              OR length(u."active_x_user_id") > ${MAX_LEGACY_SESSION_ACTIVE_X_ID_CODEPOINTS}
+              OR length(CAST(u."active_x_user_id" AS BLOB)) > ${MAX_LEGACY_SESSION_ACTIVE_X_ID_BYTES})
+            THEN 1 ELSE 0 END AS user_active_x_id_invalid
         FROM "session" s
         INNER JOIN "user" u ON s."userId" = u."id"
         WHERE s."sessionToken" = ?
@@ -287,6 +347,7 @@ export async function resolveSessionUser(
         user_role: string | null;
         user_is_banned: number | null;
         user_active_x_user_id: string | null;
+        user_active_x_id_invalid: number;
       }>();
 
     if (!row) {
@@ -299,28 +360,46 @@ export async function resolveSessionUser(
       return null;
     }
 
-    const role =
-      row.user_role === "admin" || row.user_role === "moderator"
-        ? row.user_role
-        : "user";
+    // D1 replaces malformed UTF-8 TEXT with U+FFFD, so SQLite length(TEXT)
+    // can undercount the returned codepoints. Recheck the decoded value,
+    // without normalizing its spelling. 128 decoded Unicode codepoints also
+    // bound UTF-8 to 512 bytes; stop after the first excess codepoint.
+    let activeXCodepoints = 0;
+    for (const _ of row.user_active_x_user_id ?? "") {
+      if (++activeXCodepoints > MAX_LEGACY_SESSION_ACTIVE_X_ID_CODEPOINTS) break;
+    }
 
-    return {
-      id: row.user_id,
-      name: row.user_name ?? null,
-      email: row.user_email ?? null,
-      image: row.user_image ?? null,
-      role,
-      is_banned: row.user_is_banned === 1 ? 1 : 0,
-      active_x_user_id: row.user_active_x_user_id ?? null,
-    };
+    // The invalid marker must never become a successful session with null Active X.
+    // Keep the success path inside the D1 catch, but handle the marker after it
+    // so provider exceptions need not be inspected or mistaken for our own error.
+    if (row.user_active_x_id_invalid !== 1 &&
+        activeXCodepoints <= MAX_LEGACY_SESSION_ACTIVE_X_ID_CODEPOINTS) {
+      const role =
+        row.user_role === "admin" || row.user_role === "moderator"
+          ? row.user_role
+          : "user";
+
+      return {
+        id: row.user_id,
+        name: row.user_name ?? null,
+        email: row.user_email ?? null,
+        image: row.user_image ?? null,
+        role,
+        is_banned: row.user_is_banned === 1 ? 1 : 0,
+        active_x_user_id: row.user_active_x_user_id ?? null,
+      };
+    }
   } catch {
     // D1/adapter errors may include bound session tokens in their message/stack.
-    // Emit a fixed code only; do not serialize the underlying exception.
-    console.error("[auth:session] D1_LOOKUP_FAILED");
+    // Emit a fixed code only; do not inspect or serialize the underlying exception.
+    logSessionDiagnostic("D1_LOOKUP_FAILED");
     // CURRENT currentUser.ts: a failed lookup is CurrentUserUnavailableError
     // ("database_unavailable"), never "no session". Callers map it to 503.
     throw new SessionUnavailableError();
   }
+
+  logSessionDiagnostic("INVALID_ACTIVE_X_ID_VALUE");
+  throw new SessionUnavailableError();
 }
 
 /** Reason code CURRENT CurrentUserUnavailableError uses for D1 failures. */
@@ -386,11 +465,7 @@ export function sessionMiddleware(options?: SessionMiddlewareOptions) {
       bindingGetterFailed = true;
     }
     if (!db) {
-      console.error(
-        bindingGetterFailed
-          ? "[auth:session] D1_BINDING_FAILED"
-          : "[auth:session] D1_BINDING_MISSING",
-      );
+      logSessionDiagnostic(bindingGetterFailed ? "D1_BINDING_FAILED" : "D1_BINDING_MISSING");
       c.set("user", null);
       c.set("session", null);
       c.set("sessionState", "unavailable" satisfies SessionState);

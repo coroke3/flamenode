@@ -786,7 +786,11 @@ if (runUnderRootTsx(import.meta.url)) {
     } finally {
       console.error = before;
     }
-    assert.ok(logs.some((s) => s.includes("SESSION_RESOLUTION_UNAVAILABLE")));
+    // SEC-713 now handles a throwing diagnostic inside sessionMiddleware.
+    // The binding-specific marker is attempted once, not the route's
+    // unexpected pre-downstream exception fallback.
+    assert.equal(logs.filter((s) => s === "[auth:session] D1_BINDING_FAILED").length, 1);
+    assert.ok(!logs.some((s) => s.includes("SESSION_RESOLUTION_UNAVAILABLE")));
     assert.doesNotMatch(logs.join("\n"), /D1_BINDING_SECRET_SENTINEL/);
   });
 
