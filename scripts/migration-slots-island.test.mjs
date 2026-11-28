@@ -1328,6 +1328,21 @@ test("U03k host serializes mutations and reconciles only a committed current vie
     assert.equal(publicReads, 5, "already-committed successor must not lose the read wakeup");
     assert.equal(pendingPublicReads.length, 2);
     assert.equal(requests.length, 8, "obsolete public completion cannot refresh x5 private state");
+
+    // The original mutation has returned, but its deferred reconciliation
+    // still owns the successor read. A new POST must not overtake that read.
+    let duringReconcile;
+    await React.act(async () => {
+      duringReconcile = await runMutation(presentation, async () => {
+        mutationCalls += 1;
+        return { status: 200, result: { ok: true, slotId: "s" } };
+      }, onOutcome);
+    });
+    assert.equal(duringReconcile.kind, "busy");
+    assert.equal(mutationCalls, 6, "no POST while successor reconciliation is pending");
+    assert.equal(publicReads, 5, "no competing RH-020 read while reconciliation is pending");
+    assert.equal(requests.length, 8, "no competing RH-014 read while reconciliation is pending");
+
     await React.act(async () => {
       pendingPublicReads[1](true);
       await new Promise(resolve => setTimeout(resolve, 10));

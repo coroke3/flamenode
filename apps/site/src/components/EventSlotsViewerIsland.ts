@@ -403,9 +403,15 @@ export function EventSlotsViewerIsland<T extends ViewerSlotBase>({
     mutate: SlotMutationAction,
     onOutcome?: SlotMutationOutcomeHandler,
   ): Promise<SlotMutationHostResult> => {
-    if (inFlight.current) return { kind: "busy" };
+    if (inFlight.current || reconcileInFlight.current) return { kind: "busy" };
     const receipt = state.captureMutationReceipt();
     if (!receipt) return { kind: "stale" };
+    if (staleReconcilePending.current) {
+      // A new committed receipt still owes a read-only reconciliation.
+      // Do not start a second POST against an unreconciled snapshot.
+      void reconcileCurrent();
+      return { kind: "busy" };
+    }
     inFlight.current = true;
     try {
       const outcome = await runSlotMutation(presentation, mutate, () => currentPath);
