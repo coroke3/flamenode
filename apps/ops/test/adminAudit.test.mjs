@@ -16,7 +16,7 @@ import { createAdminAuditApi } from "../.test-dist/apps/ops/src/api/adminAudit.j
 import { AuditListContent, parseChangedKeys, parseAuditActorSnapshot } from "../.test-dist/apps/ops/src/routes/admin/AuditList.js";
 import { AdminAuditDetailRoute, OpsRoutes } from "../.test-dist/apps/ops/src/routes/router.js";
 import { createOpsApi } from "../.test-dist/apps/ops/src/api/account.js";
-import { MemoryRouter, Routes, Route } from "react-router-dom";
+import { MemoryRouter, Routes, Route, useNavigate } from "react-router-dom";
 
 const row = (overrides={}) => ({
   id:"aud-1",table_name:"videos",target_id:"v1",operation:"UPDATE",
@@ -474,20 +474,29 @@ test("MIG-0733 U04: actual OpsRoutes gate all four audit views before fetching a
     {name:"non-admin",summary:{loggedIn:true,role:"moderator",canAccessAdmin:false,canAccessManage:true},redirect:"/dashboard"},
     {name:"admin",summary:{loggedIn:true,role:"admin",canAccessAdmin:true,canAccessManage:true},redirect:null},
   ];
-  let root;
+  let root, navigate;
+  function NavigationProbe() {
+    const go=useNavigate();
+    React.useEffect(()=>{navigate=go;},[go]);
+    return null;
+  }
+  const nextListPath="/api/admin-read/audit?actor=op2&limit=25";
+  const nextMarker="NEW_AUDIT_CANARY";
+  const nextList={...list,limit:25,rows:[row({actor_user_id:"op2",actor_snapshot_json:JSON.stringify({discord_name:nextMarker,x_name:null,x_user_id:null})})]};
   try {
     for (const [key,value] of Object.entries(globals)) Object.defineProperty(globalThis,key,{configurable:true,writable:true,value});
     for (const scenario of cases) {
       for (const actor of actors) {
         assigned.length=0;
         const calls=[];
-        let resolveSummary;
+        let resolveSummary, resolveNextList;
         const summaryReceipt=new Promise(resolve=>{resolveSummary=resolve;});
         globalThis.fetch=(path,init)=>{
-          calls.push({path:String(path),method:init?.method,cache:init?.cache,credentials:init?.credentials});
+          calls.push({path:String(path),method:init?.method,cache:init?.cache,credentials:init?.credentials,signal:init?.signal});
           if(path==="/api/account/summary") return summaryReceipt;
           if(path==="/api/admin-read/cost-guard-banner") return Promise.resolve(json(200,{mode:"normal",reason:null}));
           if(path===scenario.api) return Promise.resolve(json(200,scenario.body));
+          if(path===nextListPath) return new Promise(resolve=>{resolveNextList=resolve;});
           return Promise.resolve(json(500,{}));
         };
         const target=document.createElement("div");
@@ -495,7 +504,8 @@ test("MIG-0733 U04: actual OpsRoutes gate all four audit views before fetching a
         root=createRoot(target);
         const api=createOpsApi();
         await React.act(async()=>{
-          root.render(React.createElement(MemoryRouter,{initialEntries:[scenario.path]},React.createElement(OpsRoutes,{api})));
+          root.render(React.createElement(MemoryRouter,{initialEntries:[scenario.path]},
+            React.createElement(NavigationProbe),React.createElement(OpsRoutes,{api})));
         });
         assert.deepEqual(calls.map(c=>c.path),["/api/account/summary"],"pending gate must not fetch protected data");
         assert.equal(target.querySelector("[data-admin-shell]"),null);
@@ -519,6 +529,24 @@ test("MIG-0733 U04: actual OpsRoutes gate all four audit views before fetching a
           }
           if(scenario.api.startsWith("/api/admin-read/audit?")) {
             assert.equal(target.querySelector("main.admin-main input[name='limit']")?.value,"50");
+            assert.equal(target.querySelector("main.admin-main input[name='actor']")?.value,"op1");
+            // The real browser location intentionally differs from MemoryRouter.
+            assert.equal(dom.window.location.search,"");
+            const oldRead=calls.find(c=>c.path===scenario.api);
+            await React.act(async()=>{navigate("/admin/audit?actor=op2&limit=25&view=cards");});
+            assert.equal(typeof resolveNextList,"function");
+            assert.equal(oldRead.signal.aborted,true);
+            assert.deepEqual(calls.map(c=>c.path).sort(),
+              ["/api/account/summary","/api/admin-read/cost-guard-banner",scenario.api,nextListPath].sort());
+            assert.doesNotMatch(target.textContent,/PRIVATE_AUDIT_CANARY/);
+            assert.match(target.querySelector("main.admin-main").textContent,/読み込み中/);
+            assert.equal(target.querySelector("main.admin-main input[name='actor']")?.value,"op2");
+            assert.equal(target.querySelector("main.admin-main input[name='limit']")?.value,"25");
+            await React.act(async()=>{resolveNextList(json(200,nextList));});
+            assert.match(target.querySelector("main.admin-main").textContent,/NEW_AUDIT_CANARY/);
+            assert.doesNotMatch(target.textContent,/PRIVATE_AUDIT_CANARY/);
+            assert.equal(target.querySelector('[role="tab"][aria-selected="true"]')?.textContent,"カード");
+            assert.equal(target.querySelector("main.admin-main table"),null);
           }
         }
         assert.ok(calls.every(c=>c.method==="GET"&&c.cache==="no-store"&&c.credentials==="same-origin"));

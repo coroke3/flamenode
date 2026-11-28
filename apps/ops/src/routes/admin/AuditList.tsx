@@ -1,4 +1,5 @@
 import * as React from "react";
+import { useLocation } from "react-router-dom";
 import type { AdminAuditListResponse } from "@flamenode/contracts";
 import { createAdminAuditApi, type AuditAuditApi } from "../../api/adminAudit.js";
 import type { OpsFetch, OpsResult } from "../../api/read.js";
@@ -38,9 +39,12 @@ export function parseChangedKeys(raw: string | null): string[] {
 
 /** MIG-0733 U04: read-only Ops audit list under AdminLayout/OpsGate; no restore mutation. */
 export function AuditList({
-  search = typeof window === "undefined" ? "" : window.location.search,
+  search: explicitSearch,
   fetchFn = fetch,
 }: { search?: string; fetchFn?: OpsFetch }): React.ReactElement {
+  // The router owns the current location, including same-route query changes.
+  const { search: routerSearch } = useLocation();
+  const search = explicitSearch ?? routerSearch;
   const query = React.useMemo(() => parseAuditListQuery(search), [search]);
   const api = React.useMemo(() => createAdminAuditApi(fetchFn), [fetchFn]);
   const data = useApiResult(
@@ -65,7 +69,7 @@ export function AuditListContent({ query, state, api }: {
         <a href="/admin/audit/restore">復元履歴</a>
         <a href="/admin/audit/settings">監査設定</a>
       </nav>
-      <AuditFilterForm query={query} />
+      <AuditFilterForm key={JSON.stringify(query)} query={query} />
       {state.status === "loading" ? <p role="status">読み込み中...</p>
         : state.status === "anonymous" ? <p role="alert">セッションが期限切れです。<a href="/entry">ログイン</a></p>
         : state.status === "forbidden" ? <p role="alert">監査ログを閲覧する権限がありません。</p>
