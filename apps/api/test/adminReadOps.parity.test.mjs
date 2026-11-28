@@ -1551,7 +1551,7 @@ if (runUnderRootTsx(import.meta.url)) {
       assert.ok(receipt.projections[0].bytes < 8 * 1024);
       assert.match(receipt.sql, /video_interactions_auth/);
       assert.doesNotMatch(receipt.sql, /FROM\s+"?video_interactions"?(?:\s|$)/i);
-      assert.match(receipt.sql, /ORDER BY id/i);
+      assert.match(receipt.sql, /ORDER BY classified\.id/i);
       assert.match(receipt.sql, /LIMIT 5/i);
     };
 
@@ -1647,6 +1647,27 @@ if (runUnderRootTsx(import.meta.url)) {
         "video:" + prefix + "03-abs-above stored:6 actual:0 diff:6 threshold:5 [abs(5)]",
         "video:" + prefix + "04-abs-equal stored:5 actual:0 diff:5 threshold:5 [abs(5)]",
       ]));
+
+      // Sort by the stored ID, not the nullable projected ID alias. A
+      // later invalid identifier counts as drift but must not displace the
+      // first five samples. An invalid identifier inside those five still
+      // fails closed (covered by the following identifier-bound cases).
+      for (const storage of ["text", "blob"]) {
+        const lateId = prefix + "zzzz-late-" + "x".repeat(256);
+        video(lateId, 6);
+        try {
+          if (storage === "blob") {
+            sqlite.prepare("UPDATE videos SET id = ? WHERE id = ?").run(Buffer.from("late-blob"), lateId);
+          }
+          const late = await measure();
+          assertReadOnly(late, 2, 5);
+          assert.deepEqual(late.body, expected("warn", 16, many.body.results[0].samples));
+          assert.deepEqual(late.projections[0].sampleIds, many.projections[0].sampleIds);
+          assert.doesNotMatch(late.text, /late-blob|xxxxxxxxxxxxxxxxxxxx/);
+        } finally {
+          sqlite.prepare("DELETE FROM videos WHERE title = ?").run(lateId);
+        }
+      }
 
       const invalidId = prefix + "zz-invalid-counter";
       video(invalidId, "Infinity");

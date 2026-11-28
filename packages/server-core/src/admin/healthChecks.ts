@@ -464,7 +464,7 @@ export async function runAuthLikeCountDriftCandidate(db: AnyDb): Promise<HealthC
         CASE WHEN ratio_threshold >= ${LIKE_COUNT_DRIFT_ABS} THEN 1 ELSE 0 END AS ratio_triggered
       FROM classified
       WHERE valid = 1 AND diff >= threshold
-      ORDER BY id
+      ORDER BY classified.id
       LIMIT 5
     )
     SELECT
