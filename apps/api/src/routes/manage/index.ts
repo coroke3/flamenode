@@ -14,13 +14,20 @@ import { manageVideosRoutes } from "./videos.ts";
 import { manageNotificationCenterRoutes } from "./notificationCenter.ts";
 import { manageOverviewRoutes } from "./overview.ts";
 import { manageSlotsRoutes } from "./slots.ts";
+import { slotAvailableDeleteChunkRoutes } from "./slotAvailableDeleteChunk.ts";
+import { slotBatchAvailableDeleteRoutes } from "./slotBatchAvailableDelete.ts";
+import { slotBatchLabelWriteRoutes } from "./slotBatchLabelWrite.ts";
+import { slotBatchReservedReleaseRoutes } from "./slotBatchReservedRelease.ts";
+import { slotGeneratedChunkRoutes } from "./slotGeneratedChunk.ts";
+import { slotSingleReleaseRoutes } from "./slotSingleRelease.ts";
+import { slotSubmittedDangerRoutes } from "./slotSubmittedDanger.ts";
 import { manageStaffRoutes } from "./staff.ts";
 import { registerStaffWriteRoutes } from "./staffWrite.ts";
 import { manageXLinkRequestRoutes } from "./xlink.ts";
 
-// MIG-0624: authenticated, read-only Manage screens API. Every response (success, 401, 403, 404, 503)
-// is `Cache-Control: private, no-store`. GET does not write; writes (MIG-0655 playlist and MIG-0654 staff mutations)
-// go through the onlyMutating Origin -> session -> writeGuard -> db stack below (D-15-10).
+// MIG-0624: authenticated Manage API. Existing read-only screens remain GET-only; every response
+// (success, 401, 403, 404, 503) is `Cache-Control: private, no-store`. Mutating playlist (MIG-0655),
+// staff (MIG-0654), and slot (MIG-0656) routes use the scoped Origin -> session -> writeGuard -> db stack below (D-15-10).
 // Status mapping of CURRENT redirects/notFound: not logged in -> 401, banned -> 403 (requireAuth),
 // neither admin nor event staff (layout redirect to /dashboard) -> 403 { reason: "manage_access_required" },
 // notFound() -> 404.
@@ -35,29 +42,69 @@ manageRoutes.use("*", async (c, next) => {
 // MIG-0655: playlist writes verify Origin BEFORE reading the Auth.js session.
 const playlistWritePaths = ["/events/:id/youtube-playlist", "/events/:id/youtube-playlist/sync"];
 const staffWritePaths = ["/events/:id/staff", "/events/:id/staff/:staffId", "/events/:id/owner-transfer"];
-const guardedWritePaths = [...playlistWritePaths, ...staffWritePaths];
+// SA-056..064 slot write routes (Origin-first / session / writeGuard / DB).
+const slotWritePaths = [
+  "/events/:id/slots/batch-delete",
+  "/events/:id/slots/batch-release",
+  "/events/:id/slots/labels",
+  "/events/:id/slots/:slotId/release",
+  "/events/:id/slots/generate-chunk",
+  "/events/:id/slots/delete-available-chunk",
+];
+const submittedDangerWritePaths = [
+  "/events/:id/slots/:slotId/force-release-submitted",
+  "/events/:id/slots/:slotId/release-video-keep-reservation",
+];
+const scopedWritePaths = [...playlistWritePaths, ...slotWritePaths, ...submittedDangerWritePaths];
+// Dynamic :slotId path overlaps /batch-delete etc. Apply ONLY to DELETE.
+const singleSlotDeletePath = "/events/:id/slots/:slotId";
+
+
 const originOptions = (c: import("hono").Context<AppEnv>) => ({
   loadSiteUrl: () => c.env.NEXT_PUBLIC_SITE_URL ?? null,
   allowLocalPreview: () => c.env.FLAMENODE_LOCAL_PREVIEW === "1",
 });
-for (const path of guardedWritePaths) {
+for (const path of scopedWritePaths) {
   manageRoutes.use(path, onlyMutating((c, next) => originGuardMiddleware(originOptions(c))(c, next)));
 }
+for (const path of staffWritePaths) {
+  manageRoutes.use(path, onlyMutating((c, next) => originGuardMiddleware(originOptions(c))(c, next)));
+}
+manageRoutes.use(singleSlotDeletePath, (c, next) =>
+  c.req.method === "DELETE" ? originGuardMiddleware(originOptions(c))(c, next) : next());
 manageRoutes.use("*", sessionMiddleware());
 manageRoutes.use("*", requireAuth());
-// The existing read-only /manage API remains unchanged. Every mutating
-// playlist AND staff path must receive writeGuard(identity/TOS) -> DB before
-// the handlers; onlyMutating keeps the GET staff endpoint read-only.
-for (const path of guardedWritePaths) {
+// Existing GET /manage handlers remain read-only. Every mutating playlist, staff,
+// and slot path receives writeGuard(identity/TOS) -> DB before its handler;
+// onlyMutating keeps the GET staff endpoint read-only.
+for (const path of scopedWritePaths) {
   manageRoutes.use(path, onlyMutating((c, next) =>
     writeGuardMiddleware({ ...originOptions(c), requiredRole: null })(c, next)));
   manageRoutes.use(path, onlyMutating(dbMiddleware));
 }
+for (const path of staffWritePaths) {
+  manageRoutes.use(path, onlyMutating((c, next) =>
+    writeGuardMiddleware({ ...originOptions(c), requiredRole: null })(c, next)));
+  manageRoutes.use(path, onlyMutating(dbMiddleware));
+}
+manageRoutes.use(singleSlotDeletePath, (c, next) =>
+  c.req.method === "DELETE"
+    ? writeGuardMiddleware({ ...originOptions(c), requiredRole: null })(c, next)
+    : next());
+manageRoutes.use(singleSlotDeletePath, (c, next) =>
+  c.req.method === "DELETE" ? dbMiddleware(c, next) : next());
 
 manageRoutes.route("/navigation", manageNavigationRoutes);
 manageRoutes.route("/events/:id/staff", manageStaffRoutes);
 registerStaffWriteRoutes(manageRoutes);
 manageRoutes.route("/events/:id/slots", manageSlotsRoutes);
+manageRoutes.route("/events/:id/slots", slotGeneratedChunkRoutes);
+manageRoutes.route("/events/:id/slots", slotAvailableDeleteChunkRoutes);
+manageRoutes.route("/events/:id/slots", slotBatchReservedReleaseRoutes);
+manageRoutes.route("/events/:id/slots", slotBatchLabelWriteRoutes);
+manageRoutes.route("/events/:id/slots", slotBatchAvailableDeleteRoutes);
+manageRoutes.route("/events/:id/slots", slotSingleReleaseRoutes);
+manageRoutes.route("/events/:id/slots", slotSubmittedDangerRoutes);
 manageRoutes.route("/events/:id/edit", manageEventEditRoutes);
 manageRoutes.route("/events/:id/videos/:videoId", manageVideoDetailRoutes);
 manageRoutes.route("/events/:id/videos", manageVideosRoutes);

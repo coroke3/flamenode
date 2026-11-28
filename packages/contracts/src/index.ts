@@ -17,3 +17,4 @@ export * from "./costGuardBanner.ts";
 export * from "./terms.ts"; // MIG-0641: Personal write contract
 export * from "./xidRequest.ts"; // MIG-0659: X ID request / cancel / merge-revert (SA-099..101)
 export * from "./xid.ts"; // MIG-0636: setActiveX contract
+export * from "./slotAdminWrite.ts";
