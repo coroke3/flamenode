@@ -199,6 +199,45 @@ test("SEC-800: preserve exact trusted owner and confirmation messages, and CSV a
   }
 });
 
+test("SEC-800: CSV owner conflicts return local row-specific messages, not provider text", async () => {
+  const s = setup();
+  const existingOwner = { ...csv().rows[0], lineNumber: 3, x_user_id: "owner_x" };
+  const existingMessage = "3行目: 代表者はCSVで変更できません。専用の代表者移譲操作を使用してください。";
+  try {
+    const newOwner = await s.send("POST", "/csv", csv("owner"));
+    assert.equal(newOwner.status, 409, await newOwner.clone().text());
+    assert.deepEqual(await newOwner.json(), {
+      ok: false,
+      message: "2行目: 代表者の追加・変更はCSVでは行えません。専用の代表者移譲操作を使用してください。",
+    });
+    for (const rows of [[existingOwner], [...csv().rows, existingOwner]]) {
+      const result = await s.send("POST", "/csv", { reason: "CSV owner conflict", rows });
+      assert.equal(result.status, 409, await result.clone().text());
+      assert.equal(result.headers.get("cache-control"), "private, no-store");
+      assert.deepEqual(await result.json(), { ok: false, message: existingMessage });
+      assert.deepEqual(s.before(), s.initial);
+      assert.equal(s.stats.batches, 0);
+    }
+  } finally {
+    s.sqlite.close();
+  }
+  // Even the same exact text from a provider is not a trusted local outcome.
+  const faulty = setup({ fault: { match: staffRead, error: new Error(existingMessage) } });
+  try {
+    await withThrowingDiagnostics(async ({ errors }) => {
+      const result = await faulty.send("POST", "/csv", { reason: "CSV owner conflict", rows: [existingOwner] });
+      assert.equal(result.status, 503, await result.clone().text());
+      assert.deepEqual(await result.json(), { ok: false, message: GENERIC });
+      assert.deepEqual(errors, [["[MIG-0654] CSV staff mutation unavailable"]]);
+    });
+    assert.equal(faulty.receipt.readFaults, 1);
+    assert.equal(faulty.stats.batches, 0);
+    assert.deepEqual(faulty.before(), faulty.initial);
+  } finally {
+    faulty.sqlite.close();
+  }
+});
+
 test("SEC-800: projection and diagnostic failure after strict audit preserves original success", async () => {
   const expectedRouteLog = [["[MIG-0654] post-commit staff projection enqueue failed"]];
   for (const mode of ["queue", "route"]) {
