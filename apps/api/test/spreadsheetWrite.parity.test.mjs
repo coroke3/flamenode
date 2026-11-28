@@ -680,6 +680,68 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+  test("MIG-0638 / MIG-0689: future actor revision rejects client assignment before nonce, DML or audit", async () => {
+    resetAllCaches();
+    const { curSqlite, honoSqlite, honoD1, callHono } = createFixture();
+    const column = "actor_snapshot_version";
+    const actor = "orph_x";
+    const patch = (value) => ({ table: "x_users", primaryKey: { id: actor }, column, value });
+    try {
+      const absent = await callHono("PATCH", "/data", patch("1"));
+      assert.equal(absent.status, 400);
+      assert.deepEqual(absent.body, { error: "unknown_column" });
+      // Disposable fixture only: the actual schema/allocator is not adopted.
+      honoSqlite.exec("ALTER TABLE x_users ADD COLUMN actor_snapshot_version INTEGER NOT NULL DEFAULT 0");
+      honoSqlite.prepare("UPDATE x_users SET actor_snapshot_version=? WHERE id=?").run(17, actor);
+      assert.equal(honoSqlite.prepare("SELECT actor_snapshot_version AS v FROM x_users WHERE id=?").get(actor).v, 17);
+      resetAllCaches();
+      const rows = [{ id: actor, x_name: "ordinary-field-preview" }];
+      const good = await callHono("POST", "/import", { table: "x_users", mode: "upsert", dryRun: true, rows });
+      assert.equal(good.status, 200);
+      assert.equal(typeof good.body.previewToken, "string");
+      const snapshot = () => ({
+        actors: honoSqlite.prepare("SELECT * FROM x_users ORDER BY id").all(),
+        audits: allAudits(honoSqlite),
+        queue: allQueueRows(honoSqlite),
+        nonces: honoSqlite.prepare("SELECT * FROM spreadsheet_import_runs ORDER BY nonce").all(),
+      });
+      const before = snapshot();
+      const stats = { ...honoD1.stats };
+      const cases = [];
+      for (const value of ["0", "17", "999", null]) {
+        cases.push(["PATCH", "/data", patch(value), "column_not_editable"]);
+        cases.push(["POST", "/data", { table: "x_users", row: { id: "actor-version-forged", x_name: "fixture", [column]: value } }, "column_not_editable"]);
+        for (const mode of ["insert", "upsert"]) {
+          const forgedRows = [{ ...rows[0], [column]: value }];
+          cases.push(["POST", "/import", { table: "x_users", mode, dryRun: true, rows: forgedRows }, "column_not_editable:" + column]);
+          cases.push(["POST", "/import", { table: "x_users", mode, previewToken: good.body.previewToken, rows: forgedRows }, "column_not_editable:" + column]);
+        }
+      }
+      cases.push(["POST", "/import", {
+        table: "x_users", mode: "upsert", dryRun: true, hasHeader: true, delimiter: "csv",
+        text: "id,x_name,actor_snapshot_version\n" + actor + ",fixture,999",
+      }, "column_not_editable:" + column]);
+      // A valid token for an ordinary payload must not authorize a protected field.
+      for (const [method, path, payload, error] of cases) {
+        const result = await callHono(method, path, payload);
+        assert.equal(result.status, 400, method + " " + path);
+        assert.deepEqual(result.body, { error });
+        assert.equal(result.headers.get("cache-control"), "private, no-store");
+        assert.deepEqual(snapshot(), before, "no actor/audit/queue/nonce side effects");
+        assert.equal(honoD1.stats.writes, stats.writes);
+        assert.equal(honoD1.stats.batches, stats.batches);
+      }
+      assert.equal(cases.length, 25);
+      assert.equal(honoSqlite.prepare("SELECT actor_snapshot_version AS v FROM x_users WHERE id=?").get(actor).v, 17);
+      // Do not apply an otherwise legal mutation on this hypothetical schema:
+      // trigger-aware default/audit-image/CAS behavior remains a rollout gate.
+    } finally {
+      resetAllCaches();
+      curSqlite.close();
+      honoSqlite.close();
+    }
+  });
+
   test("MIG-0638 U02: write/import provider diagnostics never reflect forged column details", async () => {
     resetAllCaches();
     const { honoSqlite, honoD1, callHono, callCurrent } = createFixture();

@@ -281,6 +281,11 @@ export function isSpreadsheetColumnEditable(
 ): boolean {
   if (def.mode === "readonly") return false;
   if (isSpreadsheetSecretColumn(column)) return false;
+  // MIG-0689 actor-history proposal: a future system-allocated revision must
+  // never be a client-supplied cell. This is a pre-adoption write guard only;
+  // the physical column, allocator, audit projection and CAS policy are not
+  // introduced or approved here. Current schemas have no such column.
+  if (def.table === "x_users" && column === "actor_snapshot_version") return false;
   if (SPREADSHEET_VISIBILITY_STATUS_READONLY_COLUMNS.has(`${def.table}.${column}`)) {
     return false;
   }

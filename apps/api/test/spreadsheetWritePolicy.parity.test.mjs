@@ -78,6 +78,22 @@ test("secret, visibility, blocked table and readonly policy cannot drift", () =>
   }
 });
 
+test("MIG-0689 proposed actor revision is system-owned in TARGET even if future catalog exposes it", () => {
+  const x = target.resolveSpreadsheetTableDef("x_users", true);
+  assert.equal(x.mode, "editable");
+  assert.equal(target.isSpreadsheetColumnEditable(x, "actor_snapshot_version"), false);
+  for (const column of ["id", "x_name", "icon_url", "youtube_channel_url"]) {
+    assert.equal(target.isSpreadsheetColumnEditable(x, column), current.isSpreadsheetColumnEditable(current.resolveSpreadsheetTableDef("x_users", true), column), column);
+    assert.equal(target.isSpreadsheetColumnEditable(x, column), true, column);
+  }
+  assert.equal(target.isSpreadsheetColumnEditable(x, "approval_status"), false);
+  // The proposed column is not a secret column, nor a new visibility status.
+  assert.equal(target.isSpreadsheetSecretColumn("actor_snapshot_version"), false);
+  assert.deepEqual(target.SPREADSHEET_VISIBILITY_STATUS_READONLY_COLUMNS, current.SPREADSHEET_VISIBILITY_STATUS_READONLY_COLUMNS);
+  // No broad column-name reservation on unrelated tables.
+  assert.equal(target.isSpreadsheetColumnEditable(target.resolveSpreadsheetTableDef("software_catalog", true), "actor_snapshot_version"), true);
+});
+
 test("policy getters return independent objects instead of shared mutable state", () => {
   const first = target.getSpreadsheetColumnPolicy("events", "review_settings");
   first.maxLength = 1;
