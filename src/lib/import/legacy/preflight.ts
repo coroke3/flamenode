@@ -20,6 +20,23 @@ const LEGACY_IMPORT_SYSTEM_USER_ID = "system_legacy_import";
 const MAX_EVENT_CUSTOM_QUESTIONS = 18;
 const LEGACY_CUSTOM_ANSWER_AUDIT_CONTEXT = "legacy_import:custom-answer";
 
+// Publish only deliberate validation failures, never arbitrary provider errors.
+// Identity lookup also avoids reading an untrusted error's getters/prototype.
+const validationMessages = new WeakMap<object, string>();
+
+class LegacyImportPreflightValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    validationMessages.set(this, message);
+  }
+}
+
+export function legacyImportPreflightValidationMessage(cause: unknown): string | undefined {
+  return typeof cause === "object" && cause !== null
+    ? validationMessages.get(cause)
+    : undefined;
+}
+
 export type LegacyImportPreflightResult = {
   existingEventIds: string[];
   existingVideoIds: string[];
@@ -233,7 +250,7 @@ export async function preflightLegacyImportPlan(
   strategy: LegacyImportStrategy,
 ): Promise<LegacyImportPreflightResult> {
   if (plan.errors.length > 0) {
-    throw new Error(plan.errors.join("\n"));
+    throw new LegacyImportPreflightValidationError(plan.errors.join("\n"));
   }
 
   const errors: string[] = [];
@@ -531,7 +548,7 @@ export async function preflightLegacyImportPlan(
   }
 
   if (errors.length > 0) {
-    throw new Error(errors.join("\n"));
+    throw new LegacyImportPreflightValidationError(errors.join("\n"));
   }
   return {
     existingEventIds: [...existingEvents].sort(),
