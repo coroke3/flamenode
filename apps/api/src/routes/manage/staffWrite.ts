@@ -67,19 +67,34 @@ async function permitted(c: import("hono").Context<AppEnv>): Promise<StaffContex
     }
     return { eventId, user };
   } catch {
-    console.error("[MIG-0654] staff permission read failed");
+    staffDiagnostic("[MIG-0654] staff permission read failed");
     return deny(c, GENERIC_FAILURE, 503);
   }
 }
 
-function assignment(data: UpsertBody, isSiteAdmin: boolean) {
+function parseStaffPermissionInput(raw: string | null | undefined):
+  { ok: true; keys: string[] } | { ok: false; message: string } {
+  try {
+    return { ok: true, keys: parseEventStaffPermissionKeys(raw) };
+  } catch {
+    // This catch surrounds only the pure domain input parser, never D1.
+    // Build the bounded CURRENT message from the validated request, not
+    // from error.message, and never allow it in the mutation error matcher.
+    const invalid = raw && raw.length <= 512
+      ? raw.split(",").map((key) => key.trim()).find((key) => key && !canonicalizePermissionKey(key))
+      : null;
+    return { ok: false, message: invalid && invalid.length <= 100
+      ? `不正な権限キーです: ${invalid}` : "入力エラー" };
+  }
+}
+
+function assignment(data: UpsertBody, raw: readonly string[], isSiteAdmin: boolean) {
   if (data.permission_preset === "xid_reviewer" && !isSiteAdmin) {
     throw new Error("X ID確認権限は site admin 専用です。");
   }
   if (data.permission_preset !== "custom") {
     return { permission_preset: data.permission_preset, custom_permission_keys_json: null };
   }
-  const raw = parseEventStaffPermissionKeys(data.permission_keys);
   if (!isSiteAdmin && raw.some((key) => {
     const canonical = canonicalizePermissionKey(key);
     return canonical !== null && isAdminOnlyKey(canonical);
@@ -117,15 +132,73 @@ function assignmentFromCsv(
   };
 }
 
-// Guarded known CURRENT domain failures may be shown; never expose a SQL, D1,
-// provider or internal stack trace in an HTTP response.
-function domainMessage(error: unknown): string | null {
-  if (!(error instanceof Error)) return null;
-  if (error.message === LAST_OWNER_ERROR) return error.message;
-  if (/^(同じX ID|代表権限|イベント代表者|移譲元|移譲先|自分自身|確認|X ID確認権限|site admin 専用権限|owner を付与|イベントスタッフ)/.test(error.message)) {
-    return error.message;
+// SEC-800: mirror CURRENT's exact fixed domain-message policy. Provider
+// exceptions may contain arbitrary SQL/params; never reflect a prefix match.
+const STAFF_SAFE_DOMAIN_MESSAGES = new Set([
+  LAST_OWNER_ERROR,
+  "X ID確認権限は site admin 専用です。",
+  "site admin 専用権限は付与できません。",
+  "同じX IDを指す既存スタッフ行が複数あるため、先に整理してください。",
+  "イベントスタッフには X ID が必要です。",
+  "このイベントには同じ X ID のスタッフが既に登録されています。",
+  "イベント代表者には、承認済みX IDとowner roleのaccount linkが必要です。",
+  "権限が不足しています (event.members)",
+  "代表権限を付与できるのはイベント代表者または管理者だけです。",
+  "自分の権限を変更する理由を入力してください。",
+  "代表権限の移譲理由を入力してください。",
+  "移譲元は現在の代表者である必要があります。",
+  "移譲先は同じイベントに登録済みのスタッフを選択してください。",
+  "移譲元と移譲先に同じスタッフは指定できません。",
+  "一括スタッフ更新に対象行がありません。",
+  "一括スタッフ更新に重複した行があります。",
+  "更新対象のスタッフが見つからないため、一括更新を中止しました。",
+  "新規スタッフ ID が既存行と衝突しています。",
+  "代表者の追加・変更は一括更新では行えません。専用の代表者移譲操作を使用してください。",
+  "同じイベントに同一 X ID のスタッフを重複登録できません。",
+  "同一イベントに同一 X ID のスタッフを重複登録できません。",
+  "自分自身のスタッフ権限は一括更新できません。個別の確認付き操作を使用してください。",
+  "スタッフ一括置換には理由が必要です。",
+  "一括スタッフ置換に重複または空のスタッフ ID があります。",
+]);
+
+function domainMessage(error: unknown, eventId: string): string | null {
+  let message: unknown;
+  try {
+    if (!(error instanceof Error)) return null;
+    message = error.message;
+  } catch {
+    // A getter or Proxy can throw during error classification itself.
+    return null;
+  }
+  if (typeof message !== "string" || message.length > 240) return null;
+  if (STAFF_SAFE_DOMAIN_MESSAGES.has(message)) return message;
+  // Only reflect complete prompts for the validated route event, not
+  // arbitrary text following a known prefix or another event's identifier.
+  if (VALID_EVENT_ID.test(eventId)) {
+    for (const action of ["SELF CHANGE", "REMOVE SELF", "TRANSFER"]) {
+      if (message === `確認のため「${action} ${eventId}」と入力してください。`) return message;
+    }
   }
   return null;
+}
+
+function staffDiagnostic(message: string): void {
+  try {
+    console.error(message);
+  } catch {
+    // Diagnostics must not replace a fixed error or a committed success.
+  }
+}
+
+// CURRENT separates direct preparation-read failures from domain mutation
+// failures. Discard the provider exception even if its text is identical
+// to an allowlisted domain error or a confirmation prompt.
+async function staffPreparationRead<T>(read: () => Promise<T>): Promise<T> {
+  try {
+    return await read();
+  } catch {
+    throw new Error("staff preparation read failed");
+  }
 }
 
 async function queueProjection(c: import("hono").Context<AppEnv>, ctx: StaffContext, reason: string, includeUsers: boolean) {
@@ -147,7 +220,7 @@ async function queueProjection(c: import("hono").Context<AppEnv>, ctx: StaffCont
     // The staff/ownership write has already committed with strict audit.
     // Projection is post-commit best-effort: never turn a committed write into
     // an HTTP failure that invites clients to replay the mutation.
-    console.error("[MIG-0654] post-commit staff projection enqueue failed");
+    staffDiagnostic("[MIG-0654] post-commit staff projection enqueue failed");
   }
 }
 
@@ -166,15 +239,19 @@ async function upsert(c: import("hono").Context<AppEnv>, targetId: string | null
   if (!xId) return deny(c, "X IDが不正です", 400);
   const access = await permitted(c);
   if (access instanceof Response) return access;
+  // CURRENT validates the supplied key list for every preset, including
+  // non-custom presets whose valid keys will subsequently be ignored.
+  const permissionInput = parseStaffPermissionInput(parsed.data.permission_keys);
+  if (!permissionInput.ok) return deny(c, permissionInput.message, 400);
   try {
     const isAdmin = access.user.role === "admin";
-    const a = assignment(parsed.data, isAdmin);
+    const a = assignment(parsed.data, permissionInput.keys, isAdmin);
     // Authorization is done before any private staff/X-user record is read.
     // Bounded legacy scan prevents two differently formatted rows from creating
     // duplicate canonical X identities. Fail closed when coverage is incomplete.
-    const { results } = await c.env.DB.prepare(
+    const { results } = await staffPreparationRead(() => c.env.DB.prepare(
       "SELECT * FROM event_staff WHERE event_id = ? LIMIT 101",
-    ).bind(access.eventId).all<EventStaffRow>();
+    ).bind(access.eventId).all<EventStaffRow>());
     if (results.length > 100) return deny(c, GENERIC_FAILURE, 503);
     const matches = results.filter((r) => parseCanonicalXId(r.x_user_id) === xId);
     if (matches.length > 1) return deny(c, "同じX IDを指す既存スタッフ行が複数あります。", 409);
@@ -193,9 +270,9 @@ async function upsert(c: import("hono").Context<AppEnv>, targetId: string | null
       await assertActorMayAssignOwner({ db: c.get("db"), eventId: access.eventId,
         actorUserId: access.user.id, isSiteAdmin: isAdmin });
     }
-    const userExists = await c.env.DB.prepare(
+    const userExists = await staffPreparationRead(() => c.env.DB.prepare(
       "SELECT id FROM x_users WHERE id = ? LIMIT 1",
-    ).bind(xId).first<{ id: string }>();
+    ).bind(xId).first<{ id: string }>());
     const extras: EventStaffAtomicExtras | undefined = userExists ? undefined : {
       mutationStatements: [c.get("db").run(sql`
         INSERT INTO x_users (id, x_name, approval_status)
@@ -216,7 +293,8 @@ async function upsert(c: import("hono").Context<AppEnv>, targetId: string | null
       permission_preset: a.permission_preset,
       custom_permission_keys_json: a.custom_permission_keys_json,
       is_public: parsed.data.is_public,
-      public_role_label: parsed.data.public_role_label ?? null,
+      // CURRENT converts empty form labels to null before constructing the write snapshot.
+      public_role_label: parsed.data.public_role_label || null,
     };
     const now = Math.floor(Date.now() / 1000);
     if (existing) {
@@ -235,9 +313,9 @@ async function upsert(c: import("hono").Context<AppEnv>, targetId: string | null
     await queueProjection(c, access, parsed.data.reason, Boolean(extras));
     return c.json({ ok: true, pendingPublicReflection: true }, 200);
   } catch (error) {
-    const message = domainMessage(error);
+    const message = domainMessage(error, access.eventId);
     if (message) return deny(c, message, 409);
-    console.error("[MIG-0654] staff upsert unavailable");
+    staffDiagnostic("[MIG-0654] staff upsert unavailable");
     return deny(c, GENERIC_FAILURE, 503);
   }
 }
@@ -282,9 +360,9 @@ export function registerStaffWriteRoutes(app: Hono<AppEnv>): void {
       await queueProjection(c, access, parsed.data.reason, false);
       return c.json({ ok: true, pendingPublicReflection: true }, 200);
     } catch (error) {
-      const message = domainMessage(error);
+      const message = domainMessage(error, access.eventId);
       if (message) return deny(c, message, 409);
-      console.error("[MIG-0654] owner transfer unavailable");
+      staffDiagnostic("[MIG-0654] owner transfer unavailable");
       return deny(c, GENERIC_FAILURE, 503);
     }
   });
@@ -296,7 +374,20 @@ export function registerStaffWriteRoutes(app: Hono<AppEnv>): void {
     if (request.kind === "too_large") return deny(c, BODY_TOO_LARGE_MESSAGE, 413);
     if (request.kind !== "ok") return deny(c, "入力エラー", 400);
     const parsed = EventStaffCsvBodySchema.safeParse(request.value);
-    if (!parsed.success) return deny(c, parsed.error.issues[0]?.message ?? "CSV入力エラー", 400);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      const path = issue?.path ?? [];
+      // CURRENT identifies the CSV line for an invalid X ID even when the
+      // wire schema rejects it before canonical X-ID normalization.
+      if (path[0] === "rows" && typeof path[1] === "number" && path[2] === "x_user_id") {
+        const rows = request.value.rows;
+        const rawRow = Array.isArray(rows) ? rows[path[1]] : null;
+        const lineNumber = rawRow && typeof rawRow === "object" && typeof rawRow.lineNumber === "number"
+          ? rawRow.lineNumber : path[1] + 1;
+        return deny(c, `${lineNumber}行目: X IDが不正です`, 400);
+      }
+      return deny(c, issue?.message ?? "CSV入力エラー", 400);
+    }
     const access = await permitted(c);
     if (access instanceof Response) return access;
     const isAdmin = access.user.role === "admin";
@@ -314,20 +405,15 @@ export function registerStaffWriteRoutes(app: Hono<AppEnv>): void {
       };
     };
     const normalized: CsvNormalized[] = [];
-    const seen = new Map<string, number>();
     try {
       for (const row of parsed.data.rows) {
-        const xId = parseCanonicalXId(row.x_user_id);
-        if (!xId) return deny(c, `${row.lineNumber}行目: X IDが不正です`, 400);
-        const previous = seen.get(xId);
-        if (previous !== undefined) {
-          return deny(c, `${row.lineNumber}行目: X IDは${previous}行目と重複しています`, 409);
-        }
-        seen.set(xId, row.lineNumber);
+        // CURRENT resolves preset/admin-only/owner policy before canonical X parsing.
         const a = assignmentFromCsv(row.permission_preset, row.permission_keys, isAdmin);
         if (a.permission_preset === "owner") {
-          return deny(c, `${row.lineNumber}行目: 代表者の変更はCSVでは行えません。`, 409);
+          return deny(c, `${row.lineNumber}行目: 代表者の追加・変更はCSVでは行えません。専用の代表者移譲操作を使用してください。`, 409);
         }
+        const xId = parseCanonicalXId(row.x_user_id);
+        if (!xId) return deny(c, `${row.lineNumber}行目: X IDが不正です`, 400);
         normalized.push({
           line: row.lineNumber, xId, displayName: row.display_name,
           values: {
@@ -340,16 +426,16 @@ export function registerStaffWriteRoutes(app: Hono<AppEnv>): void {
         });
       }
     } catch (error) {
-      const message = domainMessage(error);
+      const message = domainMessage(error, access.eventId);
       return deny(c, message ?? "CSV入力エラー", 400);
     }
 
     try {
       // Bound the legacy-canonical scan; never create duplicate staff grants
       // if the event has more rows than we can reliably examine.
-      const staff = await c.env.DB.prepare(
+      const staff = await staffPreparationRead(() => c.env.DB.prepare(
         "SELECT * FROM event_staff WHERE event_id = ? LIMIT 101",
-      ).bind(access.eventId).all<EventStaffRow>();
+      ).bind(access.eventId).all<EventStaffRow>());
       if (staff.results.length > 100) return deny(c, GENERIC_FAILURE, 503);
       const byX = new Map<string, EventStaffRow>();
       const requestedX = new Set(normalized.map((row) => row.xId));
@@ -357,37 +443,48 @@ export function registerStaffWriteRoutes(app: Hono<AppEnv>): void {
         const canonical = parseCanonicalXId(row.x_user_id);
         if (!canonical || !requestedX.has(canonical)) continue;
         if (byX.has(canonical)) {
-          return deny(c, "同じX IDを指す既存スタッフ行が複数あります。", 409);
+          return deny(c, "同じX IDを指す既存スタッフ行が複数あるため、先に整理してください。", 409);
         }
         byX.set(canonical, row);
       }
-      const known = await c.env.DB.prepare(
+      const known = await staffPreparationRead(() => c.env.DB.prepare(
         `SELECT id FROM x_users WHERE id IN (${normalized.map(() => "?").join(",")})`,
-      ).bind(...normalized.map((row) => row.xId)).all<{ id: string }>();
+      ).bind(...normalized.map((row) => row.xId)).all<{ id: string }>());
       const knownIds = new Set(known.results.map((row) => row.id));
       const context = `event-staff-csv:${generateId("batch")}`;
       const newX = normalized.filter((row) => !knownIds.has(row.xId));
-      const upserts = normalized.map((row) => {
+      const upserts = [];
+      // CURRENT checks duplicate CSV X IDs only after every row has passed
+      // assignment/X validation and after the existing-row scan.
+      const seen = new Map<string, number>();
+      for (const row of normalized) {
+        const previous = seen.get(row.xId);
+        if (previous !== undefined) {
+          return deny(c, `${row.line}行目: X IDは${previous}行目と重複しています`, 409);
+        }
+        seen.set(row.xId, row.line);
         const existing = byX.get(row.xId) ?? null;
         if (existing?.permission_preset === "owner") {
-          throw new Error(`${row.line}行目: 代表者はCSVで変更できません。`);
+          // This is a trusted local validation outcome, not a provider error.
+          // Preserve CURRENT's row-specific message without widening domainMessage.
+          return deny(c, `${row.line}行目: 代表者はCSVで変更できません。専用の代表者移譲操作を使用してください。`, 409);
         }
         if (existing && !VALID_STAFF_ID.test(existing.id)) {
           throw new Error("既存スタッフIDが不正です。");
         }
-        return {
+        upserts.push({
           id: existing?.id ?? generateId("es"),
           existingId: existing?.id ?? null,
           values: row.values,
-        };
-      });
+        });
+      }
       const mutations = upserts.length + newX.length;
       const budget = planD1AuditMutationBudget({
         mutationStatementCount: mutations, mutationAssertionCount: mutations,
         auditEntryCount: mutations, distinctActorCount: 1,
       });
       if (!budget.withinLimit) {
-        return deny(c, `このCSVは原子更新上限を超えています（${budget.totalQueryCount}/${budget.limit} query）。件数を分けてください`, 400);
+        return deny(c, `このCSVは1回の原子更新上限を超えています（${budget.totalQueryCount}/${budget.limit} query）。件数を分けて登録してください`, 400);
       }
       const extras: EventStaffBulkAtomicExtras = {
         mutationStatements: newX.map((row) => c.get("db").run(sql`
@@ -412,9 +509,9 @@ export function registerStaffWriteRoutes(app: Hono<AppEnv>): void {
       await queueProjection(c, access, parsed.data.reason, newX.length > 0);
       return c.json({ ok: true, pendingPublicReflection: true }, 200);
     } catch (error) {
-      const message = domainMessage(error);
+      const message = domainMessage(error, access.eventId);
       if (message) return deny(c, message, 409);
-      console.error("[MIG-0654] CSV staff mutation unavailable");
+      staffDiagnostic("[MIG-0654] CSV staff mutation unavailable");
       return deny(c, GENERIC_FAILURE, 503);
     }
   });
@@ -437,9 +534,9 @@ app.delete(`${base}/:staffId`, async (c) => {
   const access = await permitted(c);
   if (access instanceof Response) return access;
   try {
-    const existing = await c.env.DB.prepare(
+    const existing = await staffPreparationRead(() => c.env.DB.prepare(
       "SELECT * FROM event_staff WHERE event_id = ? AND id = ? LIMIT 1",
-    ).bind(access.eventId, staffId).first<EventStaffRow>();
+    ).bind(access.eventId, staffId).first<EventStaffRow>());
     if (!existing) return c.json({ ok: true }, 200);
     await deleteEventStaffWithProtection({
       db: c.get("db"), existing, actorUserId: access.user.id,
@@ -449,9 +546,9 @@ app.delete(`${base}/:staffId`, async (c) => {
     await queueProjection(c, access, parsed.data.reason, false);
     return c.json({ ok: true, pendingPublicReflection: true }, 200);
   } catch (error) {
-    const message = domainMessage(error);
+    const message = domainMessage(error, access.eventId);
     if (message) return deny(c, message, 409);
-    console.error("[MIG-0654] staff delete unavailable");
+    staffDiagnostic("[MIG-0654] staff delete unavailable");
     return deny(c, GENERIC_FAILURE, 503);
   }
 });
