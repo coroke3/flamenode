@@ -109,7 +109,7 @@ const ADMIN = { id: "admin-1", name: "Admin", email: null, image: null,
 // Capture the actual bound statements and batch sizes in the isolated fixture.
 // SQLite permits more binds than D1; do not let a passing SQLite test hide a
 // D1 request-budget violation. No parameter values or SQL contents are stored.
-function setup({ user = ADMIN, role = "admin", settings = "normal", bucket, applyStep, bindings = {}, beforeBatch, captureD1Budget = false } = {}) {
+function setup({ user = ADMIN, role = "admin", settings = "normal", bucket, applyStep, bindings = {}, beforeBatch, captureD1Budget = false, realSession = false } = {}) {
   const { db, sqlite, stats } = createAdminD1();
   const trace = { binds: [], batches: [] };
   if (captureD1Budget) {
@@ -154,7 +154,7 @@ function setup({ user = ADMIN, role = "admin", settings = "normal", bucket, appl
   seedBase(sqlite, { role, settings });
   let d1ApplyCalls = 0;
   const app = new Hono();
-  const admin = createAdminRoutes({
+  const admin = createAdminRoutes(realSession ? {} : {
     session: async (c, next) => {
       c.set("user", user);
       c.set("sessionState", user ? "user" : "none");
@@ -168,9 +168,18 @@ function setup({ user = ADMIN, role = "admin", settings = "normal", bucket, appl
   }));
   app.route("/api/admin", admin);
   const request = (data, origin = SITE) =>
-    app.request("/api/admin/import/legacy/apply", {
-      method: "POST", headers: { Origin: origin }, body: data,
-    }, { DB: db, BUCKET: bucket, NEXT_PUBLIC_SITE_URL: SITE, ...bindings });
+    app.request(
+      realSession ? SITE + "/api/admin/import/legacy/apply" : "/api/admin/import/legacy/apply",
+      {
+        method: "POST",
+        headers: {
+          Origin: origin,
+          ...(realSession ? { Cookie: "__Secure-authjs.session-token=valid-session-token" } : {}),
+        },
+        body: data,
+      },
+      { DB: db, BUCKET: bucket, NEXT_PUBLIC_SITE_URL: SITE, ...bindings },
+    );
   return { request, sqlite, stats, d1Budget, getD1ApplyCalls: () => d1ApplyCalls };
 }
 
@@ -1647,6 +1656,26 @@ function extendLegacyImportVideoCreateSchema(sqlite) {
       PRIMARY KEY(video_id, event_id, question_id));
   `);
 }
+
+test("MIG-0645 U02ba: real Auth.js session exposes four pre-reads; S3 three-read ceiling remains blocked", async () => {
+  const { bucket } = previewBucket();
+  const { request, sqlite, d1Budget } = setup({
+    bucket, captureD1Budget: true, realSession: true, applyStep: legacyImportD1ApplyStep,
+  });
+  extendLegacyImportUserSchema(sqlite);
+  sqlite.exec('CREATE TABLE "session" ("sessionToken" TEXT PRIMARY KEY, "userId" TEXT, expires INTEGER)');
+  sqlite.prepare('INSERT INTO "session" ("sessionToken", "userId", expires) VALUES (?, ?, ?)')
+    .run("valid-session-token", ADMIN.id, Date.now() + 3600_000);
+  const { form } = await createApplyCredential(bucket, ADMIN.id, questionPlan(1));
+  const mark = d1Budget.mark();
+  const response = await request(form());
+  assert.equal(response.status, 200, JSON.stringify(await response.clone().json()));
+  assert.equal((await response.json()).progress.stage, "x_users");
+  // One real Auth.js session SELECT + write identity/ToS + CostGuard + apply-stage
+  // snapshot. This is a characterization of the current path, NOT S3 compliance.
+  d1Budget.assertSince(mark, "real Auth.js session and first apply stage", 4, 1);
+  assert.ok(4 > 3, "the actual session path exceeds ZERO_1102's three pre-read ceiling");
+});
 
 test("MIG-0645 U02az: mixed-case and Unicode video proofs use SQLite BINARY; historical proofs match one whole order only", async () => {
   const { bucket } = previewBucket();
