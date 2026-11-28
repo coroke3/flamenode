@@ -500,11 +500,11 @@ test("MIG-0645 U02x Hono: x_users mutation, rebuild queue and receipt commit ato
     const existing = sqlite.prepare(
       "SELECT x_name, approval_status FROM x_users WHERE id = ?",
     ).get("legacy_x_existing");
-    assert.deepEqual(existing, { x_name: "Existing creator", approval_status: "approved" });
+    assert.deepEqual({ ...existing }, { x_name: "Existing creator", approval_status: "approved" });
     const created = sqlite.prepare(
       "SELECT x_name, icon_url, youtube_channel_url, approval_status FROM x_users WHERE id = ?",
     ).get("legacy_x_new");
-    assert.deepEqual(created, {
+    assert.deepEqual({ ...created }, {
       x_name: "New creator",
       icon_url: "https://example.com/new.png",
       youtube_channel_url: "https://youtube.com/@new",
@@ -514,7 +514,7 @@ test("MIG-0645 U02x Hono: x_users mutation, rebuild queue and receipt commit ato
     const queue = sqlite.prepare(
       "SELECT id, target_type, target_id, reason, priority, requested_by_user_id FROM static_rebuild_queue",
     ).get();
-    assert.deepEqual(queue, {
+    assert.deepEqual({ ...queue }, {
       id: "legacy_import_" + runDigest(credential.previewToken) + "_" +
         credential.planHash.slice(0, 24) + "_x_users_0_0",
       target_type: "users_index",
