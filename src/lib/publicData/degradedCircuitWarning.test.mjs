@@ -74,6 +74,7 @@ function createFixture(runtime, { initial = 19, fault = null, badLogger = false 
     },
     async delete(key) {
       recordWrite("delete", key);
+      await pauseIfSelected("delete", key);
       if (faults[0] === "cleanup" && key === hitKey) {
         faults.shift();
         throw new Error("synthetic DELETE failure");
@@ -402,6 +403,90 @@ function registerTests(test, equal, runtime) {
     f.tick(900); await f.miss(f.now());
     equal(f.values.get("public:degraded_circuit:miss:2"), "3");
     equal(f.snapshot().pending, 0);
+    equal(f.rateViolations.length, 0);
+  });
+  test("SEC-798: expired delayed marker read cannot renew an old OPEN", async () => {
+    const f = make({fault:"marker"});
+    await f.miss(f.now());
+    f.tick(89000);
+    f.values.set(f.openKey, "1");
+    const pause = f.pause("get", f.openKey);
+    const repairing = f.miss(f.now());
+    await pause.started;
+    f.tick(1000);
+    f.values.delete(f.openKey);
+    pause.resume(); await repairing;
+    equal(f.snapshot().stage, null);
+    equal(await f.isOpen(), false);
+    equal(f.values.has(f.openKey), false);
+    equal(f.writes.filter(x=>x[0]==="put"&&x[1]===f.openKey).length, 1);
+    equal(f.writes.filter(x=>x[0]==="delete"&&x[1]===f.hitKey).length, 0);
+  });
+  test("SEC-798: hits at original deadline survive outstanding marker PUT", async () => {
+    const f = make({fault:"marker"});
+    await f.miss(f.now());
+    f.tick(89000);
+    const pause = f.pauseMarker();
+    const repairing = f.miss(f.now());
+    await pause.started;
+    f.tick(1000);
+    await f.hit(); await f.hit(); await f.hit();
+    equal(await f.isOpen(), true);
+    equal(f.snapshot().stage, "marker");
+    equal(f.writes.filter(x=>x[0]==="delete"&&x[1]===f.openKey).length, 0);
+    pause.resume(); await repairing;
+    equal(f.values.has(f.openKey), false);
+    equal(f.snapshot().open, false);
+    equal(f.snapshot().stage, null);
+    equal(f.rateViolations.length, 0);
+  });
+  test("SEC-798: acknowledgement beyond write-start TTL needs a fresh probe", async () => {
+    const f = make();
+    const pause = f.pauseMarker();
+    const repairing = f.miss(f.now());
+    await pause.started;
+    f.tick(90000);
+    await f.hit(); await f.hit(); await f.hit();
+    pause.resume(); await repairing;
+    equal(f.snapshot().known, false);
+    equal(f.snapshot().stage, null);
+    equal(f.values.get(f.openKey), "1");
+    equal(f.writes.filter(x=>x[0]==="delete"&&x[1]===f.openKey).length, 0);
+    equal(f.writes.filter(x=>x[0]==="delete"&&x[1]===f.hitKey).length, 0);
+    equal(await f.isOpen(), true);
+  });
+  test("SEC-798: delayed cold hit read cannot cancel newer local threshold", async () => {
+    const f = make({initial:0});
+    f.seed({bucket:1,observed:19,pending:0,lastFlushAt:-Infinity});
+    const pause = f.pause("get", f.openKey);
+    const hitting = f.hit();
+    await pause.started;
+    await f.miss(f.now());
+    equal(await f.isOpen(), true);
+    equal(f.snapshot().stage, "marker");
+    pause.resume(); await hitting;
+    equal(f.values.get(f.openKey), "1");
+    equal(f.snapshot().open, true);
+    equal(f.snapshot().stage, null);
+    equal(f.snapshot().pending, 1);
+  });
+  test("SEC-798: newer threshold during old close cleanup propagates after cleanup", async () => {
+    const f = make();
+    await f.miss(f.now());
+    await f.hit(); await f.hit();
+    f.tick(1000);
+    const pause = f.pause("delete", f.hitKey);
+    const closing = f.hit();
+    await pause.started;
+    f.seed({bucket:1,observed:19,pending:0,lastFlushAt:-Infinity});
+    await f.miss(f.now());
+    equal(await f.isOpen(), true);
+    equal(f.snapshot().stage, "marker");
+    equal(f.values.has(f.openKey), false);
+    pause.resume(); await closing;
+    equal(f.values.get(f.openKey), "1");
+    equal(f.snapshot().open, true);
+    equal(f.snapshot().stage, null);
     equal(f.rateViolations.length, 0);
   });
 }

@@ -107,13 +107,16 @@ async function putOpenMarkerIfNeeded(
   ) {
     return null;
   }
-  if ((await kv.get(key)) === "1") {
+  const firstMarker = await kv.get(key);
+  if (Date.now() >= expiresAt) throw new Error("degraded circuit repair expired");
+  if (firstMarker === "1") {
     openMarkerKnown = true;
     markCircuitOpen(nowMs, openRepair !== null);
     return null;
   }
 
   await waitForKvWriteSlot(key);
+  if (Date.now() >= expiresAt) throw new Error("degraded circuit repair expired");
   // Re-check after waiting. Another request in this isolate may have completed
   // the marker while this request was waiting for the KV rate window.
   if (
@@ -123,23 +126,26 @@ async function putOpenMarkerIfNeeded(
   ) {
     return null;
   }
-  if ((await kv.get(key)) === "1") {
+  const secondMarker = await kv.get(key);
+  if (Date.now() >= expiresAt) throw new Error("degraded circuit repair expired");
+  if (secondMarker === "1") {
     openMarkerKnown = true;
     markCircuitOpen(nowMs, openRepair !== null);
     return null;
   }
-
-  if (Date.now() >= expiresAt) throw new Error("degraded circuit repair expired");
   const writeStartedAt = Date.now();
   lastKvWriteAttemptAt.set(key, writeStartedAt);
   try {
     await kv.put(key, "1", {
       expirationTtl: DEGRADED_CIRCUIT_OPEN_TTL_SEC,
     });
-    openMarkerKnown = true;
+    const writtenUntil = writeStartedAt + DEGRADED_CIRCUIT_OPEN_TTL_SEC * 1_000;
+    // An acknowledged write can outlive its conservative local TTL estimate.
+    // In that case force a fresh marker probe rather than assuming absence or
+    // renewing the local TTL from the time the receipt arrived.
+    openMarkerKnown = Date.now() < writtenUntil;
     markCircuitOpen(writeStartedAt, openRepair !== null);
-    // Only our acknowledged PUT provides a conservative known TTL boundary.
-    return writeStartedAt + DEGRADED_CIRCUIT_OPEN_TTL_SEC * 1_000;
+    return writtenUntil;
   } catch (error) {
     openMarkerKnown = false;
     throw error;
@@ -271,6 +277,7 @@ async function attemptOpenRepair(kv: KVNamespace, nowMs: number): Promise<void> 
     }
   } catch {
     // Retry only the unfinished OPEN stage on a later request.
+    if (openRepair === repair && Date.now() >= repair.expiresAt) openRepair = null;
   } finally {
     openRepairInFlight = false;
   }
@@ -280,7 +287,8 @@ async function reconcileOpenRepair(kv: KVNamespace, nowMs: number): Promise<void
   await attemptOpenRepair(kv, nowMs);
   // Hits accrued while marker I/O was in flight must not require a fourth hit.
   // Close using this request's binding, not the earlier request's promise.
-  if (localCircuitState.open && shouldCloseDegradedCircuit(localCircuitState.hitStreak)) {
+  if (localCircuitState.open && Date.now() < localCircuitState.openUntil &&
+    shouldCloseDegradedCircuit(localCircuitState.hitStreak)) {
     await closeCircuitIfReady(kv, Date.now());
   }
 }
@@ -489,8 +497,12 @@ export async function recordDegradedCircuitR2Hit(): Promise<void> {
     return;
   }
 
-  if (localCircuitState.open && now >= localCircuitState.openUntil) {
+  if (localCircuitState.open && now >= localCircuitState.openUntil &&
+    !openRepairInFlight && !hitCloseInFlight && !missFlushInFlight) {
+    // Do not erase a pending marker receipt or accumulated hits while an
+    // operation is outstanding. A fresh probe is required after expiry.
     markCircuitClosed(now);
+    localCircuitState.lastKvProbeAt = Number.NEGATIVE_INFINITY;
   }
 
   localCircuitState.hitStreak += 1;
@@ -510,7 +522,12 @@ async function closeCircuitIfReady(kv: KVNamespace, now: number): Promise<void> 
   hitCloseInFlight = true;
   try {
     localCircuitState.lastKvProbeAt = now;
-    if ((await kv.get(degradedCircuitOpenKey())) !== "1") {
+    const revision = circuitRevision;
+    const remoteOpen = await kv.get(degradedCircuitOpenKey());
+    // A miss may have established a newer local threshold while this hit
+    // awaited KV. Do not clear that repair from a stale closed receipt.
+    if (revision !== circuitRevision) return;
+    if (remoteOpen !== "1") {
       markCircuitClosed(now);
       return;
     }
@@ -545,8 +562,8 @@ async function closeCircuitIfReady(kv: KVNamespace, now: number): Promise<void> 
     // Best effort only.
   } finally {
     hitCloseInFlight = false;
-  }
-  if (openRepair && localCircuitState.open && !shouldCloseDegradedCircuit(localCircuitState.hitStreak)) {
-    await attemptOpenRepair(kv, Date.now());
+    if (openRepair && localCircuitState.open && !shouldCloseDegradedCircuit(localCircuitState.hitStreak)) {
+      await attemptOpenRepair(kv, Date.now());
+    }
   }
 }
