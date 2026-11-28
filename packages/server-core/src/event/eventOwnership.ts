@@ -34,6 +34,29 @@ const OPERABLE_OWNER_ERROR =
   "イベント代表者には、承認済みX IDとowner roleのaccount linkが必要です。";
 
 /**
+ * Keep provider read failures distinct from trusted domain validation errors.
+ * Route adapters may expose allowlisted domain messages, so a raw D1 exception
+ * must never cross this boundary with attacker/provider-controlled text.
+ */
+class EventOwnershipPreparationReadError extends Error {
+  constructor(cause: unknown) {
+    // CURRENT Next.js 15.5.28 unstable_rethrow walks Error.cause for nested
+    // redirect/notFound control-flow errors. Keep the outer message fixed so
+    // provider text remains non-domain and is never reflected by adapters.
+    super("event ownership preparation read failed", { cause });
+    this.name = "EventOwnershipPreparationReadError";
+  }
+}
+
+async function ownershipPreparationRead<T>(read: () => Promise<T>): Promise<T> {
+  try {
+    return await read();
+  } catch (cause) {
+    throw new EventOwnershipPreparationReadError(cause);
+  }
+}
+
+/**
  * 操作可能owner Xの正本条件。
  * 引数は bind 用の文字列 ID、または event_staff.x_user_id など列参照。
  * 列の `.name`（"x_user_id" という文字）を渡してはならない。
@@ -77,9 +100,8 @@ export function remainingOperableEventOwnerSql(eventId: string, excludedStaffId:
 }
 
 async function assertOperableOwnerX(db: ServerCoreDb, xUserId: string): Promise<void> {
-  if ((await countOwnerRoleLinksForXUser(db, xUserId)) < 1) {
-    throw new Error(OPERABLE_OWNER_ERROR);
-  }
+  const count = await ownershipPreparationRead(() => countOwnerRoleLinksForXUser(db, xUserId));
+  if (count < 1) throw new Error(OPERABLE_OWNER_ERROR);
 }
 
 export type EventStaffWriteValues = {
@@ -168,7 +190,7 @@ export async function getEventOwners(
   db: ServerCoreDb,
   eventId: string,
 ): Promise<EventStaffRow[]> {
-  return db
+  return ownershipPreparationRead(() => db
     .select()
     .from(eventStaff)
     .where(
@@ -177,7 +199,7 @@ export async function getEventOwners(
         eq(eventStaff.permission_preset, "owner"),
         operableOwnerXSql(eventStaff.x_user_id),
       )!,
-    );
+    ));
 }
 
 /** 認証ユーザーに紐づく承認済みX名義を正本リンクから解決する。 */
@@ -185,7 +207,7 @@ export async function getApprovedXIdsForUser(
   db: ServerCoreDb,
   authUserId: string,
 ): Promise<string[]> {
-  return getApprovedLinkedXUserIds(db, authUserId);
+  return ownershipPreparationRead(() => getApprovedLinkedXUserIds(db, authUserId));
 }
 
 export async function assertEventWillRetainOwner(args: {
@@ -207,10 +229,10 @@ export async function validateEventStaffUniqueness(args: {
   candidate: Pick<EventStaffRow, "id" | "x_user_id">;
 }): Promise<void> {
   validateEventStaffSubject({ xUserId: args.candidate.x_user_id });
-  const rows = await args.db
+  const rows = await ownershipPreparationRead(() => args.db
     .select()
     .from(eventStaff)
-    .where(eq(eventStaff.event_id, args.eventId));
+    .where(eq(eventStaff.event_id, args.eventId)));
   validateRowsForUniqueness({
     rows: rows.map(asOwnershipRow),
     candidate: {
@@ -494,10 +516,10 @@ export async function bulkUpsertEventStaffWithProtection(args: {
     throw new Error("一括スタッフ更新に対象行がありません。");
   }
   const extras = normalizeEventStaffAtomicExtras(args.atomicExtras);
-  const existingRows = await args.db
+  const existingRows = await ownershipPreparationRead(() => args.db
     .select()
     .from(eventStaff)
-    .where(eq(eventStaff.event_id, args.eventId));
+    .where(eq(eventStaff.event_id, args.eventId)));
   const existingById = new Map(existingRows.map((row) => [row.id, row]));
   const prospectiveById = new Map(existingRows.map((row) => [row.id, row]));
   const mutatedIds = new Set<string>();
@@ -667,10 +689,10 @@ export async function buildReplaceEventStaffWithProtection(args: {
   }
   if (args.replacements.length === 0) throw new Error(LAST_OWNER_ERROR);
   const extras = normalizeEventStaffAtomicExtras(args.atomicExtras);
-  const beforeRows = await args.db
+  const beforeRows = await ownershipPreparationRead(() => args.db
     .select()
     .from(eventStaff)
-    .where(eq(eventStaff.event_id, args.eventId));
+    .where(eq(eventStaff.event_id, args.eventId)));
   const ids = new Set<string>();
   const xSubjects = new Set<string>();
   let ownerCount = 0;
@@ -785,7 +807,7 @@ export async function transferEventOwnership(args: {
   context?: string | null;
   now?: number;
 }): Promise<{ transferRunId: string }> {
-  const rows = await args.db
+  const rows = await ownershipPreparationRead(() => args.db
     .select()
     .from(eventStaff)
     .where(
@@ -793,7 +815,7 @@ export async function transferEventOwnership(args: {
         eq(eventStaff.event_id, args.eventId),
         inArray(eventStaff.id, [args.fromStaffId, args.toStaffId]),
       )!,
-    );
+    ));
   const from = rows.find((row) => row.id === args.fromStaffId) ?? null;
   const to = rows.find((row) => row.id === args.toStaffId) ?? null;
 

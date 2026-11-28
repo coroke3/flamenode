@@ -57,36 +57,238 @@ export type ParsedOperationModeKvMirror = {
 
 /** ZERO_1102 rule 78: request-time JSON.parse is capped at 64 KiB. */
 export const KV_MIRROR_PARSE_LIMIT = 64 * 1024;
-const KV_MIRROR_TAIL_SCAN = 256;
-const OVERSIZED_OPEN = /^\s*\{/;
-const OVERSIZED_MODE = /"mode"\s*:\s*"([a-z_]+)"/;
-const OVERSIZED_UPDATED_AT = /"updated_at"\s*:\s*(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*[,}]/;
-const OVERSIZED_CLOSE = /\}\s*$/;
-
 /**
- * Bounded scan for a valid mirror above the parse limit (no JSON.parse).
- * Mode and updated_at are looked up only in the first 64 KiB head and a short
- * tail (writers put them outside the large reason string; an escaped quote
- * inside a reason cannot match the unescaped key patterns). Reason is dropped
- * (null). Truncated or unrecognised text stays null (normal).
+ * Oversized legacy mirrors: validate the complete JSON grammar without
+ * constructing the large reason or calling JSON.parse on >64 KiB input.
+ * The state machine uses O(nesting) memory and checks top-level keys only.
+ * Duplicate properties follow JSON.parse's last-key-wins semantics.
+ * Small key/mode tokens are decoded with JSON.parse (at most 128 chars).
  */
 function scanOversizedKvMirror(raw: string): ParsedOperationModeKvMirror | null {
-  const head = raw.slice(0, KV_MIRROR_PARSE_LIMIT);
-  const tail = raw.slice(-KV_MIRROR_TAIL_SCAN);
-  if (!OVERSIZED_OPEN.test(head) || !OVERSIZED_CLOSE.test(tail)) return null;
-  const mode = OVERSIZED_MODE.exec(head)?.[1];
-  if (!isOperationMode(mode)) return null;
-  const at = OVERSIZED_UPDATED_AT.exec(head) ?? OVERSIZED_UPDATED_AT.exec(tail);
-  if (!at) return null;
-  const updatedAt = Number(at[1]);
-  if (!Number.isFinite(updatedAt)) return null;
-  return { mode, updated_at: updatedAt, reason: null };
+  let i = 0;
+  const n = raw.length;
+  // Only JSON's four ASCII whitespace characters are allowed. Skip long
+  // runs natively rather than paying a JS iteration for every code unit.
+  const whitespaceRun = /[ \t\n\r]+/y;
+  const whitespace = (): void => {
+    const c = raw[i];
+    if (c !== " " && c !== "\t" && c !== "\n" && c !== "\r") return;
+    whitespaceRun.lastIndex = i;
+    if (whitespaceRun.test(raw)) i = whitespaceRun.lastIndex;
+  };
+  // Keep the fast native search for ordinary text. At an escape, consume
+  // bounded batches of valid escapes and short plain runs; this avoids one
+  // JS iteration per escape in legacy mirrors without an unbounded regex
+  // repetition stack. Longer plain runs use stringSpecial again.
+  const stringSpecial = /["\\\u0000-\u001f]/g;
+  const escapedRun = /(?:\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4})[^"\\\u0000-\u001f]{0,16}){1,256}/y;
+  const stringToken = (): [number, number] => {
+    const start = i;
+    if (raw[i++] !== '"') throw new Error("quote");
+    stringSpecial.lastIndex = i;
+    while (true) {
+      const match = stringSpecial.exec(raw);
+      if (!match) throw new Error("unterminated string");
+      i = stringSpecial.lastIndex;
+      if (match[0] === '"') return [start, i];
+      if (match[0] !== "\\") throw new Error("control");
+      escapedRun.lastIndex = i - 1;
+      if (!escapedRun.test(raw)) throw new Error("invalid escape");
+      i = escapedRun.lastIndex;
+      stringSpecial.lastIndex = i;
+    }
+  };
+  const smallString = (token: [number, number]): string | null =>
+    token[1] - token[0] <= 128 ? JSON.parse(raw.slice(token[0], token[1])) as string : null;
+  // A sticky match consumes a valid JSON number prefix. The enclosing
+  // array/object state still rejects any invalid suffix (01, 1., 1e+, etc.).
+  const numberPattern = /-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/y;
+  const numberToken = (): [number, number] => {
+    const start = i;
+    numberPattern.lastIndex = i;
+    if (!numberPattern.test(raw)) throw new Error("number");
+    i = numberPattern.lastIndex;
+    return [start, i];
+  };
+  // Skip batches of short scalar array entries only when each is followed by
+  // a comma. Short unescaped strings are also complete scalar tokens;
+  // escaped/longer strings, longer numbers and containers use the full scanner.
+  // The next state still requires a value, so a trailing comma is invalid.
+  const scalarArrayRun = /(?:(?:true|false|null|-?(?:0|[1-9][0-9]{0,15})(?:\.[0-9]{1,16})?(?:[eE][+-]?[0-9]{1,6})?|"[^"\\\u0000-\u001f]{0,32}")[ \t\r\n]{0,16},[ \t\r\n]{0,16}){2,256}/y;
+  // Only nested object members may be skipped: root keys can change mode
+  // or updated_at. Require complete comma-delimited scalar members; all
+  // escaped or longer keys/values and containers use the general scanner.
+  const scalarObjectRun = /(?:"[^"\\\u0000-\u001f]{0,32}"[ \t\r\n]{0,16}:[ \t\r\n]{0,16}(?:true|false|null|-?(?:0|[1-9][0-9]{0,15})(?:\.[0-9]{1,16})?(?:[eE][+-]?[0-9]{1,6})?|"[^"\\\u0000-\u001f]{0,32}")[ \t\r\n]{0,16},[ \t\r\n]{0,16}){2,256}/y;
+  // Batch only two-or-more adjacent array openers; single arrays keep the original path.
+  const arrayOpenRun = /\[+/y;
+  // One byte per open container; only the root needs a decoded property key.
+  // Grow with actual nesting rather than allocating one object per frame.
+  const OBJECT_FIRST_KEY = 0, OBJECT_KEY = 1, OBJECT_COLON = 2,
+    OBJECT_VALUE = 3, OBJECT_AFTER = 4;
+  const ARRAY_FIRST_VALUE = 5, ARRAY_VALUE = 6, ARRAY_AFTER = 7;
+  let stack = new Uint8Array(32);
+  let depth = 0;
+  let rootKey: string | null = null;
+  const push = (state: number): void => {
+    if (depth === stack.length) {
+      const larger = new Uint8Array(Math.min(n, stack.length * 2));
+      larger.set(stack);
+      stack = larger;
+    }
+    stack[depth++] = state;
+  };
+  let mode: string | null = null;
+  let updatedAt = NaN;
+  const value = (rootKey: string | null): void => {
+    whitespace();
+    const c = raw[i];
+    if (c === "{" || c === "[") {
+      if (c === "[") {
+        if (raw[i + 1] === "[") {
+          arrayOpenRun.lastIndex = i;
+          arrayOpenRun.test(raw);
+          const count = arrayOpenRun.lastIndex - i;
+          i += count;
+          const needed = depth + count;
+          if (needed > stack.length) {
+            const larger = new Uint8Array(Math.min(n, Math.max(needed, stack.length * 2)));
+            larger.set(stack);
+            stack = larger;
+          }
+          stack.fill(ARRAY_AFTER, depth, needed - 1);
+          stack[needed - 1] = ARRAY_FIRST_VALUE;
+          depth = needed;
+        } else {
+          i++;
+          push(ARRAY_FIRST_VALUE);
+        }
+      } else {
+        i++;
+        push(OBJECT_FIRST_KEY);
+      }
+      if (rootKey === "mode") mode = null;
+      if (rootKey === "updated_at") updatedAt = NaN;
+      return;
+    }
+    if (c === '"') {
+      const token = stringToken();
+      if (rootKey === "mode") mode = smallString(token);
+      if (rootKey === "updated_at") updatedAt = NaN;
+      return;
+    }
+    if (c === "-" || (c >= "0" && c <= "9")) {
+      const token = numberToken();
+      if (rootKey === "mode") mode = null;
+      if (rootKey === "updated_at") updatedAt =
+        Number(raw.slice(token[0], token[1]));
+      return;
+    }
+    for (const literal of ["true", "false", "null"]) {
+      if (!raw.startsWith(literal, i)) continue;
+      i += literal.length;
+      if (rootKey === "mode") mode = null;
+      if (rootKey === "updated_at") updatedAt = NaN;
+      return;
+    }
+    throw new Error("value");
+  };
+  try {
+    whitespace();
+    if (raw[i++] !== "{") return null;
+    push(OBJECT_FIRST_KEY);
+    while (depth > 0) {
+      whitespace();
+      const top = depth - 1;
+      const state = stack[top];
+      switch (state) {
+        case OBJECT_FIRST_KEY:
+        case OBJECT_KEY: {
+          if (state === OBJECT_FIRST_KEY && raw[i] === "}") {
+            i++; depth--; break;
+          }
+          if (raw[i] !== '"') return null;
+          if (depth > 1 && state === OBJECT_KEY) {
+            scalarObjectRun.lastIndex = i;
+            if (scalarObjectRun.test(raw)) {
+              i = scalarObjectRun.lastIndex;
+              break;
+            }
+          }
+          const token = stringToken();
+          if (depth === 1) rootKey = smallString(token);
+          stack[top] = OBJECT_COLON;
+          break;
+        }
+        case OBJECT_COLON:
+          if (raw[i++] !== ":") return null;
+          stack[top] = OBJECT_VALUE;
+          break;
+        case OBJECT_VALUE:
+          stack[top] = OBJECT_AFTER;
+          value(depth === 1 ? rootKey : null);
+          break;
+        case OBJECT_AFTER:
+          if (raw[i] === ",") { i++; stack[top] = OBJECT_KEY; break; }
+          if (raw[i] === "}") { i++; depth--; break; }
+          return null;
+        case ARRAY_FIRST_VALUE:
+          if (raw[i] === "]") { i++; depth--; break; }
+          // The first element follows the same grammar as later elements.
+          stack[top] = ARRAY_AFTER;
+          value(null);
+          break;
+        case ARRAY_VALUE: {
+          const c = raw[i];
+          if (c === '"' || c === "t" || c === "f" || c === "n" || c === "-" || (c >= "0" && c <= "9")) {
+            scalarArrayRun.lastIndex = i;
+            if (scalarArrayRun.test(raw)) {
+              i = scalarArrayRun.lastIndex;
+              break;
+            }
+          }
+          stack[top] = ARRAY_AFTER;
+          value(null);
+          break;
+        }
+        case ARRAY_AFTER:
+          if (raw[i] === ",") { i++; stack[top] = ARRAY_VALUE; break; }
+          if (raw[i] === "]") {
+            i++;
+            depth--;
+            // Collapse only adjacent array parents; stop at an object frame.
+            if (raw[i] === "]" && depth > 0 && stack[depth - 1] === ARRAY_AFTER) {
+              while (depth > 0 && stack[depth - 1] === ARRAY_AFTER && raw[i] === "]") {
+                i++;
+                depth--;
+              }
+            }
+            break;
+          }
+          return null;
+        default:
+          return null;
+      }
+    }
+    whitespace();
+    if (i !== n || !isOperationMode(mode) || !Number.isFinite(updatedAt)) return null;
+    return { mode, updated_at: updatedAt, reason: null };
+  } catch {
+    return null;
+  }
 }
 
 /** Mirrors CURRENT kvMirrorCore: invalid reason is absent, not coerced. */
 export function parseKvMirror(raw: string | null): ParsedOperationModeKvMirror | null {
   if (!raw) return null;
-  if (raw.length > KV_MIRROR_PARSE_LIMIT) return scanOversizedKvMirror(raw);
+  // String.length counts UTF-16 code units, not UTF-8 bytes. A unit
+  // occupies at most three UTF-8 bytes (a surrogate pair uses four total).
+  // Only borderline inputs need encoding; encodeInto caps the temporary
+  // allocation at the parse limit and stops before an incomplete code point.
+  if (
+    raw.length > KV_MIRROR_PARSE_LIMIT ||
+    (raw.length > Math.floor(KV_MIRROR_PARSE_LIMIT / 3) &&
+      new TextEncoder().encodeInto(raw, new Uint8Array(KV_MIRROR_PARSE_LIMIT)).read !== raw.length)
+  ) return scanOversizedKvMirror(raw);
   try {
     const parsed = JSON.parse(raw) as {
       mode?: unknown;

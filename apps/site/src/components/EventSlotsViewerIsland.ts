@@ -1,4 +1,5 @@
 import * as React from "react";
+import { flushSync } from "react-dom";
 import { ACTIVE_X_CHANGED_EVENT } from "../../../../src/lib/client/activeXSwitchEvents.ts";
 import {
   runSlotMutation,
@@ -219,6 +220,9 @@ export function useEventSlotsViewer<T extends ViewerSlotBase>(
   }>({ value: EMPTY_OVERLAY, baseSlots: null, eventId: null, scope: null });
   const [loading, setLoading] = React.useState(true);
   const [refreshNonce, setRefreshNonce] = React.useState(0);
+  const [suspended, setSuspended] = React.useState(false);
+  const suspendedRef = React.useRef(false);
+  const requestController = React.useRef<AbortController | null>(null);
   // A distinct request receipt is required even if A→B→A reuses the same
   // event ID and public array. Raw overlay fields must not revive while pending.
   const overlayScope = React.useMemo(
@@ -228,49 +232,72 @@ export function useEventSlotsViewer<T extends ViewerSlotBase>(
   const generation = React.useRef(0);
   const committedMutationScope = React.useRef<{ scope: object } | null>(null);
 
-  const refresh = React.useCallback(() => {
+  const retire = React.useCallback(() => {
     // Invalidate in-flight responses synchronously, even before React's effect cleanup.
     generation.current += 1;
     committedMutationScope.current = null;
+    requestController.current?.abort();
     setOverlayState({ value: EMPTY_OVERLAY, baseSlots: null, eventId: null, scope: null });
     setLoading(true);
-    setRefreshNonce((n) => n + 1);
   }, []);
+  const refresh = React.useCallback(() => {
+    retire();
+    if (!suspendedRef.current) setRefreshNonce((n) => n + 1);
+  }, [retire]);
 
   React.useEffect(() => {
+    if (suspended || suspendedRef.current) return;
     let active = true;
     const controller = new AbortController();
+    requestController.current = controller;
     const capturedBase = baseSlots;
     const requestScope = overlayScope;
     const requestGeneration = ++generation.current;
     setLoading(true);
     void fetchSlotViewerOverlay(eventId, controller.signal).then((value) => {
-      if (!active || generation.current !== requestGeneration) return;
+      if (!active || suspendedRef.current || generation.current !== requestGeneration) return;
       setOverlayState({ value, baseSlots: capturedBase, eventId, scope: requestScope });
       setLoading(false);
     });
     return () => {
       active = false;
+      if (requestController.current === controller) requestController.current = null;
       controller.abort();
     };
-  }, [eventId, baseSlots, refreshNonce, overlayScope]);
+  }, [eventId, baseSlots, refreshNonce, overlayScope, suspended]);
 
   React.useEffect(() => {
+    const onPageHide = (event: PageTransitionEvent) => {
+      if (!event.persisted) return;
+      // A frozen document must not retain the viewer DTO or mutation receipt.
+      // Commit the public-only render before the native pagehide returns.
+      // No replacement read is permitted until persisted pageshow.
+      suspendedRef.current = true;
+      flushSync(() => {
+        retire();
+        setSuspended(true);
+      });
+    };
     const onPageShow = (event: PageTransitionEvent) => {
-      if (event.persisted) refresh();
+      if (!event.persisted) return;
+      suspendedRef.current = false;
+      refresh();
+      setSuspended(false);
     };
     window.addEventListener(ACTIVE_X_CHANGED_EVENT, refresh);
+    window.addEventListener("pagehide", onPageHide);
     window.addEventListener("pageshow", onPageShow);
     return () => {
       window.removeEventListener(ACTIVE_X_CHANGED_EVENT, refresh);
+      window.removeEventListener("pagehide", onPageHide);
       window.removeEventListener("pageshow", onPageShow);
     };
-  }, [refresh]);
+  }, [refresh, retire]);
 
   // Bind the receipt to the distinct request as well as event and public data.
   const current = overlayState.scope === overlayScope &&
     overlayState.baseSlots === baseSlots && overlayState.eventId === eventId;
-  const pending = loading || !current;
+  const pending = suspended || loading || !current;
   const value = pending ? EMPTY_OVERLAY : overlayState.value;
   const canManageOwnSlots = !pending && value.loggedIn &&
     !value.authUnavailable && !value.isBanned && !value.needsTermsAcceptance;
@@ -296,7 +323,7 @@ export function useEventSlotsViewer<T extends ViewerSlotBase>(
   }, [mutationScope]);
   const captureMutationReceipt = React.useCallback(() => {
     const committed = committedMutationScope.current;
-    if (!mutationScope || committed?.scope !== mutationScope) return null;
+    if (suspendedRef.current || !mutationScope || committed?.scope !== mutationScope) return null;
     return () => committedMutationScope.current === committed;
   }, [mutationScope]);
   // This is a UI receipt, not server authorization or a mutation lock.

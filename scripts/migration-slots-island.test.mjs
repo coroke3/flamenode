@@ -933,7 +933,7 @@ test("U03h mutation receipts expire on Active X refresh, public snapshot, event 
 });
 
 
-test("U03i RH-014 overlay and mutation receipts cannot revive on pending A-B-A or persisted pageshow", async () => {
+test("U03i RH-014 overlay and mutation receipts cannot revive on pending A-B-A or persisted pagehide/pageshow", async () => {
   const React = (await import("react")).default;
   const { JSDOM } = await import("jsdom");
   const { useEventSlotsViewer } = await import("../apps/site/src/components/EventSlotsViewerIsland.ts");
@@ -996,11 +996,13 @@ test("U03i RH-014 overlay and mutation receipts cannot revive on pending A-B-A o
     }
     assert.equal(snapshot.captureMutationReceipt(), null);
   };
-  const pageShow = persisted => {
-    const event = new dom.window.Event("pageshow");
+  const pageTransition = (type, persisted) => {
+    const event = new dom.window.Event(type);
     Object.defineProperty(event, "persisted", { value: persisted });
     dom.window.dispatchEvent(event);
   };
+  const pageShow = persisted => pageTransition("pageshow", persisted);
+  const pageHide = persisted => pageTransition("pagehide", persisted);
   try {
     await render();
     assert.equal(requests.length, 1);
@@ -1077,10 +1079,66 @@ test("U03i RH-014 overlay and mutation receipts cannot revive on pending A-B-A o
     assert.equal(snapshot.overlay.viewerXIdNotice, "new-active");
     const last = snapshot.captureMutationReceipt();
     assert.equal(last(), true);
-    await React.act(async () => root.render(null));
-    assert.equal(last(), false);
-    pageShow(true);
+    // Loaded viewer: nonpersisted hide is a control. Persisted hide must
+    // synchronously remove the private DTO and commit the public-only DOM.
+    await React.act(async () => pageHide(false));
+    assert.equal(last(), true);
     assert.equal(requests.length, 7);
+    start = frames.length;
+    await React.act(async () => {
+      pageHide(true);
+      assert.equal(last(), false);
+      assert.equal(snapshot.captureMutationReceipt(), null);
+      assert.equal(snapshot.overlay.viewerXIdNotice, null);
+      assert.equal(dom.window.document.getElementById("root").textContent, "public");
+      assert.equal(requests.length, 7);
+    });
+    assertHidden(start);
+    // A public-data refresh, changed Active X and duplicate pagehide while
+    // frozen must not start a private request or revive the old receipt.
+    baseSlots = alternate;
+    await render();
+    await React.act(async () => {
+      dom.window.dispatchEvent(new dom.window.Event(ACTIVE_X_CHANGED_EVENT));
+      pageHide(true);
+      pageShow(false);
+    });
+    assertHidden(start);
+    assert.equal(requests.length, 7);
+    await React.act(async () => pageShow(true));
+    assertHidden(start);
+    assert.equal(requests.length, 8);
+    await settle(requests[7], "after-hide");
+    assert.equal(snapshot.overlay.viewerXIdNotice, "after-hide");
+    const restored = snapshot.captureMutationReceipt();
+    assert.equal(restored(), true);
+    assert.equal(last(), false);
+    // Pending viewer: hide aborts the GET immediately. Even if its custom
+    // fetcher resolves before pageshow, the private response stays retired.
+    await React.act(async () => snapshot.refresh());
+    assert.equal(restored(), false);
+    assert.equal(requests.length, 9);
+    const held = requests[8];
+    start = frames.length;
+    await React.act(async () => {
+      pageHide(true);
+      assert.equal(held.init.signal.aborted, true);
+    });
+    assertHidden(start);
+    await settle(held, "late-hidden");
+    assertHidden(start);
+    assert.equal(requests.length, 9);
+    await React.act(async () => pageShow(true));
+    assert.equal(requests.length, 10);
+    assertHidden(start);
+    await settle(requests[9], "fresh-restored");
+    assert.equal(snapshot.overlay.viewerXIdNotice, "fresh-restored");
+    const finalReceipt = snapshot.captureMutationReceipt();
+    assert.equal(finalReceipt(), true);
+    await React.act(async () => root.render(null));
+    assert.equal(finalReceipt(), false);
+    pageShow(true);
+    assert.equal(requests.length, 10);
   } finally {
     await React.act(async () => root.unmount());
     for (const [key, descriptor] of previousDom) {

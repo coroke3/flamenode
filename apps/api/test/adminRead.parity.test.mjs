@@ -62,8 +62,8 @@ if (runUnderRootTsx(import.meta.url)) {
     const text = await response.text();
     return { status: response.status, headers: response.headers, body: text ? parseBody(text) : null, stats: d1.stats };
   }
-  const get = async (path, token = "root") => {
-    const r = await call(path, `tok-${token}`);
+  const get = async (path, token = "root", options = {}) => {
+    const r = await call(path, `tok-${token}`, options);
     assert.equal(r.status, 200, `${path}: ${JSON.stringify(r.body)}`);
     assert.equal(r.headers.get("cache-control"), "private, no-store");
     assert.equal(r.stats.writes, 0, `${path}: GET must not write`);
@@ -692,7 +692,121 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(unknown.body.templateName, null);
     assert.equal(unknown.body.templateSettingsJson, null);
     assert.equal((await get("/api/admin-read/events/new?template=tpl-big", "root")).body.templateSettingsJson, null, "> 64 KiB not returned");
-    assert.equal((await get("/api/admin-read/events/new", "root")).body.templateId, "");
+    // #924: SQLite TEXT length counts codepoints and stops at raw NUL.
+    // The stored-byte projection and decoded-wire guard are separate bounds.
+    const limit = 64 * 1024;
+    const originalSettings = sqlite.prepare("SELECT settings_json FROM event_templates WHERE id = ?").get("tpl2").settings_json;
+    const setTemplateSettings = sqlite.prepare("UPDATE event_templates SET settings_json = CAST(? AS TEXT) WHERE id = ?");
+    const setBlobSettings = sqlite.prepare("UPDATE event_templates SET settings_json = ? WHERE id = ?");
+    const storageClass = sqlite.prepare("SELECT typeof(settings_json) AS storage FROM event_templates WHERE id = ?");
+    const expectedList = canon((await refGuardList("u_root")).templates);
+    try {
+      const prefix = '{"v":"';
+      const suffix = '"}';
+      const overhead = Buffer.byteLength(prefix + suffix);
+      const cases = [];
+      for (const unit of ["x", "é", "あ", "🚀", "\\u0000", '\\"', "\\\\"]) {
+        for (const size of [limit - 1, limit, limit + 1]) {
+          const padding = size - overhead;
+          const width = Buffer.byteLength(unit);
+          const raw = prefix + unit.repeat(Math.floor(padding / width)) + "x".repeat(padding % width) + suffix;
+          assert.equal(Buffer.byteLength(raw), size);
+          const wire = size <= limit ? raw : null;
+          cases.push({ raw, storedSize: size, wire, expected: wire });
+        }
+      }
+      // node:sqlite decodes each invalid 0xff byte to U+FFFD. The stored
+      // projection can therefore fit even when the returned string exceeds 64 KiB.
+      for (const size of [limit - 1, limit, limit + 1, 90_008]) {
+        const padding = size - overhead;
+        const count = Math.floor(padding / 3);
+        const tail = "x".repeat(padding % 3);
+        const raw = Buffer.concat([Buffer.from(prefix), Buffer.alloc(count, 0xff), Buffer.from(tail + suffix)]);
+        const wire = prefix + "\ufffd".repeat(count) + tail + suffix;
+        assert.ok(raw.length <= limit);
+        assert.equal(Buffer.byteLength(wire), size);
+        cases.push({ raw, storedSize: raw.length, wire, expected: size <= limit ? wire : null });
+      }
+      // Raw settings are not parsed by this endpoint; preserve short legacy values.
+      for (const raw of ["", "{bad-json", '{"v":"\\u0000"}']) {
+        cases.push({ raw, storedSize: Buffer.byteLength(raw), wire: raw, expected: raw });
+      }
+      cases.push({ raw: "\u0000" + "x".repeat(limit), storedSize: limit + 1, wire: null, expected: null });
+      // TEXT affinity does not convert a bound BLOB into TEXT. Do not transfer
+      // binary values even when their stored byte size fits the raw-string DTO.
+      for (const raw of [Buffer.from('{"v":1}'), Buffer.alloc(0), Buffer.alloc(limit, 120), Buffer.alloc(limit + 1, 120)]) {
+        cases.push({ raw, storage: "blob", storedSize: raw.length, wire: null, expected: null });
+      }
+      for (const { raw, storage = "text", storedSize, wire, expected } of cases) {
+        (storage === "blob" ? setBlobSettings : setTemplateSettings).run(raw, "tpl2");
+        assert.equal(storageClass.get("tpl2").storage, storage);
+        const backing = createD1(sqlite);
+        const receipts = [];
+        const d1 = {
+          ...backing,
+          prepare(sql) {
+            const statement = backing.prepare(sql);
+            if (!sql.includes("AS tpl_settings")) return statement;
+            return {
+              ...statement,
+              bind(...values) {
+                const bound = statement.bind(...values);
+                return {
+                  ...bound,
+                  async first() {
+                    const row = await bound.first();
+                    receipts.push({ size: row?.tpl_size, settings: row?.tpl_settings });
+                    return row;
+                  },
+                };
+              },
+            };
+          },
+        };
+        const result = await get("/api/admin-read/events/new?template=tpl2", "root", { d1 });
+        assert.deepEqual(receipts, [{ size: storedSize, settings: wire }]);
+        assert.equal(result.body.guardOk, true);
+        assert.deepEqual(result.body.templates, expectedList);
+        assert.equal(result.body.templateName, "Template 2");
+        assert.equal(result.body.templateSettingsJson, expected, "stored bytes=" + storedSize);
+        assert.equal(Object.hasOwn(result.body, "tpl_size"), false);
+        assert.equal(result.stats.statements, 3);
+      }
+    } finally {
+      setTemplateSettings.run(originalSettings, "tpl2");
+    }
+    // CURRENT Next treats repeated searchParams.template as an array; Ops
+    // EventNew uses getAll as well. Never apply an ambiguous template snapshot.
+    for (const query of [
+      "", "?template", "?template=", "?template=%20%09",
+      "?template=tpl2&template=tpl1", "?template=tpl2&template=tpl2",
+      "?template=&template=tpl2", "?template=tpl2&template=",
+      "?template=tpl2&other=1&template=tpl1", "?template=tpl2&%74emplate=tpl1",
+      "?template%5B%5D=tpl2",
+    ]) {
+      const result = await get("/api/admin-read/events/new" + query, "root");
+      assert.equal(result.body.templateId, "", query);
+      assert.equal(result.body.templateName, null, query);
+      assert.equal(result.body.templateSettingsJson, null, query);
+      assert.equal(result.body.guardOk, true, query);
+      assert.deepEqual(result.body.templates, expectedList, query);
+      assert.equal(result.stats.statements, 3, query);
+    }
+    for (const query of ["?template=%20tpl2%20", "?%74emplate=tpl2", "?template=tpl2&other=1"]) {
+      const result = await get("/api/admin-read/events/new" + query, "root");
+      assert.equal(result.body.templateId, "tpl2", query);
+      assert.equal(result.body.templateName, "Template 2", query);
+      assert.equal(result.body.templateSettingsJson, originalSettings, query);
+      assert.equal(result.body.guardOk, true, query);
+      assert.deepEqual(result.body.templates, expectedList, query);
+      assert.equal(result.stats.statements, 3, query);
+    }
+    const ambiguousDenied = await get("/api/admin-read/events/new?template=tpl2&template=tpl1", "carol");
+    assert.equal(ambiguousDenied.body.guardOk, false);
+    assert.deepEqual(ambiguousDenied.body.templates, []);
+    assert.equal(ambiguousDenied.body.templateId, "");
+    assert.equal(ambiguousDenied.body.templateName, null);
+    assert.equal(ambiguousDenied.body.templateSettingsJson, null);
     try {
       for (const [sets, expected] of [
         ["operation_mode = 'read_only'", false],
@@ -708,6 +822,222 @@ if (runUnderRootTsx(import.meta.url)) {
       }
     } finally {
       sqlite.exec(`UPDATE system_settings SET operation_mode = 'normal', disabled_features_json = NULL, cost_guard_exception_until = NULL, cost_guard_exception_features_json = NULL WHERE id = 'default'`);
+    }
+  });
+
+  test("#924: template list and selected raw snapshot keep exact JSON bytes across bounded response chunks", async () => {
+    const local = createSqlite();
+    seed(local);
+    const cap = 64 * 1024;
+    const list = local.prepare("SELECT id, name, description, source_event_id, updated_at FROM event_templates ORDER BY updated_at DESC LIMIT 100");
+    const insert = local.prepare("INSERT INTO event_templates (id, name, description, source_event_id, settings_json, created_by_user_id, updated_at) VALUES (?, ?, ?, NULL, ?, 'u_root', ?)");
+    const set = local.prepare("UPDATE event_templates SET settings_json = ? WHERE id = ?");
+    const selected = "stream-100";
+    const prefix = '{"v":"', suffix = '"}';
+    const escape = '\\' + '"';
+    const raw = prefix + escape.repeat((cap - Buffer.byteLength(prefix + suffix)) / 2) + suffix;
+    assert.equal(Buffer.byteLength(raw), cap);
+    const dto = (templates, templateName, settings, guardOk = true) => ({
+      guardOk, templates, userId: guardOk ? "u_root" : "u_carol", templateId: selected,
+      templateName, templateSettingsJson: settings, formInitial: "deferred",
+    });
+    async function verify(path, token, expected, large) {
+      const d1 = createD1(local);
+      const res = await app.request(path, { headers: cookie("tok-" + token) }, { DB: d1, AUTH_SECRET: SECRET });
+      assert.equal(res.status, 200);
+      assert.match(res.headers.get("content-type"), /^application\/json(?:;|$)/i);
+      assert.equal(res.headers.get("cache-control"), "private, no-store");
+      assert.equal(d1.stats.statements, token === "root" ? 3 : 2);
+      const before = { ...d1.stats };
+      assert.ok(res.body);
+      const reader = res.body.getReader();
+      const chunks = [];
+      for (;;) {
+        const next = await reader.read();
+        if (next.done) break;
+        assert.ok(next.value.byteLength > 0 && next.value.byteLength <= cap, "bounded response chunk");
+        chunks.push(next.value);
+      }
+      const actual = Buffer.concat(chunks);
+      const wire = JSON.stringify(expected);
+      assert.equal(actual.toString("utf8"), wire, path + " exact JSON wire");
+      assert.deepEqual(JSON.parse(actual.toString("utf8")), expected);
+      assert.equal(actual.byteLength > cap, large);
+      if (large) assert.ok(chunks.length > 1, "large response is actually streamed");
+      assert.deepEqual(d1.stats, before, "no D1 work during stream consumption");
+      assert.equal(d1.stats.writes, 0);
+      assert.equal(d1.stats.batches, 0);
+      assert.ok(d1.stats.maxBinds <= 100);
+    }
+    try {
+      await verify("/api/admin-read/events/templates", "root", { guardOk: true, templates: canon(list.all()) }, false);
+      for (const unit of ["a", "é", "あ", "🚀", "\u0001", '"\\']) {
+        local.exec("DELETE FROM event_templates WHERE id GLOB 'stream-*'");
+        const fill = (size) => unit.repeat(Math.floor(size / unit.length)) + "x".repeat(size % unit.length);
+        const name = "N" + fill(118) + "N";
+        const description = "D" + fill(498) + "D";
+        assert.equal(name.length, 120);
+        assert.equal(description.length, 500);
+        for (let i = 0; i <= 100; i++) {
+          const id = "stream-" + String(i).padStart(3, "0");
+          insert.run(id, name, description, id === selected ? raw : '{"v":1}', 4_000_000_000 + i);
+        }
+        const templates = canon(list.all());
+        assert.equal(templates.length, 100);
+        assert.equal(templates[0].id, selected);
+        assert.equal(templates.at(-1).id, "stream-001");
+        const listBody = { guardOk: true, templates };
+        assert.ok(Buffer.byteLength(JSON.stringify(listBody)) > cap);
+        await verify("/api/admin-read/events/templates", "root", listBody, true);
+        await verify("/api/admin-read/events/new?template=" + selected, "root", dto(templates, name, raw), true);
+        // The list guard does not suppress the independently selected snapshot.
+        await verify("/api/admin-read/events/new?template=" + selected, "carol", dto([], name, raw, false), true);
+      }
+      // Place an astral character across the 8192-unit serialization boundary.
+      const head = prefix + "x".repeat(8191 - prefix.length) + "🚀";
+      const split = head + "x".repeat(cap - Buffer.byteLength(head + suffix)) + suffix;
+      assert.equal(Buffer.byteLength(split), cap);
+      set.run(split, selected);
+      const templates = canon(list.all());
+      await verify("/api/admin-read/events/new?template=" + selected, "root", dto(templates, templates[0].name, split), true);
+    } finally {
+      local.close();
+    }
+  });
+
+  // Feasibility probe only, not the existing HTTP contract or a release gate.
+  // A new versioned producer/consumer requires stable collection revision,
+  // agreed tie order, auth revalidation and a bounded client traversal.
+  test("#924: proposed byte-budget template page and oversized-field receipts preserve stored bytes", () => {
+    const local = createSqlite();
+    seed(local);
+    const cap = 64 * 1024, budget = 48 * 1024, fragment = 8192;
+    const ordered = `WITH selected AS (
+      SELECT id,name,description,source_event_id,updated_at FROM event_templates
+      ORDER BY updated_at DESC,id ASC LIMIT 100
+    ), numbered AS (
+      SELECT *, row_number() OVER (ORDER BY updated_at DESC,id ASC)-1 AS row_index,
+        count(*) OVER () AS row_count,
+        256+2*(length(CAST(id AS BLOB))+length(CAST(name AS BLOB))+
+          coalesce(length(CAST(description AS BLOB)),0)+coalesce(length(CAST(source_event_id AS BLOB)),0)) AS wire_upper,
+        typeof(id)='text' AND typeof(name)='text' AND typeof(description) IN ('text','null')
+          AND typeof(source_event_id) IN ('text','null') AND typeof(updated_at)='integer' AS valid_storage
+      FROM selected
+    )`;
+    // Never return a large first row or skip it: emit only a small receipt.
+    // HEX(BLOB) preserves NUL and UTF-8 bytes before the provider decodes TEXT.
+    const page = local.prepare(ordered + `, remaining AS (
+      SELECT *,sum(wire_upper) OVER (ORDER BY row_index ROWS UNBOUNDED PRECEDING) AS prefix_upper,
+        min(valid_storage) OVER (ORDER BY row_index ROWS UNBOUNDED PRECEDING) AS prefix_valid
+      FROM numbered WHERE row_index>=?
+    ), receipt AS (
+      SELECT *,prefix_upper<=? AND prefix_valid=1 AS admitted FROM remaining
+    )
+      SELECT row_index,row_count,wire_upper,admitted,valid_storage,
+        CASE WHEN admitted THEN hex(CAST(id AS BLOB)) END AS id_hex,
+        CASE WHEN admitted THEN hex(CAST(name AS BLOB)) END AS name_hex,
+        CASE WHEN admitted AND description IS NOT NULL THEN hex(CAST(description AS BLOB)) END AS description_hex,
+        CASE WHEN admitted AND source_event_id IS NOT NULL THEN hex(CAST(source_event_id AS BLOB)) END AS source_event_id_hex,
+        CASE WHEN admitted THEN updated_at END AS updated_at
+      FROM receipt WHERE admitted OR row_index=? ORDER BY row_index LIMIT 100`);
+    const piece = local.prepare(ordered + `, chosen AS (
+      SELECT CASE ? WHEN 'id' THEN id WHEN 'name' THEN name WHEN 'description' THEN description
+        WHEN 'source_event_id' THEN source_event_id END AS value,updated_at
+      FROM numbered WHERE row_index=? AND valid_storage=1 LIMIT 1
+    )
+      SELECT updated_at,typeof(value) AS storage,length(CAST(value AS BLOB)) AS total_bytes,
+        CASE WHEN value IS NOT NULL THEN hex(substr(CAST(value AS BLOB),?,?)) END AS data_hex
+      FROM chosen LIMIT 1`);
+    const decode = (hex) => hex === null ? null : Buffer.from(hex, "hex").toString("utf8");
+    try {
+      const insert = local.prepare("INSERT INTO event_templates (id,name,description,source_event_id,settings_json,created_by_user_id,updated_at) VALUES (?,?,?,?,?,'u_root',?)");
+      for (let i = 0; i < 101; i++) {
+        insert.run("transport-" + String(i).padStart(3,"0"), "N" + "日🚀".repeat(20),
+          "D" + '\\"' .concat("\u0001").repeat(140), i % 2 ? "source" : null, "{}", 4_000_000_000 + Math.floor(i/2));
+      }
+      // Legacy oversized metadata, a UTF-8 sequence spanning the byte boundary,
+      // raw NUL, and the distinction between null and empty text.
+      const long = "a".repeat(8191) + "🚀\u0000" + "日".repeat(40000);
+      insert.run("transport-large", "Large", long, "", "{}", 5_000_000_000);
+      const expected = local.prepare("SELECT id,name,description,source_event_id,updated_at FROM event_templates ORDER BY updated_at DESC,id ASC LIMIT 100").all();
+      let pos = 0, pages = 0, fragments = 0;
+      const out = [];
+      while (pos < expected.length) {
+        const rows = page.all(pos,budget,pos);
+        assert.ok(rows.length > 0);
+        assert.ok(Buffer.byteLength(JSON.stringify({ rows })) <= cap);
+        assert.equal(rows[0].row_count, 100);
+        pages++;
+        if (!rows[0].admitted) {
+          assert.equal(rows.length,1);
+          assert.equal(rows[0].valid_storage,1);
+          for (const key of ["id_hex","name_hex","description_hex","source_event_id_hex","updated_at"]) {
+            assert.equal(rows[0][key],null, key + " not transferred before admission");
+          }
+          const item = {};
+          for (const field of ["id","name","description","source_event_id"]) {
+            let at = 0, hex = "", total;
+            do {
+              const f = piece.get(field,pos,at+1,fragment);
+              assert.ok(f);
+              assert.ok(Buffer.byteLength(JSON.stringify(f)) <= cap);
+              if (item.updated_at === undefined) item.updated_at = f.updated_at;
+              else assert.equal(item.updated_at,f.updated_at);
+              fragments++;
+              if (f.storage === "null") {
+                assert.equal(f.data_hex,null);
+                item[field] = null;
+                break;
+              }
+              assert.equal(f.storage,"text");
+              if (total !== undefined) assert.equal(f.total_bytes,total);
+              total = f.total_bytes;
+              assert.equal(f.data_hex.length,2*Math.min(fragment,total-at));
+              hex += f.data_hex;
+              at += f.data_hex.length/2;
+              if (at === total) item[field] = decode(hex);
+            } while (at < total);
+          }
+          out.push(item);
+          pos++;
+        } else {
+          for (const row of rows) {
+            assert.equal(row.admitted,1);
+            assert.equal(row.row_index,pos++);
+            assert.equal(row.row_count,100);
+            assert.ok(Buffer.byteLength(JSON.stringify(row))+1 <= row.wire_upper);
+            out.push({ id: decode(row.id_hex), name: decode(row.name_hex),
+              description: decode(row.description_hex), source_event_id: decode(row.source_event_id_hex), updated_at: row.updated_at });
+          }
+        }
+      }
+      assert.ok(pages > 1 && fragments > 1);
+      assert.equal(out.length,100);
+      assert.equal(out[0].id,"transport-large");
+      assert.equal(out[0].description,long);
+      assert.equal(out[0].source_event_id,"");
+      assert.equal(out[0].updated_at,5_000_000_000);
+      const raw = local.prepare("SELECT hex(CAST(description AS BLOB)) AS h FROM event_templates WHERE id='transport-large'").get().h;
+      assert.equal(Buffer.from(out[0].description).toString("hex").toUpperCase(),raw);
+      assert.deepEqual(out.slice(1),canon(expected.slice(1)));
+      // Same timestamp + same row count are not a snapshot/revision receipt.
+      const before = page.all(1,budget,1);
+      local.prepare("UPDATE event_templates SET name=? WHERE id=?").run("changed",out[1].id);
+      const after = page.all(1,budget,1);
+      assert.notDeepEqual(before,after);
+      assert.equal(before[0].row_count,after[0].row_count);
+      assert.equal(before[0].updated_at,after[0].updated_at);
+      // SQLite permits legacy BLOB in a TEXT-affinity field. Do not return it as
+      // an ordinary row or silently omit it from the continuation.
+      local.prepare("UPDATE event_templates SET name=? WHERE id=?").run(Buffer.from([255,0]),out[1].id);
+      const invalid = page.all(1,budget,1);
+      assert.equal(invalid.length,1);
+      assert.equal(invalid[0].valid_storage,0);
+      assert.equal(invalid[0].admitted,0);
+      assert.equal(invalid[0].name_hex,null);
+      assert.equal(piece.get("name",1,1,fragment),undefined);
+    } finally {
+      local.close();
     }
   });
 
