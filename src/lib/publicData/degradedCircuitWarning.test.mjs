@@ -604,35 +604,83 @@ function registerTests(test, equal, runtime) {
       });
     }
   }
-  for (const priorHits of [0, 1, 2]) {
-    for (const earnedHits of [0, 1, 2, 3]) {
-      test("SEC-798: marker GET keeps only post-miss hits (" + priorHits + " prior, " + earnedHits + " earned)", async () => {
-        const f = make({initial:0});
-        f.values.set(f.openKey, "1");
-        equal(await f.isOpen(), true);
-        for (let i=0; i<priorHits; i++) await f.hit();
-        f.seed({bucket:1,observed:1,pending:1,lastFlushAt:-Infinity});
-        const pause = f.pause("get", f.openKey);
-        const flushing = f.miss(f.now());
-        await pause.started;
-        for (let i=0; i<earnedHits; i++) await f.hit();
-        pause.resume(); await flushing;
-        equal(f.values.get(f.missKey), "1");
-        equal(f.snapshot().pending, 0);
-        equal(f.snapshot().open, earnedHits < 3);
-        equal(f.values.has(f.openKey), earnedHits < 3);
-        if (earnedHits < 3) {
-          for (let i=earnedHits; i<2; i++) await f.hit();
-          equal(f.values.has(f.openKey), true);
-          await f.hit();
-        }
-        equal(f.values.has(f.openKey), false);
-        equal(f.snapshot().open, false);
-        equal(f.writes.filter(x=>x[0]==="delete"&&x[1]===f.openKey).length, 1);
-        equal(f.rateViolations.length, 0);
-      });
+  for (const markerPhase of ["existing GET", "missing GET", "missing PUT"]) {
+    for (const priorHits of [0, 1, 2]) {
+      for (const earnedHits of [0, 1, 2, 3]) {
+        test("SEC-798: " + markerPhase + " keeps only post-miss hits (" + priorHits + " prior, " + earnedHits + " earned)", async () => {
+          const f = make({initial:0});
+          f.values.set(f.openKey, "1");
+          equal(await f.isOpen(), true);
+          for (let i=0; i<priorHits; i++) await f.hit();
+          if (markerPhase !== "existing GET") f.values.delete(f.openKey);
+          f.seed({bucket:1,observed:1,pending:1,lastFlushAt:-Infinity});
+          const pause = f.pause(markerPhase === "missing PUT" ? "put" : "get", f.openKey);
+          const flushing = f.miss(f.now());
+          await pause.started;
+          for (let i=0; i<earnedHits; i++) await f.hit();
+          pause.resume(); await flushing;
+          equal(f.values.get(f.missKey), "1");
+          equal(f.snapshot().pending, 0);
+          equal(f.snapshot().open, earnedHits < 3);
+          equal(f.values.has(f.openKey), earnedHits < 3);
+          equal(f.writes.filter(x=>x[0]==="put"&&x[1]===f.openKey).length,
+            markerPhase === "existing GET" ? 0 : 1);
+          if (earnedHits < 3) {
+            for (let i=earnedHits; i<2; i++) await f.hit();
+            equal(f.values.has(f.openKey), true);
+            await f.hit();
+          }
+          equal(f.values.has(f.openKey), false);
+          equal(f.snapshot().open, false);
+          equal(f.writes.filter(x=>x[0]==="delete"&&x[1]===f.openKey).length, 1);
+          equal(f.rateViolations.length, 0);
+        });
+      }
     }
   }
+  test("SEC-798: expired missing-marker read cannot start a new OPEN PUT", async () => {
+    const f = make({initial:0});
+    f.values.set(f.openKey, "1");
+    equal(await f.isOpen(), true);
+    f.tick(89999);
+    f.values.delete(f.openKey);
+    f.seed({bucket:2,observed:1,pending:1,lastFlushAt:-Infinity});
+    const pause = f.pause("get", f.openKey);
+    const flushing = f.miss(f.now());
+    await pause.started;
+    f.tick(2);
+    pause.resume(); await flushing;
+    equal(f.values.has(f.openKey), false);
+    equal(f.writes.filter(x=>x[0]==="put"&&x[1]===f.openKey).length, 0);
+    equal(f.snapshot().pending, 1);
+    f.tick(1000);
+    await f.miss(f.now());
+    equal(f.values.get("public:degraded_circuit:miss:2"), "2");
+    equal(f.snapshot().pending, 0);
+    equal(f.snapshot().open, false);
+    equal(f.rateViolations.length, 0);
+  });
+  test("SEC-798: stale missing-marker PUT receipt requires a fresh closed-state probe", async () => {
+    const f = make({initial:0});
+    f.values.set(f.openKey, "1");
+    equal(await f.isOpen(), true);
+    f.tick(89999);
+    f.values.delete(f.openKey);
+    f.seed({bucket:2,observed:1,pending:1,lastFlushAt:-Infinity});
+    const pause = f.pauseMarker();
+    const flushing = f.miss(f.now());
+    await pause.started;
+    f.tick(2);
+    equal(await f.isOpen(), false);
+    pause.resume(); await flushing;
+    equal(f.values.get(f.openKey), "1");
+    equal(f.values.get("public:degraded_circuit:miss:2"), "1");
+    equal(f.snapshot().pending, 0);
+    equal(f.snapshot().open, false);
+    equal(f.snapshot().known, false);
+    equal(await f.isOpen(), true);
+    equal(f.rateViolations.length, 0);
+  });
   test("SEC-798: expired OPEN read cannot resurrect a newer closed generation", async () => {
     const f = make({initial:0});
     f.values.set(f.openKey, "1");

@@ -97,9 +97,23 @@ async function putOpenMarkerIfNeeded(
   kv: KVNamespace,
   nowMs: number,
   expiresAt = Number.POSITIVE_INFINITY,
+  priorHitStreak?: number,
 ): Promise<number | null> {
   const key = degradedCircuitOpenKey();
-  if (Date.now() >= expiresAt) throw new Error("degraded circuit repair expired");
+  const revision = circuitRevision;
+  // A flush that observed OPEN locally may have earned hits since its first
+  // marker GET. Keep those hits if we actually refresh the same generation.
+  // Ordinary OPEN repair retains its existing hit-preservation behavior.
+  const markOpenFromReceipt = (at: number): void => {
+    const earnedHits = priorHitStreak === undefined
+      ? null
+      : Math.max(0, localCircuitState.hitStreak - priorHitStreak);
+    markCircuitOpen(at, openRepair !== null);
+    if (earnedHits !== null) localCircuitState.hitStreak = earnedHits;
+  };
+  if (Date.now() >= expiresAt || revision !== circuitRevision) {
+    throw new Error("degraded circuit repair expired");
+  }
   if (
     openMarkerKnown &&
     localCircuitState.open &&
@@ -108,15 +122,19 @@ async function putOpenMarkerIfNeeded(
     return null;
   }
   const firstMarker = await kv.get(key);
-  if (Date.now() >= expiresAt) throw new Error("degraded circuit repair expired");
+  if (Date.now() >= expiresAt || revision !== circuitRevision) {
+    throw new Error("degraded circuit repair expired");
+  }
   if (firstMarker === "1") {
     openMarkerKnown = true;
-    markCircuitOpen(nowMs, openRepair !== null);
+    markOpenFromReceipt(nowMs);
     return null;
   }
 
   await waitForKvWriteSlot(key);
-  if (Date.now() >= expiresAt) throw new Error("degraded circuit repair expired");
+  if (Date.now() >= expiresAt || revision !== circuitRevision) {
+    throw new Error("degraded circuit repair expired");
+  }
   // Re-check after waiting. Another request in this isolate may have completed
   // the marker while this request was waiting for the KV rate window.
   if (
@@ -127,10 +145,12 @@ async function putOpenMarkerIfNeeded(
     return null;
   }
   const secondMarker = await kv.get(key);
-  if (Date.now() >= expiresAt) throw new Error("degraded circuit repair expired");
+  if (Date.now() >= expiresAt || revision !== circuitRevision) {
+    throw new Error("degraded circuit repair expired");
+  }
   if (secondMarker === "1") {
     openMarkerKnown = true;
-    markCircuitOpen(nowMs, openRepair !== null);
+    markOpenFromReceipt(nowMs);
     return null;
   }
   const writeStartedAt = Date.now();
@@ -143,8 +163,15 @@ async function putOpenMarkerIfNeeded(
     // An acknowledged write can outlive its conservative local TTL estimate.
     // In that case force a fresh marker probe rather than assuming absence or
     // renewing the local TTL from the time the receipt arrived.
+    if (revision !== circuitRevision) {
+      // The PUT may have committed remotely, but a newer local transition
+      // owns the state. Make the next closed-state probe read the marker.
+      openMarkerKnown = false;
+      localCircuitState.lastKvProbeAt = Number.NEGATIVE_INFINITY;
+      return writtenUntil;
+    }
     openMarkerKnown = Date.now() < writtenUntil;
-    markCircuitOpen(writeStartedAt, openRepair !== null);
+    markOpenFromReceipt(writeStartedAt);
     return writtenUntil;
   } catch (error) {
     openMarkerKnown = false;
@@ -317,7 +344,7 @@ async function flushMissCount(
       markCircuitOpen(nowMs);
       localCircuitState.hitStreak = earnedHits;
     } else if (localCircuitState.open && nowMs < localCircuitState.openUntil) {
-      await putOpenMarkerIfNeeded(kv, nowMs);
+      await putOpenMarkerIfNeeded(kv, nowMs, localCircuitState.openUntil, priorHitStreak);
     } else {
       markCircuitClosed(nowMs);
     }
