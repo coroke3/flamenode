@@ -477,8 +477,8 @@ test("MIG-0603: full quiet-status planner, real audited D1 queue and stale grant
     assert.equal(allowed.ok, true);
     assert.equal(allowed.pendingPublicReflection, true,
       "one committed static-rebuild UPSERT signals eventual public reflection");
-    assert.equal(d1.stats.statements - allowedStart, 7,
-      "one guard + video UPDATE, queue UPSERT, 2 changes assertions, audit INSERT/check");
+    assert.equal(d1.stats.statements - allowedStart, 9,
+      "one guard + video UPDATE/assert + queue UPSERT/assert + public-build generation UPDATE/assert + audit INSERT/assert");
     assert.equal(d1.stats.batches, 2, "only one atomic attempt per invocation");
     assert.equal(sqlite.prepare("SELECT visibility_status FROM videos WHERE id='v1'")
       .get().visibility_status, "private");
