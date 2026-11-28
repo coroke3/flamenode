@@ -42,7 +42,8 @@ type StoredStepOutcome =
   | { kind: "system_user" }
   | { kind: "none" }
   | { kind: "x_users"; created: number; createdAuthUsers: number }
-  | { kind: "softwares"; created: number };
+  | { kind: "softwares"; created: number }
+  | { kind: "event"; action: "created" | "replaced" | "skipped" };
 
 type PlannedSoftwareRow = { id: string; name: string; normalized_name: string };
 
@@ -78,6 +79,19 @@ async function runDigest(previewToken: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(previewToken));
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0"))
     .join("").slice(0, 24);
+}
+
+async function snapshotDigest(value: unknown): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(JSON.stringify(value)),
+  );
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function entitySnapshotTargetId(kind: "event", id: string): string {
+  return `${kind}:${encodeURIComponent(id)}`;
 }
 
 function nextSystemUserProgress(
@@ -170,6 +184,38 @@ function nextSoftwareProgress(
   return next;
 }
 
+function nextEventProgress(
+  plan: CanonicalLegacyPlan,
+  progress: LegacyImportApplyProgress,
+  outcome: StoredStepOutcome,
+): LegacyImportApplyProgress {
+  const next: LegacyImportApplyProgress = {
+    ...progress,
+    counts: { ...progress.counts },
+    skipExistingEventIds: [...progress.skipExistingEventIds],
+    skipExistingVideoIds: [...progress.skipExistingVideoIds],
+  };
+  if (plan.events.length === 0) {
+    if (outcome.kind !== "none") return fixedFailure("旧形式インポートのイベント進捗が不正です。");
+    next.stage = "custom_questions";
+    next.index = 0;
+    return next;
+  }
+  if (
+    outcome.kind !== "event" ||
+    !["created", "replaced", "skipped"].includes(outcome.action)
+  ) {
+    return fixedFailure("旧形式インポートのイベント進捗が不正です。");
+  }
+  next.counts[`${outcome.action}Events`] += 1;
+  if (progress.index + 1 < plan.events.length) next.index += 1;
+  else {
+    next.stage = "custom_questions";
+    next.index = 0;
+  }
+  return next;
+}
+
 const LEGACY_STEP_TARGET_PATTERN =
   /^[a-f0-9]{24}:[a-f0-9]{24}:(?:system_user|x_users|softwares|events|custom_questions|videos):\d+$/;
 
@@ -241,6 +287,14 @@ function parseReceipt(value: Record<string, unknown>) {
     (outcomeRecord.created as number) >= 0
   ) {
     outcome = { kind: "softwares", created: outcomeRecord.created as number };
+  } else if (
+    outcomeRecord.kind === "event" &&
+    ["created", "replaced", "skipped"].includes(String(outcomeRecord.action))
+  ) {
+    outcome = {
+      kind: "event",
+      action: outcomeRecord.action as "created" | "replaced" | "skipped",
+    };
   } else {
     return fixedFailure("旧形式インポートのステップ監査が破損しています。");
   }
@@ -283,7 +337,7 @@ export async function legacyImportD1ApplyStep(
 ): Promise<{ progress: LegacyImportApplyProgress; complete: boolean }> {
   if (input.plan.errors.length > 0) return fixedFailure(input.plan.errors.join("\n"));
   const stage = input.progress.stage;
-  if (stage !== "system_user" && stage !== "x_users" && stage !== "softwares") {
+  if (stage !== "system_user" && stage !== "x_users" && stage !== "softwares" && stage !== "events") {
     return fixedFailure("旧形式インポートのこの段階はHono側でまだ利用できません。");
   }
   if (stage === "system_user" && input.progress.index !== 0) {
@@ -308,6 +362,12 @@ export async function legacyImportD1ApplyStep(
     const groupCount = Math.max(1, Math.ceil(allSoftwareRows.length / LEGACY_IMPORT_SOFTWARE_STEP_SIZE));
     if (!Number.isSafeInteger(input.progress.index) || input.progress.index < 0 || input.progress.index >= groupCount) {
       return fixedFailure("旧形式インポートの進捗位置が不正です。");
+    }
+  }
+  if (stage === "events") {
+    const groupCount = Math.max(1, input.plan.events.length);
+    if (!Number.isSafeInteger(input.progress.index) || input.progress.index < 0 || input.progress.index >= groupCount) {
+      return fixedFailure("旧形式インポートのイベント進捗位置が不正です。");
     }
   }
 
@@ -340,9 +400,14 @@ export async function legacyImportD1ApplyStep(
         (input.progress.index + 1) * LEGACY_IMPORT_SOFTWARE_STEP_SIZE,
       )
     : [];
+  const plannedEvent = stage === "events" && input.plan.events.length > 0
+    ? input.plan.events[input.progress.index]
+    : null;
+  const eventIdForRead = plannedEvent?.id ?? "";
 
   // One bounded D1 read per request: receipt plus the reserved principal or a
   // 40-row X/software normalized-name existence snapshot.
+  // One bounded D1 read per request: receipt plus the stage-specific existing-state snapshot.
   const readRows = stage === "system_user"
     ? await input.db.all(sql`
         WITH marker_rows AS (
@@ -404,43 +469,98 @@ export async function legacyImportD1ApplyStep(
           UNION ALL
           SELECT 'existing' AS kind, payload FROM existing_rows
         `) as unknown as ReadRow[]
-      : await input.db.all(sql`
-          WITH marker_rows AS (
-            SELECT after_json AS payload
-              FROM audit_logs
-             WHERE table_name = ${STEP_AUDIT_TABLE}
-               AND target_id = ${identity.targetId}
-               AND context = ${STEP_AUDIT_CONTEXT}
-             LIMIT 2
-          ),
-          existing_rows AS (
-            SELECT normalized_name AS payload
-              FROM software_catalog
-             WHERE normalized_name IN (
-               SELECT CAST(json_extract(value, '$.normalized_name') AS TEXT)
-                 FROM json_each(${JSON.stringify(plannedSoftwareRows)})
-             )
-               AND NOT EXISTS (SELECT 1 FROM marker_rows)
-             LIMIT ${LEGACY_IMPORT_SOFTWARE_STEP_SIZE}
-          )
-          SELECT 'marker' AS kind, payload FROM marker_rows
-          UNION ALL
-          SELECT 'existing' AS kind, payload FROM existing_rows
-        `) as unknown as ReadRow[];
+      : stage === "softwares"
+        ? await input.db.all(sql`
+            WITH marker_rows AS (
+              SELECT after_json AS payload
+                FROM audit_logs
+               WHERE table_name = ${STEP_AUDIT_TABLE}
+                 AND target_id = ${identity.targetId}
+                 AND context = ${STEP_AUDIT_CONTEXT}
+               LIMIT 2
+            ),
+            existing_rows AS (
+              SELECT normalized_name AS payload
+                FROM software_catalog
+               WHERE normalized_name IN (
+                 SELECT CAST(json_extract(value, '$.normalized_name') AS TEXT)
+                   FROM json_each(${JSON.stringify(plannedSoftwareRows)})
+               )
+                 AND NOT EXISTS (SELECT 1 FROM marker_rows)
+               LIMIT ${LEGACY_IMPORT_SOFTWARE_STEP_SIZE}
+            )
+            SELECT 'marker' AS kind, payload FROM marker_rows
+            UNION ALL
+            SELECT 'existing' AS kind, payload FROM existing_rows
+          `) as unknown as ReadRow[]
+        : input.plan.events.length === 0
+          ? await input.db.all(sql`
+              SELECT 'marker' AS kind, after_json AS payload
+                FROM audit_logs
+               WHERE table_name = ${STEP_AUDIT_TABLE}
+                 AND target_id = ${identity.targetId}
+                 AND context = ${STEP_AUDIT_CONTEXT}
+               LIMIT 2
+            `) as unknown as ReadRow[]
+          : await input.db.all(sql`
+              WITH marker_rows AS (
+                SELECT after_json AS payload
+                  FROM audit_logs
+                 WHERE table_name = ${STEP_AUDIT_TABLE}
+                   AND target_id = ${identity.targetId}
+                   AND context = ${STEP_AUDIT_CONTEXT}
+                 LIMIT 2
+              ),
+              event_rows AS (
+                SELECT id AS payload
+                  FROM events
+                 WHERE id = ${eventIdForRead}
+                   AND NOT EXISTS (SELECT 1 FROM marker_rows)
+                 LIMIT 2
+              ),
+              staff_rows AS (
+                SELECT id AS payload
+                  FROM event_staff
+                 WHERE event_id = ${eventIdForRead}
+                   AND NOT EXISTS (SELECT 1 FROM marker_rows)
+                 LIMIT 2
+              )
+              SELECT 'marker' AS kind, payload FROM marker_rows
+              UNION ALL
+              SELECT 'event' AS kind, payload FROM event_rows
+              UNION ALL
+              SELECT 'staff' AS kind, payload FROM staff_rows
+            `) as unknown as ReadRow[];
 
   const markerRows = readRows.filter((row) => row.kind === "marker");
   const principalRows = readRows.filter((row) => row.kind === "principal");
   const existingRows = readRows.filter((row) => row.kind === "existing");
-  if (markerRows.length + principalRows.length + existingRows.length !== readRows.length) {
+  const eventRows = readRows.filter((row) => row.kind === "event");
+  const eventStaffSnapshotRows = readRows.filter((row) => row.kind === "staff");
+  const maxExistingRows = stage === "x_users"
+    ? plannedXUserRows.length
+    : stage === "softwares"
+      ? plannedSoftwareRows.length
+      : 0;
+  if (
+    markerRows.length + principalRows.length + existingRows.length +
+      eventRows.length + eventStaffSnapshotRows.length !== readRows.length
+  ) {
     return fixedFailure("旧形式インポートのステップ監査を確認できません。");
   }
   if (
     markerRows.length > 1 ||
     principalRows.length > 1 ||
-    existingRows.length > (stage === "x_users" ? plannedXUserRows.length : plannedSoftwareRows.length) ||
+    existingRows.length > maxExistingRows ||
+    eventRows.length > 1 ||
+    eventStaffSnapshotRows.length > 1 ||
     (stage === "system_user" && existingRows.length !== 0) ||
-    ((stage === "x_users" || stage === "softwares") && principalRows.length !== 0) ||
-    (markerRows.length === 1 && (principalRows.length !== 0 || existingRows.length !== 0))
+    ((stage === "x_users" || stage === "softwares" || stage === "events") && principalRows.length !== 0) ||
+    (stage !== "events" && (eventRows.length !== 0 || eventStaffSnapshotRows.length !== 0)) ||
+    (markerRows.length === 1 && (
+      principalRows.length !== 0 || existingRows.length !== 0 ||
+      eventRows.length !== 0 || eventStaffSnapshotRows.length !== 0
+    ))
   ) {
     return fixedFailure("旧形式インポートのステップ監査または既存ID snapshotが不正です。");
   }
@@ -461,7 +581,9 @@ export async function legacyImportD1ApplyStep(
         : fixedFailure("旧形式インポートのステップ監査と進捗が一致しません。")
       : stage === "x_users"
         ? nextXUsersProgress(input.plan, input.progress, receipt.outcome)
-        : nextSoftwareProgress(input.plan, input.progress, receipt.outcome);
+        : stage === "softwares"
+          ? nextSoftwareProgress(input.plan, input.progress, receipt.outcome)
+          : nextEventProgress(input.plan, input.progress, receipt.outcome);
     if (!legacyImportReceiptMatchesProgress(receipt, identity, expected)) {
       return fixedFailure("旧形式インポートのステップ監査と進捗が一致しません。");
     }
@@ -713,6 +835,246 @@ export async function legacyImportD1ApplyStep(
   }
 
   
+  if (stage === "events") {
+    if (input.plan.events.length === 0) {
+      const outcome = { kind: "none" } as const;
+      const nextProgress = nextEventProgress(input.plan, input.progress, outcome);
+      await mutateWithAudit(input.db, {
+        preMutationAssertions: [markerAbsenceAssertion],
+        mutationStatements: [
+          input.db.run(sql`
+            SELECT CASE WHEN 1 THEN 1
+            ELSE json_extract('legacy_import_step_marker', '$') END
+          `),
+        ],
+        expectedMutationChanges: [null],
+        audits: [buildMarkerAudit(nextProgress, outcome)],
+        callerQueryCount: 3,
+        preloaded: input.preloaded,
+      });
+      return { progress: nextProgress, complete: false };
+    }
+
+    const event = plannedEvent;
+    if (!event) return fixedFailure("旧形式インポートのイベント進捗位置が不正です。");
+    if (eventRows.length === 1 && eventRows[0].payload !== event.id) {
+      return fixedFailure("旧形式インポートの既存イベントsnapshotが不正です。");
+    }
+    if (eventStaffSnapshotRows.some((row) => typeof row.payload !== "string" || row.payload.length === 0)) {
+      return fixedFailure("旧形式インポートの既存イベントスタッフsnapshotが不正です。");
+    }
+    const expectedExistingForSkip = input.progress.skipExistingEventIds.includes(event.id);
+    if (eventRows.length === 1) {
+      if (input.strategy === "skip_existing" && expectedExistingForSkip) {
+        const outcome = { kind: "event", action: "skipped" } as const;
+        const nextProgress = nextEventProgress(input.plan, input.progress, outcome);
+        const eventStillExistsAssertion = input.db.run(sql`
+          SELECT CASE WHEN EXISTS (
+            SELECT 1 FROM events WHERE id = ${event.id}
+          ) THEN 1 ELSE json_extract('legacy_import_event_disappeared_after_snapshot', '$') END
+        `);
+        await mutateWithAudit(input.db, {
+          preMutationAssertions: [markerAbsenceAssertion, eventStillExistsAssertion],
+          mutationStatements: [
+            input.db.run(sql`
+              SELECT CASE WHEN 1 THEN 1
+              ELSE json_extract('legacy_import_step_marker', '$') END
+            `),
+          ],
+          expectedMutationChanges: [null],
+          audits: [buildMarkerAudit(nextProgress, outcome)],
+          callerQueryCount: 3,
+          preloaded: input.preloaded,
+        });
+        return { progress: nextProgress, complete: false };
+      }
+      if (input.strategy === "skip_existing" && !expectedExistingForSkip) {
+        return fixedFailure(`イベント ${event.id} はプレビュー後に作成されたため、再プレビューが必要です。`);
+      }
+      if (input.strategy === "create_only") {
+        return fixedFailure(`イベント ${event.id} は既に存在します。`);
+      }
+      return fixedFailure("既存イベントの置換は、可視性フェンスとR2補償のHono統合が完了するまで利用できません。");
+    }
+    if (input.strategy === "skip_existing" && expectedExistingForSkip) {
+      return fixedFailure(`イベント ${event.id} はプレビュー時点から削除されたため、再プレビューが必要です。`);
+    }
+    if (eventStaffSnapshotRows.length > 0) {
+      return fixedFailure("イベント本体のない既存スタッフ行があるため、イベントを作成できません。");
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+    const nextStaff = input.plan.eventStaff
+      .filter((row) => row.event_id === event.id)
+      .map((row) => ({
+        id: row.id,
+        event_id: row.event_id,
+        x_user_id: row.x_user_id,
+        display_name: row.display_name,
+        permission_preset: row.permission_preset,
+        custom_permission_keys_json: null,
+        is_public: row.is_public,
+        public_role_label: row.public_role_label,
+        approved_by_auth_user_id: input.actorAuthUserId,
+        approved_at: now,
+        created_at: now,
+        updated_at: now,
+      }))
+      .sort((left, right) => left.id.localeCompare(right.id));
+    if (new Set(nextStaff.map((row) => row.id)).size !== nextStaff.length) {
+      return fixedFailure("イベントスタッフIDが重複しています。");
+    }
+    const ownerCount = nextStaff.filter((row) => row.permission_preset === "owner").length;
+    if (ownerCount !== 1) {
+      return fixedFailure(`イベント ${event.id} の owner はちょうど1人必要です（現在 ${ownerCount} 人）。`);
+    }
+    const staffPayload = JSON.stringify(nextStaff);
+    const managedEvent = {
+      id: event.id,
+      title: event.title,
+      event_type: event.event_type,
+      explanation: event.explanation,
+      icon_url: event.icon_url,
+      img_url: event.img_url,
+      visibility_status: event.visibility_status,
+      start_time: event.start_time,
+      end_time: event.end_time,
+      created_at: now,
+    };
+    const [managedDigest, staffDigest] = await Promise.all([
+      snapshotDigest(managedEvent),
+      snapshotDigest(nextStaff),
+    ]);
+    const snapshotTargetId = entitySnapshotTargetId("event", event.id);
+    const queueRows = [
+      { target_type: "event_base", target_id: event.id, reason: "legacy_import", priority: "high" },
+      { target_type: "event_slots", target_id: event.id, reason: "legacy_import", priority: "high" },
+      { target_type: "event_release", target_id: event.id, reason: "legacy_import", priority: "high" },
+      { target_type: "events_index", target_id: "global", reason: "legacy_import", priority: "low" },
+      { target_type: "search_index", target_id: "global", reason: "legacy_import", priority: "low" },
+    ].map((row, index) => ({
+      id: legacyImportRebuildQueueId(identity.targetId, index),
+      ...row,
+    }));
+    const queuePayload = JSON.stringify(queueRows);
+    const outcome = { kind: "event", action: "created" } as const;
+    const nextProgress = nextEventProgress(input.plan, input.progress, outcome);
+    const eventAbsenceAssertion = input.db.run(sql`
+      SELECT CASE WHEN
+        NOT EXISTS (SELECT 1 FROM events WHERE id = ${event.id})
+        AND NOT EXISTS (SELECT 1 FROM event_staff WHERE event_id = ${event.id})
+      THEN 1 ELSE json_extract('legacy_import_event_exists_after_snapshot', '$') END
+    `);
+    await mutateWithAudit(input.db, {
+      preMutationAssertions: [markerAbsenceAssertion, eventAbsenceAssertion],
+      mutationStatements: [
+        input.db.run(sql`
+          INSERT INTO events (
+            id, title, event_type, explanation, icon_url, img_url, accent_color,
+            visibility_status, allow_user_video_event_links, allow_unslotted_posts,
+            allow_user_video_edits, slot_type, slot_visibility_mode, start_time, end_time,
+            entry_start_time, entry_end_time, created_at, updated_at, max_slots_per_video,
+            slot_part_gap_minutes, public_api_enabled
+          ) VALUES (
+            ${event.id}, ${event.title}, ${event.event_type}, ${event.explanation},
+            ${event.icon_url}, ${event.img_url}, NULL, ${event.visibility_status},
+            0, 0, 0, 'time', 'public_name', ${event.start_time}, ${event.end_time},
+            NULL, NULL, ${now}, ${now}, 1, 15, 0
+          )
+        `),
+        input.db.run(sql`
+          INSERT INTO event_staff (
+            id, event_id, x_user_id, display_name, permission_preset,
+            custom_permission_keys_json, is_public, public_role_label,
+            approved_by_auth_user_id, approved_at, created_at, updated_at
+          )
+          SELECT
+            json_extract(value, '$.id'),
+            json_extract(value, '$.event_id'),
+            json_extract(value, '$.x_user_id'),
+            json_extract(value, '$.display_name'),
+            json_extract(value, '$.permission_preset'),
+            json_extract(value, '$.custom_permission_keys_json'),
+            json_extract(value, '$.is_public'),
+            json_extract(value, '$.public_role_label'),
+            json_extract(value, '$.approved_by_auth_user_id'),
+            json_extract(value, '$.approved_at'),
+            json_extract(value, '$.created_at'),
+            json_extract(value, '$.updated_at')
+          FROM json_each(${staffPayload})
+        `),
+        input.db.run(sql`
+          INSERT INTO static_rebuild_queue (
+            id, target_type, target_id, reason, priority, status,
+            attempt_count, requested_by_user_id, created_at, updated_at
+          )
+          SELECT
+            json_extract(incoming.value, '$.id'),
+            json_extract(incoming.value, '$.target_type'),
+            json_extract(incoming.value, '$.target_id'),
+            json_extract(incoming.value, '$.reason'),
+            json_extract(incoming.value, '$.priority'),
+            'pending', 0, ${input.actorAuthUserId}, ${now}, ${now}
+          FROM json_each(${queuePayload}) AS incoming
+          WHERE 1 = 1
+          ON CONFLICT(target_type, target_id) WHERE status IN ('pending', 'processing')
+          DO UPDATE SET
+            reason = CASE
+              WHEN static_rebuild_queue.reason = 'video_visibility_update'
+                   AND excluded.reason <> 'video_visibility_update'
+                THEN static_rebuild_queue.reason
+              ELSE excluded.reason
+            END,
+            priority = CASE
+              WHEN static_rebuild_queue.priority = 'high' OR excluded.priority = 'high' THEN 'high'
+              WHEN static_rebuild_queue.priority = 'normal' OR excluded.priority = 'normal' THEN 'normal'
+              ELSE 'low'
+            END,
+            requested_by_user_id = excluded.requested_by_user_id,
+            updated_at = MAX(static_rebuild_queue.updated_at + 1, excluded.updated_at)
+        `),
+      ],
+      expectedMutationChanges: [1, nextStaff.length, queueRows.length],
+      audits: [
+        {
+          table_name: "events",
+          target_id: event.id,
+          operation: "CREATE" as const,
+          before: null,
+          after: { ...event, staff: input.plan.eventStaff.filter((row) => row.event_id === event.id) },
+          actor_user_id: input.actorAuthUserId,
+          reason: "旧形式イベントを新正本へ変換",
+          context: "legacy_import",
+          retention_class: "long_audit" as const,
+          restore_strategy: "delete_created" as const,
+        },
+        {
+          table_name: "legacy_import_entity_snapshots",
+          target_id: snapshotTargetId,
+          operation: "SYSTEM" as const,
+          before: null,
+          after: {
+            entity_kind: "event",
+            managed_digest: managedDigest,
+            staff_digest: staffDigest,
+          },
+          actor_user_id: input.actorAuthUserId,
+          reason: "旧形式イベントの置換可能snapshotを確定",
+          context: "legacy_import:entity-snapshot",
+          retention_class: "long_audit" as const,
+          restore_strategy: "none" as const,
+          strict: true,
+        },
+        buildMarkerAudit(nextProgress, outcome),
+      ],
+      callerQueryCount: 3,
+      preloaded: input.preloaded,
+    });
+    // Queue rows are persisted atomically. Hono wake=0 is an explicit, still-unaccepted
+    // parity gap; this apply route remains unmounted until the wake contract is resolved.
+    return { progress: nextProgress, complete: false };
+  }
+
   if (stage !== "softwares") {
     return fixedFailure("旧形式インポートのこの段階はHono側でまだ利用できません。");
   }

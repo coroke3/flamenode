@@ -1,5 +1,5 @@
 // MIG-0645: intentionally test-only mounted apply HTTP adapter.
-// The real D1 adapter currently covers system_user only; production has no mount.
+// The real D1 adapter covers system_user, x_users, software catalog, and bounded event create/skip; production has no mount.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
@@ -26,6 +26,25 @@ function extendLegacyImportUserSchema(sqlite) {
 
 function extendLegacyImportSoftwareSchema(sqlite) {
   sqlite.exec('CREATE TABLE software_catalog (id TEXT PRIMARY KEY, name TEXT NOT NULL, normalized_name TEXT NOT NULL, category TEXT, usage_count INTEGER NOT NULL DEFAULT 0, is_active INTEGER NOT NULL DEFAULT 1, is_verified INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL); CREATE UNIQUE INDEX software_catalog_norm_uniq ON software_catalog(normalized_name);');
+}
+
+function extendLegacyImportEventSchema(sqlite) {
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS event_staff (
+      id TEXT PRIMARY KEY,
+      event_id TEXT NOT NULL,
+      x_user_id TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      permission_preset TEXT NOT NULL,
+      custom_permission_keys_json TEXT,
+      is_public INTEGER NOT NULL,
+      public_role_label TEXT,
+      approved_by_auth_user_id TEXT,
+      approved_at INTEGER,
+      created_at INTEGER,
+      updated_at INTEGER
+    );
+  `);
 }
 
 function legacySoftwareId(normalizedName) {
@@ -738,6 +757,171 @@ test("MIG-0645 U02ac Hono: all-existing software group writes marker only and pr
     assert.deepEqual({ ...preserved }, {
       name: "OBS canonical", category: "streaming", usage_count: 7, is_active: 0, is_verified: 1,
     });
+  } finally {
+    sqlite.close();
+  }
+});
+
+
+test("MIG-0645 U02ad Hono: event, owner staff, rebuild targets and audit receipt commit atomically and replay after R2 CAS failure", async () => {
+  const { bucket, record } = previewBucket({ failAdvanceOnce: true, failAdvanceStage: "events" });
+  const plan = normalizeLegacyFiles([], {
+    eventVisibility: "private", videoVisibility: "private", now: 1700000000,
+  });
+  plan.xUsers.push({
+    id: "legacy_event_owner",
+    x_name: "Event owner",
+    icon_url: null,
+    youtube_channel_url: null,
+    other_social_links: null,
+  });
+  const event = {
+    id: "legacy-event-1",
+    title: "Imported event",
+    event_type: "event",
+    explanation: null,
+    icon_url: null,
+    img_url: null,
+    visibility_status: "private",
+    start_time: 1700000000,
+    end_time: 1700003600,
+  };
+  plan.events.push(event);
+  plan.eventStaff.push({
+    id: "legacy-event-owner-staff",
+    event_id: event.id,
+    x_user_id: "legacy_event_owner",
+    display_name: "Event owner",
+    permission_preset: "owner",
+    is_public: 0,
+    public_role_label: null,
+  });
+  const { credential, form } = await createApplyCredential(bucket, ADMIN.id, plan);
+  const { request, sqlite, stats, getD1ApplyCalls } = setup({ bucket, applyStep: legacyImportD1ApplyStep });
+  extendLegacyImportUserSchema(sqlite);
+  extendLegacyImportSoftwareSchema(sqlite);
+  extendLegacyImportEventSchema(sqlite);
+
+  try {
+    const systemUser = await request(form());
+    assert.equal(systemUser.status, 200, JSON.stringify(await systemUser.clone().json()));
+    assert.equal((await systemUser.json()).progress.stage, "x_users");
+
+    const xUsers = await request(form());
+    assert.equal(xUsers.status, 200, JSON.stringify(await xUsers.clone().json()));
+    assert.equal((await xUsers.json()).progress.stage, "softwares");
+
+    const emptySoftwares = await request(form());
+    assert.equal(emptySoftwares.status, 200, JSON.stringify(await emptySoftwares.clone().json()));
+    assert.equal((await emptySoftwares.json()).progress.stage, "events");
+
+    const failedAdvance = await request(form());
+    assert.equal(failedAdvance.status, 503, JSON.stringify(await failedAdvance.clone().json()));
+    const pending = await failedAdvance.json();
+    assert.equal(pending.kind, "committed_progress_pending");
+    assert.equal(pending.committed, true);
+    assert.equal(pending.requires_repreview, false);
+    assert.equal(pending.progress.stage, "custom_questions");
+    assert.equal(pending.result.created.events, 1);
+    assert.equal(record().status, "ready");
+    assert.equal(record().progress.stage, "events");
+    assert.equal(stats.reads, 12, "four requests use three pre-reads each, including the combined event snapshot");
+    assert.equal(stats.batches, 4, "system user, X users, empty software marker and event/staff/queue/audit batches");
+
+    const savedEvent = sqlite.prepare(
+      "SELECT id, title, event_type, visibility_status, start_time, end_time FROM events WHERE id = ?",
+    ).get(event.id);
+    assert.deepEqual({ ...savedEvent }, {
+      id: event.id,
+      title: event.title,
+      event_type: "event",
+      visibility_status: "private",
+      start_time: 1700000000,
+      end_time: 1700003600,
+    });
+    const savedStaff = sqlite.prepare(
+      "SELECT id, event_id, x_user_id, permission_preset, approved_by_auth_user_id FROM event_staff WHERE event_id = ?",
+    ).get(event.id);
+    assert.deepEqual({ ...savedStaff }, {
+      id: "legacy-event-owner-staff",
+      event_id: event.id,
+      x_user_id: "legacy_event_owner",
+      permission_preset: "owner",
+      approved_by_auth_user_id: ADMIN.id,
+    });
+    const queueTargets = sqlite.prepare(
+      "SELECT target_type, target_id, reason, priority FROM static_rebuild_queue ORDER BY target_type, target_id",
+    ).all().map((row) => ({ ...row }));
+    assert.deepEqual(queueTargets, [
+      { target_type: "event_base", target_id: event.id, reason: "legacy_import", priority: "high" },
+      { target_type: "event_release", target_id: event.id, reason: "legacy_import", priority: "high" },
+      { target_type: "event_slots", target_id: event.id, reason: "legacy_import", priority: "high" },
+      { target_type: "events_index", target_id: "global", reason: "legacy_import", priority: "low" },
+      { target_type: "search_index", target_id: "global", reason: "legacy_import", priority: "low" },
+      { target_type: "users_index", target_id: "global", reason: "legacy_import_x_users", priority: "low" },
+    ]);
+    const eventAudit = sqlite.prepare(
+      "SELECT after_json FROM audit_logs WHERE table_name = 'events' AND target_id = ?",
+    ).get(event.id);
+    assert.deepEqual(JSON.parse(eventAudit.after_json).staff.map((row) => row.id), ["legacy-event-owner-staff"]);
+    const entitySnapshot = sqlite.prepare(
+      "SELECT after_json FROM audit_logs WHERE table_name = 'legacy_import_entity_snapshots' AND target_id = ?",
+    ).get("event:legacy-event-1");
+    assert.ok(entitySnapshot);
+    const stepAudit = sqlite.prepare(
+      "SELECT after_json FROM audit_logs WHERE table_name = 'legacy_import_steps' AND target_id LIKE '%:events:0'",
+    ).get();
+    const receipt = JSON.parse(stepAudit.after_json);
+    assert.deepEqual(receipt.outcome, { kind: "event", action: "created" });
+    assert.equal(receipt.next_stage, "custom_questions");
+    assert.equal(receipt.next_index, 0);
+
+    const replay = await request(form());
+    assert.equal(replay.status, 200, JSON.stringify(await replay.clone().json()));
+    const recovered = await replay.json();
+    assert.equal(recovered.progress.stage, "custom_questions");
+    assert.equal(recovered.result.created.events, 1);
+    assert.equal(record().progress.stage, "custom_questions");
+    assert.equal(stats.reads, 15, "durable receipt replay adds one combined event snapshot read");
+    assert.equal(stats.batches, 4, "receipt replay never duplicates event, staff, queue or audit writes");
+    assert.equal(getD1ApplyCalls(), 5);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM events").get().n, 1);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM event_staff").get().n, 1);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 6);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE table_name = 'events'").get().n, 1);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE table_name = 'legacy_import_entity_snapshots'").get().n, 1);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE table_name = 'legacy_import_steps'").get().n, 4);
+    assert.ok(!JSON.stringify(receipt).includes(credential.previewToken));
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("MIG-0645 U02ad Hono: empty events stage writes only its durable marker", async () => {
+  const { bucket, record } = previewBucket();
+  const { form } = await createApplyCredential(bucket);
+  const { request, sqlite, stats } = setup({ bucket, applyStep: legacyImportD1ApplyStep });
+  extendLegacyImportUserSchema(sqlite);
+  extendLegacyImportSoftwareSchema(sqlite);
+  extendLegacyImportEventSchema(sqlite);
+  try {
+    const systemUser = await request(form());
+    assert.equal(systemUser.status, 200);
+    const emptyXUsers = await request(form());
+    assert.equal(emptyXUsers.status, 200);
+    const emptySoftwares = await request(form());
+    assert.equal(emptySoftwares.status, 200);
+    const emptyEvents = await request(form());
+    assert.equal(emptyEvents.status, 200, JSON.stringify(await emptyEvents.clone().json()));
+    assert.equal((await emptyEvents.json()).progress.stage, "custom_questions");
+    assert.equal(record().progress.stage, "custom_questions");
+    assert.equal(stats.reads, 12);
+    assert.equal(stats.batches, 4);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM events").get().n, 0);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM event_staff").get().n, 0);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 0);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE table_name = 'legacy_import_steps'").get().n, 4);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE table_name = 'legacy_import_entity_snapshots'").get().n, 0);
   } finally {
     sqlite.close();
   }
