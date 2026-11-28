@@ -206,6 +206,11 @@ test("SEC-800: SA-031 validates permission input before staff mutation for every
     ["POST", "/", { ...upsert, permission_keys: unknown }, boundedMessage],
     ["POST", "/", { ...upsert, permission_preset: "custom", permission_keys: "event.members, " + unknown }, boundedMessage],
     ["PUT", "/s-owner", { ...upsert, staff_id: "s-owner", permission_keys: unknown }, boundedMessage],
+    // SEC-930: representative inherited names must fail before preparation for both methods/presets.
+    ["POST", "/", { ...upsert, permission_keys: "constructor" }, "不正な権限キーです: constructor"],
+    ["PUT", "/s-owner", { ...upsert, staff_id: "s-owner", permission_keys: "event.members, __proto__" }, "不正な権限キーです: __proto__"],
+    ["POST", "/", { ...upsert, permission_preset: "custom", permission_keys: "__proto__" }, "不正な権限キーです: __proto__"],
+    ["PUT", "/s-owner", { ...upsert, staff_id: "s-owner", permission_preset: "custom", permission_keys: "videos.title, toString" }, "不正な権限キーです: toString"],
     ["POST", "/", { ...upsert, permission_keys: "x".repeat(100) }, "不正な権限キーです: " + "x".repeat(100)],
     ["POST", "/", { ...upsert, permission_keys: "x".repeat(101) }, "入力エラー"],
     ["POST", "/", { ...upsert, permission_keys: "event.members,".repeat(40) + unknown }, "入力エラー"],
