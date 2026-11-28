@@ -107,7 +107,8 @@ type StoredStepOutcome =
   | { kind: "x_users"; created: number; createdAuthUsers: number }
   | { kind: "softwares"; created: number }
   | { kind: "event"; action: "created" | "replaced" | "skipped" }
-  | { kind: "custom_questions"; created: number; reused: number };
+  | { kind: "custom_questions"; created: number; reused: number }
+  | { kind: "video"; action: "skipped" };
 
 type PlannedSoftwareRow = { id: string; name: string; normalized_name: string };
 
@@ -313,6 +314,38 @@ function nextQuestionProgress(
   return next;
 }
 
+/** The U02aj video boundary only permits marker-only empty/confirmed-skip steps. */
+function nextVideoProgress(
+  input: ApplyInput,
+  outcome: StoredStepOutcome,
+): LegacyImportApplyProgress {
+  const next: LegacyImportApplyProgress = {
+    ...input.progress,
+    counts: { ...input.progress.counts },
+    skipExistingEventIds: [...input.progress.skipExistingEventIds],
+    skipExistingVideoIds: [...input.progress.skipExistingVideoIds],
+  };
+  if (input.plan.videos.length === 0) {
+    if (outcome.kind !== "none") return fixedFailure("旧形式インポートの作品進捗が不正です。");
+  } else {
+    const video = input.plan.videos[input.progress.index];
+    if (
+      outcome.kind !== "video" || outcome.action !== "skipped" ||
+      input.strategy !== "skip_existing" || !video ||
+      !input.progress.skipExistingVideoIds.includes(video.id)
+    ) {
+      return fixedFailure("旧形式インポートの作品進捗が不正です。");
+    }
+    next.counts.skippedVideos += 1;
+  }
+  if (input.progress.index + 1 < input.plan.videos.length) next.index += 1;
+  else {
+    next.stage = "complete";
+    next.index = 0;
+  }
+  return next;
+}
+
 const LEGACY_STEP_TARGET_PATTERN =
   /^[a-f0-9]{24}:[a-f0-9]{24}:(?:system_user|x_users|softwares|events|custom_questions|videos):\d+$/;
 
@@ -396,6 +429,8 @@ function parseReceipt(value: Record<string, unknown>) {
       created: outcomeRecord.created as number,
       reused: outcomeRecord.reused as number,
     };
+  } else if (outcomeRecord.kind === "video" && outcomeRecord.action === "skipped") {
+    outcome = { kind: "video", action: "skipped" };
   } else if (
     outcomeRecord.kind === "event" &&
     ["created", "replaced", "skipped"].includes(String(outcomeRecord.action))
@@ -440,14 +475,15 @@ function parseReceipt(value: Record<string, unknown>) {
  * Bounded real Hono D1 apply units for RH-002.
  * system_user, x_users, software catalog, event create/preview-confirmed skip,
  * proven imported-event same-visibility replacement and custom question steps.
- * Visibility-changing replacements and video mutations remain fail closed.
+ * Empty/preview-confirmed skipped video steps are supported; visibility-changing
+ * event replacements and video create/replace mutations remain fail closed.
  */
 export async function legacyImportD1ApplyStep(
   input: ApplyInput,
 ): Promise<{ progress: LegacyImportApplyProgress; complete: boolean }> {
   if (input.plan.errors.length > 0) return fixedFailure(input.plan.errors.join("\n"));
   const stage = input.progress.stage;
-  if (stage !== "system_user" && stage !== "x_users" && stage !== "softwares" && stage !== "events" && stage !== "custom_questions") {
+  if (stage !== "system_user" && stage !== "x_users" && stage !== "softwares" && stage !== "events" && stage !== "custom_questions" && stage !== "videos") {
     return fixedFailure("旧形式インポートのこの段階はHono側でまだ利用できません。");
   }
   if (stage === "system_user" && input.progress.index !== 0) {
@@ -487,6 +523,13 @@ export async function legacyImportD1ApplyStep(
       return fixedFailure("旧形式インポートのカスタム質問進捗位置が不正です。");
     }
   }
+  if (stage === "videos" && (
+    !Number.isSafeInteger(input.progress.index) || input.progress.index < 0 ||
+    input.progress.index >= Math.max(1, input.plan.videos.length)
+  )) {
+    return fixedFailure("旧形式インポートの作品進捗位置が不正です。");
+  }
+
   const actorJson = input.preloaded.actorSnapshotJsonById?.[input.actorAuthUserId];
   if (
     !isValidPreloadedAuditSettings(input.preloaded.settings) ||
@@ -519,6 +562,9 @@ export async function legacyImportD1ApplyStep(
   const plannedEvent = stage === "events" && input.plan.events.length > 0
     ? input.plan.events[input.progress.index]
     : null;
+  const plannedVideo = stage === "videos" && input.plan.videos.length > 0
+    ? input.plan.videos[input.progress.index]
+    : null;
   const eventIdForRead = plannedEvent?.id ?? "";
   const readReplacement = input.strategy === "replace_imported";
   const replacementTargetId = entitySnapshotTargetId("event", eventIdForRead);
@@ -538,7 +584,33 @@ export async function legacyImportD1ApplyStep(
   // One bounded D1 read per request: receipt plus the reserved principal or a
   // 40-row X/software normalized-name existence snapshot.
   // One bounded D1 read per request: receipt plus the stage-specific existing-state snapshot.
-  const readRows = stage === "custom_questions"
+  const readRows = stage === "videos"
+    ? !plannedVideo
+      ? await input.db.all(sql`
+          SELECT 'marker' AS kind, after_json AS payload FROM audit_logs
+           WHERE table_name = ${STEP_AUDIT_TABLE}
+             AND target_id = ${identity.targetId}
+             AND context = ${STEP_AUDIT_CONTEXT}
+           LIMIT 2
+        `) as unknown as ReadRow[]
+      : await input.db.all(sql`
+          WITH marker_rows AS (
+            SELECT after_json AS payload FROM audit_logs
+             WHERE table_name = ${STEP_AUDIT_TABLE}
+               AND target_id = ${identity.targetId}
+               AND context = ${STEP_AUDIT_CONTEXT}
+             LIMIT 2
+          ), video_rows AS (
+            SELECT id AS payload FROM videos
+             WHERE id = ${plannedVideo.id}
+               AND NOT EXISTS (SELECT 1 FROM marker_rows)
+             LIMIT 2
+          )
+          SELECT 'marker' AS kind, payload FROM marker_rows
+          UNION ALL
+          SELECT 'video' AS kind, payload FROM video_rows
+        `) as unknown as ReadRow[]
+    : stage === "custom_questions"
     ? questions.length === 0
       ? await input.db.all(sql`
           SELECT 'marker' AS kind, after_json AS payload
@@ -747,6 +819,7 @@ export async function legacyImportD1ApplyStep(
   const principalRows = readRows.filter((row) => row.kind === "principal");
   const existingRows = readRows.filter((row) => row.kind === "existing");
   const eventRows = readRows.filter((row) => row.kind === "event");
+  const videoRows = readRows.filter((row) => row.kind === "video");
   const eventStaffSnapshotRows = readRows.filter((row) => row.kind === "staff");
   const replacementEventRows = readRows.filter((row) => row.kind === "replacement_event");
   const replacementStaffRows = readRows.filter((row) => row.kind === "replacement_staff");
@@ -762,7 +835,7 @@ export async function legacyImportD1ApplyStep(
         : 0;
   if (
     markerRows.length + principalRows.length + existingRows.length +
-      eventRows.length + eventStaffSnapshotRows.length + replacementRowCount !== readRows.length
+      eventRows.length + videoRows.length + eventStaffSnapshotRows.length + replacementRowCount !== readRows.length
   ) {
     return fixedFailure("旧形式インポートのステップ監査を確認できません。");
   }
@@ -771,6 +844,8 @@ export async function legacyImportD1ApplyStep(
     principalRows.length > 1 ||
     existingRows.length > maxExistingRows ||
     eventRows.length > 1 ||
+    videoRows.length > 1 ||
+    (videoRows.length > 0 && (stage !== "videos" || !plannedVideo || markerRows.length > 0 || videoRows[0].payload !== plannedVideo.id)) ||
     eventStaffSnapshotRows.length > 1 ||
     replacementEventRows.length > 1 ||
     replacementStaffRows.length > MAX_LEGACY_EVENT_STAFF_PER_EVENT ||
@@ -808,11 +883,13 @@ export async function legacyImportD1ApplyStep(
           ? nextSoftwareProgress(input.plan, input.progress, receipt.outcome)
           : stage === "custom_questions"
             ? nextQuestionProgress(input.plan, input.progress, receipt.outcome, questions.length)
-            : nextEventProgress(input.plan, input.progress, receipt.outcome);
+            : stage === "videos"
+              ? nextVideoProgress(input, receipt.outcome)
+              : nextEventProgress(input.plan, input.progress, receipt.outcome);
     if (!legacyImportReceiptMatchesProgress(receipt, identity, expected)) {
       return fixedFailure("旧形式インポートのステップ監査と進捗が一致しません。");
     }
-    return { progress: expected, complete: false };
+    return { progress: expected, complete: expected.stage === "complete" };
   }
 
   const markerAbsenceAssertion = input.db.run(sql`
@@ -1525,6 +1602,43 @@ export async function legacyImportD1ApplyStep(
       preloaded: input.preloaded,
     });
     return { progress: nextProgress, complete: false };
+  }
+
+  if (stage === "videos") {
+    const expectedExistingForSkip = plannedVideo &&
+      input.strategy === "skip_existing" &&
+      input.progress.skipExistingVideoIds.includes(plannedVideo.id);
+    if (plannedVideo) {
+      if (input.strategy === "skip_existing" && expectedExistingForSkip !== (videoRows.length === 1)) {
+        return fixedFailure("作品の存在状態がプレビュー時点から変更されたため、再プレビューが必要です。");
+      }
+      if (!expectedExistingForSkip) {
+        // Neither create nor replace may reach a D1 write, receipt or Queue wake
+        // before the full video support snapshot and side effects are migrated.
+        return fixedFailure("旧形式インポートの作品作成・置換はHono側でまだ利用できません。");
+      }
+    }
+    const outcome: StoredStepOutcome = plannedVideo
+      ? { kind: "video", action: "skipped" }
+      : { kind: "none" };
+    const nextProgress = nextVideoProgress(input, outcome);
+    const assertions = [
+      markerAbsenceAssertion,
+      ...(plannedVideo ? [input.db.run(sql`
+        SELECT CASE WHEN EXISTS (
+          SELECT 1 FROM videos WHERE id = ${plannedVideo.id}
+        ) THEN 1 ELSE json_extract('legacy_import_video_disappeared_after_snapshot', '$') END
+      `)] : []),
+    ];
+    await mutateWithAudit(input.db, {
+      preMutationAssertions: assertions,
+      mutationStatements: [input.db.run(sql`SELECT 1`)],
+      expectedMutationChanges: [null],
+      audits: [buildMarkerAudit(nextProgress, outcome)],
+      callerQueryCount: 3,
+      preloaded: input.preloaded,
+    });
+    return { progress: nextProgress, complete: nextProgress.stage === "complete" };
   }
 
   if (stage !== "softwares") {

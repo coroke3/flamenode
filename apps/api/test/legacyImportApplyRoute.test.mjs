@@ -1,5 +1,5 @@
 // MIG-0645: intentionally test-only mounted apply HTTP adapter.
-// The real D1 adapter covers system_user, x_users, software catalog, and bounded event create/skip; production has no mount.
+// The real D1 adapter covers staged import through question definitions and marker-only video completion/skip; production has no mount.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
@@ -1223,7 +1223,7 @@ async function reachQuestionStage(request, form) {
 }
 
 test("MIG-0645 U02ai Hono: bounded question creation, reuse, limit/collision refusal and durable receipt replay", async () => {
-  const { bucket } = previewBucket({ failAdvanceOnce: true, failAdvanceStage: "videos" });
+  const { bucket } = previewBucket({ failAdvanceOnce: true, failAdvanceStage: "videos", failCompleteOnce: true });
   const { request, sqlite, stats } = setup({ bucket, applyStep: legacyImportD1ApplyStep });
   extendLegacyImportUserSchema(sqlite);
   extendLegacyImportSoftwareSchema(sqlite);
@@ -1295,14 +1295,47 @@ test("MIG-0645 U02ai Hono: bounded question creation, reuse, limit/collision ref
     const emptyBody = await noQuestions.json();
     assert.equal(emptyBody.progress.stage, "videos");
     assert.deepEqual(emptyBody.result.customQuestions, { created: 0, reused: 0 });
+    const beforeFinal = stats.batches;
+    const failedComplete = await request(empty.form());
+    assert.equal(failedComplete.status, 503, JSON.stringify(await failedComplete.clone().json()));
+    const pendingFinal = await failedComplete.json();
+    assert.equal(pendingFinal.kind, "committed_progress_pending");
+    assert.equal(pendingFinal.progress.stage, "complete");
+    assert.equal(pendingFinal.result.complete, true);
+    assert.equal(stats.batches, beforeFinal + 1, "empty video step commits one durable receipt");
+    const completed = await request(empty.form());
+    assert.equal(completed.status, 200, JSON.stringify(await completed.clone().json()));
+    const completedBody = await completed.json();
+    assert.equal(completedBody.result.complete, true);
+    assert.equal(completedBody.continuation_required, false);
+    assert.equal(completedBody.progress.stage, "complete");
+    assert.equal(stats.batches, beforeFinal + 1, "final receipt replay must not commit twice");
+    const againComplete = await request(empty.form());
+    assert.equal(againComplete.status, 200);
+    assert.equal((await againComplete.json()).result.complete, true);
+    assert.equal(stats.batches, beforeFinal + 1, "completed preview is idempotent");
   } finally {
     sqlite.close();
   }
 });
 
-test("MIG-0645 U02ai Hono: skip-existing question creation requires unchanged relevant video existence", async () => {
+test("MIG-0645 U02ai/U02aj Hono: question and video skip use preview-confirmed existence", async () => {
   const { bucket } = previewBucket();
-  const { request, sqlite } = setup({ bucket, applyStep: legacyImportD1ApplyStep });
+  const wakes = [];
+  let deleteBeforeBatch = false;
+  const { request, sqlite, stats } = setup({
+    bucket, applyStep: legacyImportD1ApplyStep,
+    bindings: {
+      QUEUE_DISPATCH_ENABLED: "1",
+      STATIC_REBUILD_WAKE_QUEUE: { send: async (message) => { wakes.push(message); } },
+      YOUTUBE_SYNC_WAKE_QUEUE: { send: async (message) => { wakes.push(message); } },
+    },
+    beforeBatch: (db) => {
+      if (!deleteBeforeBatch) return;
+      deleteBeforeBatch = false;
+      db.prepare("DELETE FROM videos WHERE id = ?").run("existing-video");
+    },
+  });
   extendLegacyImportUserSchema(sqlite);
   extendLegacyImportSoftwareSchema(sqlite);
   extendLegacyImportEventSchema(sqlite);
@@ -1310,8 +1343,7 @@ test("MIG-0645 U02ai Hono: skip-existing question creation requires unchanged re
   seedEvent(sqlite, { visibility_status: "private" });
   try {
     const plan = questionPlan(2);
-    // The question stage only consumes video IDs and their linked answers.
-    // No video-stage D1 mutation is exercised in this fixture.
+    // Video stage only consumes IDs for marker-only skips; create/replace remain disabled.
     for (const id of ["existing-video", "new-video"]) {
       plan.videos.push({
         id, primary_event_id: "ev-1", creator_x_user_id: null, collaboration_type: "individual",
@@ -1341,6 +1373,34 @@ test("MIG-0645 U02ai Hono: skip-existing question creation requires unchanged re
     assert.equal(accepted.status, 200, JSON.stringify(await accepted.clone().json()));
     assert.deepEqual((await accepted.json()).result.customQuestions, { created: 1, reused: 0 });
     assert.deepEqual(sqlite.prepare("SELECT id FROM event_custom_questions ORDER BY id").all().map(row => row.id), ["question-1"]);
+
+    const beforeDeleted = stats.batches;
+    sqlite.prepare("DELETE FROM videos WHERE id = ?").run("existing-video");
+    assert.equal((await request(fresh.form())).status, 409, "preview-confirmed skip cannot silently recreate a deleted video");
+    assert.equal(stats.batches, beforeDeleted);
+    sqlite.prepare("INSERT INTO videos(id) VALUES (?)").run("existing-video");
+
+    deleteBeforeBatch = true;
+    assert.equal((await request(fresh.form())).status, 409, "same-batch existence assertion catches concurrent deletion");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE table_name = 'videos'").get().n, 0);
+    sqlite.prepare("INSERT INTO videos(id) VALUES (?)").run("existing-video");
+    const beforeSkip = stats.batches;
+    const skipped = await request(fresh.form());
+    assert.equal(skipped.status, 200, JSON.stringify(await skipped.clone().json()));
+    const skippedBody = await skipped.json();
+    assert.equal(skippedBody.progress.stage, "videos");
+    assert.equal(skippedBody.progress.index, 1);
+    assert.equal(skippedBody.result.skipped.videos, 1);
+    assert.equal(stats.batches, beforeSkip + 1);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM videos").get().n, 1);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE table_name = 'videos'").get().n, 0);
+    assert.equal(wakes.length, 0, "question and video skips must not dispatch wakes");
+
+    const beforeUnsupported = stats.batches;
+    assert.equal((await request(fresh.form())).status, 409, "new video writes are still fail closed");
+    sqlite.prepare("INSERT INTO videos(id) VALUES (?)").run("new-video");
+    assert.equal((await request(fresh.form())).status, 409, "post-preview video creation is rejected");
+    assert.equal(stats.batches, beforeUnsupported);
   } finally {
     sqlite.close();
   }
