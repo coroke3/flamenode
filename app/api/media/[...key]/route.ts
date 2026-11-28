@@ -3,7 +3,6 @@
   getEnv,
 } from "@/lib/cloudflare";
 import {
-  getCachedPublicMediaResponse,
   isValidPublicMediaKey,
   servePublicMedia,
 } from "@/lib/media/publicMedia";
@@ -20,10 +19,12 @@ export async function GET(
   const { key } = await params;
   const rawKey = key?.join("/") ?? "";
 
-  if (!isValidPublicMediaKey(rawKey)) return new Response("Not found", { status: 404 });
-
-  const cached = await getCachedPublicMediaResponse(request, rawKey);
-  if (cached) return cached;
+  if (!isValidPublicMediaKey(rawKey)) {
+    return new Response("Not found", {
+      status: 404,
+      headers: { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" },
+    });
+  }
 
   let env: ReturnType<typeof getEnv>;
   try {
@@ -44,5 +45,5 @@ export async function GET(
       headers: UNAVAILABLE_HEADERS,
     });
   }
-  return servePublicMedia(env, rawKey, request, { skipEdgeCacheLookup: true });
+  return servePublicMedia(env, rawKey, request);
 }

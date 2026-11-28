@@ -6,7 +6,6 @@
 import { Hono, type Context } from "hono";
 import type { AppEnv } from "../../env.ts";
 import {
-  getCachedPublicMediaResponse,
   isValidPublicMediaKey,
   servePublicMedia,
 } from "./publicMedia.ts";
@@ -121,19 +120,16 @@ mediaRoutes.get("/slot-submission-icon/:slotId", async (c) => {
 // RH-023 — invalid keys are rejected before any cache/D1/R2 I/O.
 mediaRoutes.get("/*", async (c) => {
   const key = pathValue(c, "/api/media/");
-  if (!isValidPublicMediaKey(key)) return notFound();
+  if (!isValidPublicMediaKey(key)) return notFound(true);
 
   try {
-    // Public cache may return before binding acquisition, even if the runtime is degraded.
-    const cached = await getCachedPublicMediaResponse(c.req.raw, key);
-    if (cached) return cached;
     const { DB, BUCKET } = c.env ?? {};
     if (!DB || !BUCKET) return unavailable("Storage temporarily unavailable");
     return await servePublicMedia(
       { DB, BUCKET },
       key,
       c.req.raw,
-      { skipEdgeCacheLookup: true, waitUntil: executionWaitUntil(c) },
+      { waitUntil: executionWaitUntil(c) },
     );
   } catch {
     return unavailable("Storage temporarily unavailable");

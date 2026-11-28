@@ -37,11 +37,8 @@ test("public media objectはMIMEと5MiB上限をfail-closedで検査する", () 
   assert.equal(isPublicMediaObjectSafe({ size: 100, contentType: null }), false);
 });
 
-test("公開メディアの従来の長期共有キャッシュTTLを維持する", () => {
-  assert.equal(
-    PUBLIC_MEDIA_CACHE_CONTROL,
-    "public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400",
-  );
+test("公開可否が変わる画像をブラウザ/CDNは保持しない", () => {
+  assert.equal(PUBLIC_MEDIA_CACHE_CONTROL, "no-store");
 });
 
 test("public media access queryはartifactとentity visibilityを1 statementで照合する", () => {
@@ -139,6 +136,47 @@ test("D1で非公開ならR2へ触れず404", async () => {
     assert.deepEqual({ prepares: state.prepares, gets: state.gets }, { prepares: 1, gets: 0 });
 });
 
+test("RH-023: a temporary 404 cannot remain cached after the image is republished", async () => {
+  const key = "event-icons/republish/a.png";
+  const denied = await requestMedia({ key, allowed: false });
+  assert.equal(denied.response.status, 404);
+  assert.equal(denied.response.headers.get("cache-control"), "no-store");
+  assert.equal(denied.response.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(denied.state.gets, 0, "ACL denial still skips R2");
+  const republished = await requestMedia({ key, allowed: true });
+  assert.equal(republished.response.status, 200);
+  assert.equal(republished.response.headers.get("cache-control"), "no-store");
+
+  const invalid = await requestMedia({ key: "private/a.png", allowed: true });
+  assert.equal(invalid.response.status, 404);
+  assert.equal(invalid.response.headers.get("cache-control"), "no-store");
+  assert.equal(invalid.state.prepares, 0);
+
+  for (const unsafe of [
+    { size: MAX_PUBLIC_MEDIA_BYTES + 1, contentType: "image/png" },
+    { size: 128, contentType: "image/svg+xml" },
+  ]) {
+    const blocked = await requestMedia({ key, allowed: true, ...unsafe });
+    assert.equal(blocked.response.status, 404);
+    assert.equal(blocked.response.headers.get("cache-control"), "no-store");
+  }
+});
+
+test("RH-023: an R2 missing-object 404 is not shared-cacheable", async () => {
+  let reads = 0;
+  const response = await servePublicMedia({
+    DB: { prepare() {
+      reads++;
+      return { bind() { return { first: async () => ({ allowed: 1 }) }; } };
+    } },
+    BUCKET: { get: async () => null },
+  }, "event-icons/republish/missing.png");
+  assert.equal(reads, 1);
+  assert.equal(response.status, 404);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+});
+
 test("公開entityは単一D1 lookup後に安全な画像だけ返す", async () => {
     const key = "event-icons/event/a.png";
     const { response, state } = await requestMedia({ key, allowed: true });
@@ -180,13 +218,14 @@ test("public mediaはACL拒否時にIf-None-Match一致でも304を返さない"
   assert.equal(result.state.gets, 0);
 });
 
-test("isolate ACL cacheはD1 bindingを保持せず短時間の判定を再利用する", async () => {
+test("公開状態の変化は次のリクエストで反映され、isolate ACLを再利用しない", async () => {
   const key = "event-icons/event/acl-cache.png";
   const first = await requestMedia({ key, allowed: true });
   const second = await requestMedia({ key, allowed: false });
   assert.equal(first.state.prepares, 1);
-  assert.equal(second.state.prepares, 0);
-  assert.equal(second.response.status, 200);
+  assert.equal(second.state.prepares, 1);
+  assert.equal(second.response.status, 404);
+  assert.equal(second.state.gets, 0);
 });
 
 test("公開entityでも危険MIMEまたは上限超過objectは404", async () => {
@@ -271,7 +310,7 @@ test("public media障害ログは秘密情報とスタックを含めない", as
   assert.match(logLines[0], /REDACTED/);
 });
 
-test("Cache APIが存在する場合、2回目以降はD1/R2へアクセスせずCacheから直接返す", async () => {
+test("Cache APIはD1の再判定後だけR2 byteを再利用しno-storeを返す", async () => {
   const store = new Map();
   const mockCache = {
     async match(req) {
@@ -302,26 +341,163 @@ test("Cache APIが存在する場合、2回目以降はD1/R2へアクセスせ�
       [`https://example.test/api/media/${key}`],
     );
 
-    // 2回目はキャッシュから取得され、D1とR2の回数は0
+    // D1は毎回検証し、R2だけをCache APIから再利用する
     const second = await requestMedia({
       key,
       allowed: true,
       request: new Request(`https://example.test/api/media/${key}?cache-buster=two`),
     });
     assert.equal(second.response.status, 200);
-    assert.equal(second.state.prepares, 0);
+    assert.equal(second.state.prepares, 1);
     assert.equal(second.state.gets, 0);
+    assert.equal(second.response.headers.get("cache-control"), "no-store");
     assert.equal(second.response.headers.get("etag"), '"etag"');
 
-    // 3回目: If-None-Matchが一致する場合はCacheから304を返す (D1/R2は0)
+    // 3回目: 304もfresh D1確認後だけ返し、共有キャッシュ可能にしない
     const reqWithEtag = new Request(`https://example.test/api/media/${key}?cache-buster=three`, {
       headers: { "If-None-Match": '"etag"' },
     });
     const third = await requestMedia({ key, allowed: true, request: reqWithEtag });
     assert.equal(third.response.status, 304);
-    assert.equal(third.state.prepares, 0);
+    assert.equal(third.state.prepares, 1);
     assert.equal(third.state.gets, 0);
+    assert.equal(third.response.headers.get("cache-control"), "no-store");
   } finally {
     delete globalThis.caches;
+  }
+});
+
+test("revocation: Cache APIに旧200が残っていても非公開化後は404でR2を読まない", async () => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, "caches");
+  const store = new Map();
+  Object.defineProperty(globalThis, "caches", {
+    configurable: true,
+    value: {
+      default: {
+        async match(req) { return store.get(req.url)?.clone() ?? null; },
+        async put(req, res) { store.set(req.url, res.clone()); },
+      },
+    },
+  });
+  try {
+    const key = "event-icons/event/revoked.png";
+    const request = new Request(`https://example.test/api/media/${key}`);
+    const first = await requestMedia({ key, request, allowed: true });
+    assert.equal(first.response.status, 200);
+    assert.equal(store.size, 1);
+    const revoked = await requestMedia({ key, request, allowed: false });
+    assert.equal(revoked.response.status, 404);
+    assert.equal(revoked.state.prepares, 1, "Cache API must not skip D1");
+    assert.equal(revoked.state.gets, 0);
+    const conditional = await requestMedia({
+      key, request: new Request(request.url, { headers: { "If-None-Match": '"etag"' } }), allowed: false,
+    });
+    assert.equal(conditional.response.status, 404, "old ETag cannot yield 304 after revocation");
+  } finally {
+    if (original) Object.defineProperty(globalThis, "caches", original);
+    else delete globalThis.caches;
+  }
+});
+
+test("CURRENT Cache API ignores poisoned statuses/MIME/size and strips response headers after D1 ACL", async () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "caches");
+  let cached = null;
+  Object.defineProperty(globalThis, "caches", {
+    configurable: true,
+    value: {
+      default: {
+        async match() {
+          if (!cached) return null;
+          // Cache API returns an independent body stream. Avoid Response.clone()
+          // tee branches here: cancelling an oversized returned body must not wait
+          // for an unread sibling branch in this in-memory test double.
+          return new Response(await cached.clone().arrayBuffer(), {
+            status: cached.status,
+            headers: new Headers(cached.headers),
+          });
+        },
+        async put(_key, response) {
+          cached = new Response(await response.arrayBuffer(), {
+            status: response.status,
+            headers: new Headers(response.headers),
+          });
+        },
+      },
+    },
+  });
+  try {
+    const key = "event-icons/event/cached-security.png";
+    const req = new Request("https://example.test/api/media/" + key);
+    const make = (request = req) => requestMedia({ key, allowed: true, request });
+    cached = new Response(null, { status: 302, headers: { location: "https://attacker.invalid/" } });
+    const redirect = await make();
+    assert.equal(redirect.response.status, 200);
+    assert.equal(redirect.response.headers.get("location"), null);
+    assert.equal(redirect.state.gets, 1);
+    await redirect.response.arrayBuffer();
+
+    cached = new Response(new Uint8Array([1, 2, 3]), {
+      headers: { "content-type": "text/html", etag: '"unsafe"' },
+    });
+    const unsafeMime = await make();
+    assert.equal(unsafeMime.state.gets, 1);
+    assert.equal(unsafeMime.response.headers.get("content-type"), "image/webp");
+    await unsafeMime.response.arrayBuffer();
+
+    cached = new Response(new Uint8Array([1, 2, 3]), {
+      headers: {
+        "content-type": "image/png", etag: '"cached"',
+        "content-length": String(MAX_PUBLIC_MEDIA_BYTES + 1),
+      },
+    });
+    const oversized = await make();
+    assert.equal(oversized.state.gets, 1, "cache content-length over the media limit is not reusable");
+    await oversized.response.arrayBuffer();
+
+    // Legacy cache entries can omit Content-Length or lie about it. The streamed
+    // body, not the header, must enforce the 5 MiB limit.
+    for (const headers of [
+      { "content-type": "image/png", etag: '"cached-no-length"' },
+      { "content-type": "image/png", etag: '"cached-underreported"', "content-length": "1" },
+    ]) {
+      cached = new Response(new Uint8Array(MAX_PUBLIC_MEDIA_BYTES + 1), { headers });
+      const actualOversized = await make();
+      assert.equal(actualOversized.state.gets, 1, "actual cached bytes over 5 MiB must fall back to R2");
+      assert.equal(actualOversized.response.status, 200);
+      await actualOversized.response.arrayBuffer();
+    }
+
+    cached = new Response(new Uint8Array([1, 2, 3]), {
+      headers: {
+        "content-type": "image/png", etag: '"cached"',
+        "set-cookie": "session=do-not-forward",
+        location: "https://attacker.invalid/",
+        "content-disposition": "attachment; filename=unsafe.html",
+        "cache-control": "public, max-age=604800",
+      },
+    });
+    const hit = await make();
+    assert.equal(hit.response.status, 200);
+    assert.equal(hit.state.prepares, 1, "authorization occurs before each cached hit");
+    assert.equal(hit.state.gets, 0);
+    assert.equal(hit.response.headers.get("content-type"), "image/png");
+    assert.equal(hit.response.headers.get("cache-control"), "no-store");
+    assert.equal(hit.response.headers.get("x-content-type-options"), "nosniff");
+    for (const header of ["set-cookie", "location", "content-disposition"]) {
+      assert.equal(hit.response.headers.get(header), null, header);
+    }
+    await hit.response.arrayBuffer();
+
+    const conditional = await make(new Request(req.url, {
+      headers: { "If-None-Match": '"cached"' },
+    }));
+    assert.equal(conditional.response.status, 304);
+    assert.equal(conditional.state.prepares, 1);
+    assert.equal(conditional.state.gets, 0);
+    assert.equal(conditional.response.headers.get("cache-control"), "no-store");
+    assert.equal(conditional.response.headers.get("set-cookie"), null);
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "caches", previous);
+    else delete globalThis.caches;
   }
 });
