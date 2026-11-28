@@ -142,12 +142,33 @@ test("MIG-0732 U02a: explicit authorization loss clears mounted X merge data on 
   const dom = new JSDOM("<!doctype html><html><body><div id='root'></div></body></html>", {
     url: "https://flamenode.test/admin/x-id-merges?impact=mg1", virtualConsole,
   });
+  // TableScroll uses the native browser ResizeObserver. JSDOM has no layout
+  // engine, so provide the observer lifecycle without faking any layout result.
+  const observedTables = new Set();
+  class TestResizeObserver {
+    elements = new Set();
+    observe(element) { this.elements.add(element); observedTables.add(element); }
+    unobserve(element) { this.elements.delete(element); observedTables.delete(element); }
+    disconnect() { for (const element of this.elements) observedTables.delete(element); this.elements.clear(); }
+  }
   const globals = {
     window: dom.window, document: dom.window.document, navigator: dom.window.navigator,
-    HTMLElement: dom.window.HTMLElement, Node: dom.window.Node,
+    HTMLElement: dom.window.HTMLElement, Element: dom.window.Element, Node: dom.window.Node,
+    ResizeObserver: TestResizeObserver,
     IS_REACT_ACT_ENVIRONMENT: true, fetch: globalThis.fetch,
   };
   const original = new Map(Object.keys(globals).map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  // React.act can report an AggregateError with an empty top-level message.
+  // Keep underlying failures visible in Node's CI TAP output.
+  async function actWithDiagnostics(callback) {
+    try { await React.act(callback); }
+    catch (error) {
+      if (error instanceof AggregateError) {
+        throw new Error(error.errors.map(item => item?.stack ?? String(item)).join("\n"), { cause: error });
+      }
+      throw error;
+    }
+  }
   let root;
   try {
     for (const [key, value] of Object.entries(globals)) {
@@ -173,7 +194,7 @@ test("MIG-0732 U02a: explicit authorization loss clears mounted X merge data on 
     }
     for (const [code, expected] of [[401, "anonymous"], [403, "forbidden"], [404, "notFound"]]) {
       const render = async refreshKey => {
-        await React.act(async () => {
+        await actWithDiagnostics(async () => {
           root.render(React.createElement(MemoryRouter, { key: code },
             React.createElement(RefreshHarness, { refreshKey })));
         });
@@ -181,6 +202,7 @@ test("MIG-0732 U02a: explicit authorization loss clears mounted X merge data on 
       response = () => json(200, privateSnapshot);
       await render(0);
       assert.match(target.textContent, /PRIVATE_MERGE_PREVIEW_VIDEO/);
+      assert.ok(observedTables.size > 0, "mounted merge tables register scroll observers");
       response = () => json(503, {});
       await render(1);
       // Existing shared hook policy retains same-key data on transient 503.
@@ -205,7 +227,7 @@ test("MIG-0732 U02a: explicit authorization loss clears mounted X merge data on 
         ? Promise.resolve(json(200, privateSnapshot))
         : new Promise(resolve => { resolveDenied = resolve; });
     };
-    await React.act(async () => {
+    await actWithDiagnostics(async () => {
       root.render(React.createElement(MemoryRouter, {
         key: "actual-route", initialEntries: ["/admin/x-id-merges?impact=mg1"],
       }, React.createElement(AdminXIdMerges)));
@@ -213,7 +235,7 @@ test("MIG-0732 U02a: explicit authorization loss clears mounted X merge data on 
     assert.match(target.textContent, /PRIVATE_MERGE_PREVIEW_VIDEO/);
     const link = target.querySelector('a[href="/admin/x-id-merges?view=reverts"]');
     assert.ok(link);
-    await React.act(async () => {
+    await actWithDiagnostics(async () => {
       link.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
     });
     assert.equal(routeCalls.length, 2);
@@ -225,7 +247,7 @@ test("MIG-0732 U02a: explicit authorization loss clears mounted X merge data on 
     assert.doesNotMatch(target.textContent, /PRIVATE_MERGE_PREVIEW|vid\/1|@alice/);
     assert.match(target.textContent, /読み込み中/);
     assert.equal(typeof resolveDenied, "function");
-    await React.act(async () => {
+    await actWithDiagnostics(async () => {
       resolveDenied(new Response("invalid-json", { status: 403 }));
     });
     assert.doesNotMatch(target.textContent, /PRIVATE_MERGE_PREVIEW|vid\/1|@alice/);
@@ -233,7 +255,8 @@ test("MIG-0732 U02a: explicit authorization loss clears mounted X merge data on 
     assert.match(target.textContent, /読み込み中/);
   } finally {
     try {
-      if (root) await React.act(async () => { root.unmount(); });
+      if (root) await actWithDiagnostics(async () => { root.unmount(); });
+      assert.equal(observedTables.size, 0, "unmount disconnects all table observers");
     } finally {
       dom.window.close();
       for (const [key, descriptor] of original) {

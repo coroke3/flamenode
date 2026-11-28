@@ -104,9 +104,19 @@ test("MIG-0732 U01: mounted read-only screen retains CURRENT history times and D
   const dom = new JSDOM("<!doctype html><html><body><div id='root'></div></body></html>", {
     url: "https://flamenode.test/admin/x-link-requests",
   });
+  // TableScroll uses the native browser ResizeObserver. JSDOM has no layout
+  // engine, so provide the observer lifecycle without faking any layout result.
+  const observedTables = new Set();
+  class TestResizeObserver {
+    elements = new Set();
+    observe(element) { this.elements.add(element); observedTables.add(element); }
+    unobserve(element) { this.elements.delete(element); observedTables.delete(element); }
+    disconnect() { for (const element of this.elements) observedTables.delete(element); this.elements.clear(); }
+  }
   const globals = {
     window: dom.window, document: dom.window.document, navigator: dom.window.navigator,
-    HTMLElement: dom.window.HTMLElement, Node: dom.window.Node, IS_REACT_ACT_ENVIRONMENT: true,
+    HTMLElement: dom.window.HTMLElement, Element: dom.window.Element, Node: dom.window.Node,
+    ResizeObserver: TestResizeObserver, IS_REACT_ACT_ENVIRONMENT: true,
   };
   const calls = [];
   globals.fetch = async (path, init) => {
@@ -114,6 +124,17 @@ test("MIG-0732 U01: mounted read-only screen retains CURRENT history times and D
     return json(200, fixture);
   };
   const original = new Map(Object.keys(globals).map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  // React.act can report an AggregateError with an empty top-level message.
+  // Keep underlying failures visible in Node's CI TAP output.
+  async function actWithDiagnostics(callback) {
+    try { await React.act(callback); }
+    catch (error) {
+      if (error instanceof AggregateError) {
+        throw new Error(error.errors.map(item => item?.stack ?? String(item)).join("\n"), { cause: error });
+      }
+      throw error;
+    }
+  }
   let root;
   try {
     for (const [key, value] of Object.entries(globals)) {
@@ -121,13 +142,14 @@ test("MIG-0732 U01: mounted read-only screen retains CURRENT history times and D
     }
     const target = document.getElementById("root");
     root = createRoot(target);
-    await React.act(async () => {
+    await actWithDiagnostics(async () => {
       root.render(React.createElement(MemoryRouter, { initialEntries: ["/admin/x-link-requests"] },
         React.createElement(AdminXLinkRequests)));
     });
     assert.deepEqual(calls, [{ path: "/api/admin-read/x-link-requests", method: "GET", cache: "no-store" }]);
     const tables = target.querySelectorAll("table");
     assert.equal(tables.length, 3);
+    assert.equal(observedTables.size, 3, "all mounted tables register scroll observers");
     const applicants = tables[0].querySelectorAll("tbody tr");
     assert.equal(applicants[0].cells[3].querySelector("svg[aria-hidden='true']")?.getAttribute("width"), "14");
     assert.equal(applicants[1].cells[3].querySelector("img")?.getAttribute("src"), "https://cdn.example.test/avatar.png");
@@ -140,7 +162,8 @@ test("MIG-0732 U01: mounted read-only screen retains CURRENT history times and D
       !["承認", "却下", "理由を添えて却下"].includes(button.textContent.trim())));
   } finally {
     try {
-      if (root) await React.act(async () => { root.unmount(); });
+      if (root) await actWithDiagnostics(async () => { root.unmount(); });
+      assert.equal(observedTables.size, 0, "unmount disconnects all table observers");
     } finally {
       dom.window.close();
       for (const [key, descriptor] of original) {
