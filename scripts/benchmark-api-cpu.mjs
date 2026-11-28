@@ -2479,6 +2479,7 @@ export async function fetchWithDeadline(url, init = {}, options = {}) {
   }, timeoutMs);
   try {
     const response = await fetchImpl(url, { ...init, signal: controller.signal });
+    if (timedOut) throw new Error(label + " timed out");
     const bytes = await response.arrayBuffer();
     if (timedOut) throw new Error(label + " timed out");
     const headers = new Headers(response.headers);

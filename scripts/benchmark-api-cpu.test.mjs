@@ -2702,9 +2702,13 @@ test("MIG-0639: CDP profiler commands and CPU profile receipts fail closed", () 
   assert.throws(() => summarizeCpuProfile(overflowProfile), /CPU profiler returned malformed profile/);
 
   const source = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "benchmark-api-cpu.mjs"), "utf8");
-  const start = source.indexOf('requireInspectorResult(await call("Profiler.start"), "Profiler.start");');
-  const request = source.indexOf('const res = await fetch(`${base}${spec.path}`, { method:', start);
-  assert.ok(start >= 0 && request > start, "the request cannot run unless Profiler.start returned a valid result");
+  const runStart = source.indexOf('const run = async (spec, rec = null, firstBuild = null) => {');
+  const start = source.indexOf('requireInspectorResult(await call("Profiler.start"), "Profiler.start");', runStart);
+  const request = source.indexOf('const res = await fetchWithDeadline(base + spec.path, {', start);
+  const body = source.indexOf('const buf = await res.arrayBuffer();', request);
+  const stop = source.indexOf('const stopResult = requireInspectorResult(await call("Profiler.stop"), "Profiler.stop");', body);
+  assert.ok(runStart >= 0 && start > runStart && request > start && body > request && stop > body,
+    "the complete measured request body must be enclosed by validated Profiler start/stop");
 });
 
 test("MIG-0639: inspector commands are connection-scoped and fail closed on transport faults", async () => {
@@ -2845,19 +2849,44 @@ test("MIG-0639: inspector open, fetch/body and child-exit waits have finite dead
   assert.equal(fetchClock.timers.size, 0);
 
   const bodyClock = fakeClock();
+  let bodySignal;
+  let markBodyStarted;
+  const bodyStarted = new Promise((resolve) => { markBodyStarted = resolve; });
   const pendingBody = fetchWithDeadline("https://bench.invalid/body", {}, {
     timeoutMs: 10, label: "test body",
     fetchImpl: async (_url, init) => ({
       status: 200, statusText: "OK", headers: new Headers(),
       arrayBuffer: () => new Promise((_resolve, reject) => {
-        init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true });
+        bodySignal = init.signal;
+        if (bodySignal.aborted) reject(bodySignal.reason);
+        else bodySignal.addEventListener("abort", () => reject(bodySignal.reason), { once: true });
+        markBodyStarted();
       }),
     }),
     setTimer: bodyClock.setTimer, clearTimer: bodyClock.clearTimer,
   });
+  await bodyStarted;
+  assert.equal(bodySignal.aborted, false);
   bodyClock.runAll();
   await assert.rejects(pendingBody, /timed out/);
   assert.equal(bodyClock.timers.size, 0);
+
+  const earlyClock = fakeClock();
+  let releaseFetch;
+  let earlyBodyCalls = 0;
+  const pendingEarly = fetchWithDeadline("https://bench.invalid/early", {}, {
+    timeoutMs: 10, label: "test early expiry",
+    fetchImpl: async () => new Promise((resolve) => { releaseFetch = resolve; }),
+    setTimer: earlyClock.setTimer, clearTimer: earlyClock.clearTimer,
+  });
+  earlyClock.runAll();
+  releaseFetch({
+    status: 200, statusText: "OK", headers: new Headers(),
+    arrayBuffer: async () => { earlyBodyCalls++; return new ArrayBuffer(0); },
+  });
+  await assert.rejects(pendingEarly, /timed out/);
+  assert.equal(earlyBodyCalls, 0);
+  assert.equal(earlyClock.timers.size, 0);
 
   const childClock = fakeClock(), child = new EventEmitter();
   child.exitCode = null; child.signalCode = null;
