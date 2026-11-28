@@ -542,7 +542,7 @@ test("U04a-U04c: local workerd/D1 actor history, bounded reader, and lease reten
       assert.equal(item.refCount, item.expectedVersionChange ? 0 : 1, item.label);
       assert.equal(item.resource, item.expectedVersionChange ? "before" : "after", item.label);
     }
-    assert.deepEqual(body.fenceOut.filter(item => !item.expectedVersionChange).map(item => item.label).sort(), [\"approval-status-only\", \"bulk-replace-video-members-noop\", \"bulk-video-collab-perms-noop\"].sort());
+    assert.deepEqual(body.fenceOut.filter(item => !item.expectedVersionChange).map(item => item.label).sort(), ["approval-status-only", "bulk-replace-video-members-noop", "bulk-video-collab-perms-noop"].sort());
     for (const item of body.fenceOut.filter(item => !item.expectedVersionChange)) {
       assert.equal(item.liveX.x_name, "X before", item.label);
       assert.equal(item.liveX.icon_url, "x-icon", item.label);
