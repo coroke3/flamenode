@@ -1099,6 +1099,117 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+
+  test("U03a SA-088: bounded part projection matches CURRENT and falls back without truncating", async () => {
+    const {
+      MAX_SLOT_PART_PROJECTION_ROWS,
+      readSlotSubmissionReceipt,
+      resolveSlotPartFromReceipt,
+    } = await import("@flamenode/server-core/video/requiredVideoFields");
+    const { resolvePartFromSlot } = await import("../../../src/lib/video/slotPart.ts");
+    const cases = [
+      {
+        name: "timed prefix excludes later timed and untimed rows",
+        anchor: "anchor",
+        kind: "bounded",
+        expectedIds: ["p1a", "p1b", "p2a", "anchor"],
+        rows: [
+          { id: "p1a", start_time: 1000, sort_order: 0 },
+          { id: "p1b", start_time: 1500, sort_order: 1 },
+          { id: "p2a", start_time: 3000, sort_order: 0 },
+          { id: "anchor", start_time: 3500, sort_order: 1 },
+          { id: "future", start_time: 5000, sort_order: 0 },
+          { id: "untimed", start_time: null, sort_order: 0 },
+        ],
+      },
+      {
+        name: "untimed anchor uses full-event fallback",
+        anchor: "anchor",
+        kind: "fallback",
+        rows: [
+          { id: "t1", start_time: 1000, sort_order: 0 },
+          { id: "t2", start_time: 1500, sort_order: 1 },
+          { id: "u1", start_time: null, sort_order: 0 },
+          { id: "anchor", start_time: null, sort_order: 1 },
+        ],
+      },
+      {
+        name: "unsafe numeric timestamp uses full-event fallback",
+        anchor: "anchor",
+        kind: "fallback",
+        rows: [
+          { id: "before", start_time: 1000, sort_order: 0 },
+          { id: "anchor", start_time: Number.MAX_SAFE_INTEGER + 1, sort_order: 1 },
+          { id: "after", start_time: Number.MAX_SAFE_INTEGER + 2, sort_order: 2 },
+        ],
+      },
+      {
+        name: "same-time tie crossing the projection cap uses full-event fallback",
+        anchor: "tie_" + String(MAX_SLOT_PART_PROJECTION_ROWS).padStart(3, "0"),
+        kind: "fallback",
+        rows: Array.from({ length: MAX_SLOT_PART_PROJECTION_ROWS + 1 }, (_, index) => ({
+          id: "tie_" + String(index).padStart(3, "0"),
+          start_time: 1000,
+          sort_order: 0,
+        })),
+      },
+    ];
+    for (const scenario of cases) {
+      const w = seedWorld();
+      try {
+        w.sqlite.prepare(
+          "UPDATE events SET parts_json=?, slot_part_gap_minutes=? WHERE id=?",
+        ).run('["第一部","第二部","第三部","第四部"]', 15, "ev_open");
+        for (let index = 0; index < scenario.rows.length; index += 1) {
+          const row = scenario.rows[index];
+          insert(w.sqlite, "slots", {
+            id: row.id,
+            event_id: "ev_open",
+            reservation_group_id: null,
+            start_time: row.start_time,
+            sort_order: row.sort_order ?? index,
+            status: "reserved",
+            updated_at: 100,
+            version: 1,
+          });
+        }
+        const anchorRow = w.sqlite.prepare("SELECT * FROM slots WHERE id=?").get(scenario.anchor);
+        assert.ok(anchorRow, scenario.name);
+        const eventConfig = w.sqlite.prepare(
+          "SELECT parts_json, slot_part_gap_minutes FROM events WHERE id=?",
+        ).get("ev_open");
+        const before = snapshotDb(w.sqlite);
+        const current = await resolvePartFromSlot(drizzle(w.d1), anchorRow);
+        const readsBeforeReceipt = w.d1.stats.reads;
+        const receipt = await readSlotSubmissionReceipt(drizzle(w.d1), scenario.anchor);
+        assert.ok(receipt, scenario.name);
+        assert.equal(w.d1.stats.reads - readsBeforeReceipt, 1, scenario.name);
+        assert.equal(receipt.partResolution.kind, scenario.kind, scenario.name);
+        assert.equal(
+          resolveSlotPartFromReceipt(receipt, eventConfig),
+          current,
+          scenario.name,
+        );
+        if (scenario.expectedIds) {
+          assert.ok(receipt.partResolution.rows.length <= MAX_SLOT_PART_PROJECTION_ROWS, scenario.name);
+          assert.deepEqual(
+            receipt.partResolution.rows.map((row) => row.id).sort(),
+            [...scenario.expectedIds].sort(),
+            scenario.name,
+          );
+        } else {
+          assert.equal(receipt.partResolution.rows.length, scenario.rows.length, scenario.name);
+        }
+        assert.equal(w.d1.stats.batches, 0, scenario.name);
+        assert.deepEqual(snapshotDb(w.sqlite), before, scenario.name);
+        assert.deepEqual(w.bucket.puts, [], scenario.name);
+        assert.deepEqual(w.bucket.deletes, [], scenario.name);
+      } finally {
+        w.sqlite.close();
+      }
+    }
+  });
+
   test("U03a SA-088: reservation receipt CAS precedes audited mutation in one batch", async () => {
     const { readSlotSubmissionReceipt, buildSlotSubmissionReceiptAssertions } = await import("@flamenode/server-core/video/requiredVideoFields");
     const { mutateWithAudit, assertCondition } = await import("@flamenode/server-core/audit/mutate");

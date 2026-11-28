@@ -10,6 +10,7 @@ import {
   unionRequiredVideoFields,
   firstMissingRequiredVideoField,
   missingRequiredVideoFieldMessage,
+  parseEventPartsJson,
   type RequiredVideoFieldValues,
   UnslottedEventSyncError,
   type OptionalRequiredVideoField,
@@ -17,6 +18,7 @@ import {
 import type { ServerCoreDb } from "../db.ts";
 import { unslottedEventEligibilityWhere } from "./unslottedEventEligibility.ts";
 import { MAX_VIDEO_CUSTOM_QUESTIONS_READ } from "./freeVideoCustomQuestionRead.ts";
+import { buildSlotParts } from "./slotGrouping.ts";
 
 /** MIG-0651 unmounted SA-086 general-question read candidate. */
 export { loadGeneralCustomQuestionsForFreeVideo, decodeGeneralCustomQuestionPolicyProjection, type LoadedGeneralCustomQuestion } from "./freeVideoCustomQuestionRead.ts";
@@ -124,45 +126,172 @@ export async function loadEligibleUnslottedVideoRequiredFields(
   };
 }
 
+
 export type SlotSubmissionReceiptRow = typeof slots.$inferSelect;
+export type SlotPartProjectionRow = Pick<SlotSubmissionReceiptRow, "id" | "start_time" | "sort_order">;
+export type SlotSubmissionPartResolution = {
+  kind: "bounded" | "fallback";
+  rows: SlotPartProjectionRow[];
+};
 export type SlotSubmissionReceipt = {
   anchor: SlotSubmissionReceiptRow;
   group: { kind: "ready"; rows: SlotSubmissionReceiptRow[] } | { kind: "overflow" };
+  /** Preflight snapshot only; callers must revalidate these rows/config in the same mutation batch before writing. */
+  partResolution: SlotSubmissionPartResolution;
 };
 
-const SLOT_RECEIPT_COLUMNS = `id, event_id, reserved_by_user_id, x_user_id, reserved_x_id_snapshot,
-  display_name, slot_label, start_time, sort_order, reservation_group_id, video_id, status, updated_at, version`;
+export const MAX_SLOT_PART_PROJECTION_ROWS = 512;
 
-/** SA-088 U03a candidate: one statement provides the initial anchor and the
- * reservation group from the same database snapshot (#896 A). Do not mount
- * until the remaining preflight and same-batch CAS are integrated. No policy
- * decision is made here: the caller must check the anchor's authorization
- * before form errors and report overflow at CURRENT's group-validation stage.
- * The group is unordered; apply CURRENT's chronological comparator there.
- * A row-count limit does not bound the bytes of legacy text columns.
+const SLOT_RECEIPT_COLUMNS = "id, event_id, reserved_by_user_id, x_user_id, reserved_x_id_snapshot, display_name, slot_label, start_time, sort_order, reservation_group_id, video_id, status, updated_at, version";
+const SLOT_RECEIPT_NULL_COLUMNS = SLOT_RECEIPT_COLUMNS.split(",")
+  .map((column) => "NULL AS " + column.trim())
+  .join(", ");
+
+type SlotSubmissionReceiptQueryRow = Partial<SlotSubmissionReceiptRow> & {
+  receipt_kind: number;
+  part_fallback_required: number;
+  part_slot_id: string | null;
+  part_start_time: number | null;
+  part_sort_order: number | null;
+};
+
+function slotReceiptRowFromQuery(row: SlotSubmissionReceiptQueryRow): SlotSubmissionReceiptRow {
+  const {
+    receipt_kind: _receiptKind,
+    part_fallback_required: _partFallbackRequired,
+    part_slot_id: _partSlotId,
+    part_start_time: _partStartTime,
+    part_sort_order: _partSortOrder,
+    ...slot
+  } = row;
+  return slot as SlotSubmissionReceiptRow;
+}
+
+/** SA-088 U03a candidate: one statement provides the initial anchor, reservation
+ * group, and part-resolution rows from the same database snapshot (#896 A).
+ * Timed anchors use only the finite numeric prefix through the anchor, capped
+ * at 512 rows (+1 overflow sentinel). Untimed anchors, unsafe numeric values
+ * in the prefix, and over-limit/tie-crossing prefixes explicitly fall back to
+ * all event slots. The fallback preserves CURRENT semantics; it is not a new
+ * product limit. No policy decision is made here and /slot remains unmounted.
+ *
+ * The bounded projection is a transfer bound, not a Workerd CPU acceptance
+ * claim. Part rows are not yet covered by the reservation-group CAS below.
  */
 export async function readSlotSubmissionReceipt(
   db: Pick<ServerCoreDb, "all">,
   slotId: string,
 ): Promise<SlotSubmissionReceipt | null> {
-  const results = await db.all<SlotSubmissionReceiptRow & { receipt_kind: number }>(sql`WITH anchor AS (
+  const results = await db.all<SlotSubmissionReceiptQueryRow>(sql`WITH anchor AS (
     SELECT ${sql.raw(SLOT_RECEIPT_COLUMNS)} FROM slots WHERE id = ${slotId} LIMIT 1
+  ), anchor_meta AS (
+    SELECT CASE
+      WHEN typeof(start_time) IN ('integer', 'real')
+        AND abs(CAST(start_time AS REAL)) <= 9007199254740991
+      THEN 0 ELSE 1
+    END AS fallback_required
+    FROM anchor
+  ), unsupported_prefix AS (
+    SELECT CASE WHEN EXISTS (
+      SELECT 1 FROM slots
+      WHERE event_id = (SELECT event_id FROM anchor)
+        AND typeof(start_time) IN ('integer', 'real')
+        AND abs(CAST(start_time AS REAL)) > 9007199254740991
+        AND start_time <= (SELECT start_time FROM anchor)
+    ) THEN 1 ELSE 0 END AS unsupported
+  ), part_projection AS (
+    SELECT id, start_time, sort_order FROM slots
+    WHERE event_id = (SELECT event_id FROM anchor)
+      AND (SELECT fallback_required FROM anchor_meta) = 0
+      AND typeof(start_time) IN ('integer', 'real')
+      AND abs(CAST(start_time AS REAL)) <= 9007199254740991
+      AND start_time <= (SELECT start_time FROM anchor)
+    ORDER BY start_time ASC
+    LIMIT ${sql.raw(String(MAX_SLOT_PART_PROJECTION_ROWS + 1))}
+  ), part_projection_meta AS (
+    SELECT COUNT(*) AS row_count FROM part_projection
+  ), part_meta AS (
+    SELECT CASE
+      WHEN (SELECT fallback_required FROM anchor_meta) = 1
+        OR (SELECT unsupported FROM unsupported_prefix) = 1
+        OR (SELECT row_count FROM part_projection_meta) > ${MAX_SLOT_PART_PROJECTION_ROWS}
+      THEN 1 ELSE 0
+    END AS fallback_required
+  ), part_rows AS (
+    SELECT id, start_time, sort_order FROM part_projection
+    WHERE (SELECT fallback_required FROM part_meta) = 0
+    UNION ALL
+    SELECT id, start_time, sort_order FROM slots
+    WHERE event_id = (SELECT event_id FROM anchor)
+      AND (SELECT fallback_required FROM part_meta) = 1
   ), group_rows AS (
     SELECT ${sql.raw(SLOT_RECEIPT_COLUMNS)} FROM slots
     WHERE reservation_group_id = (SELECT NULLIF(reservation_group_id, '') FROM anchor)
       AND event_id = (SELECT event_id FROM anchor)
     LIMIT ${MAX_SLOTS_PER_VIDEO + 1}
   )
-  SELECT 0 AS receipt_kind, anchor.* FROM anchor
+  SELECT 0 AS receipt_kind, anchor.*,
+    part_meta.fallback_required AS part_fallback_required,
+    NULL AS part_slot_id, NULL AS part_start_time, NULL AS part_sort_order
+  FROM anchor CROSS JOIN part_meta
   UNION ALL
-  SELECT 1 AS receipt_kind, group_rows.* FROM group_rows`);
+  SELECT 1 AS receipt_kind, group_rows.*,
+    part_meta.fallback_required AS part_fallback_required,
+    NULL AS part_slot_id, NULL AS part_start_time, NULL AS part_sort_order
+  FROM group_rows CROSS JOIN part_meta
+  UNION ALL
+  SELECT 2 AS receipt_kind, ${sql.raw(SLOT_RECEIPT_NULL_COLUMNS)},
+    part_meta.fallback_required AS part_fallback_required,
+    part_rows.id AS part_slot_id,
+    part_rows.start_time AS part_start_time,
+    part_rows.sort_order AS part_sort_order
+  FROM part_rows CROSS JOIN part_meta`);
   const anchors = results.filter((row) => row.receipt_kind === 0);
   if (anchors.length === 0) return null;
-  const { receipt_kind: _kind, ...anchor } = anchors[0];
-  if (!anchor.reservation_group_id) return { anchor, group: { kind: "ready", rows: [anchor] } };
+  const anchorQueryRow = anchors[0];
+  const anchor = slotReceiptRowFromQuery(anchorQueryRow);
+  const fallbackRequired = anchorQueryRow.part_fallback_required === 1;
+  const partRows = results.flatMap((row) =>
+    row.receipt_kind === 2 && typeof row.part_slot_id === "string"
+      ? [{
+        id: row.part_slot_id,
+        start_time: row.part_start_time,
+        sort_order: row.part_sort_order,
+      }]
+      : [],
+  );
+  const partResolution: SlotSubmissionPartResolution = {
+    kind: fallbackRequired ? "fallback" : "bounded",
+    rows: partRows,
+  };
+  if (!anchor.reservation_group_id) {
+    return { anchor, group: { kind: "ready", rows: [anchor] }, partResolution };
+  }
   const groupRows = results.filter((row) => row.receipt_kind === 1);
-  if (groupRows.length > MAX_SLOTS_PER_VIDEO) return { anchor, group: { kind: "overflow" } };
-  return { anchor, group: { kind: "ready", rows: groupRows.map(({ receipt_kind: _kind, ...row }) => row) } };
+  if (groupRows.length > MAX_SLOTS_PER_VIDEO) {
+    return { anchor, group: { kind: "overflow" }, partResolution };
+  }
+  return {
+    anchor,
+    group: { kind: "ready", rows: groupRows.map(slotReceiptRowFromQuery) },
+    partResolution,
+  };
+}
+
+/** Port of CURRENT resolvePartFromSlot using the fused slot receipt. The
+ * caller supplies the event config already obtained by the slot submission
+ * preflight; no additional D1 read is performed here.
+ */
+export function resolveSlotPartFromReceipt(
+  receipt: SlotSubmissionReceipt,
+  event: Pick<SlotSubmissionEventConfig, "parts_json" | "slot_part_gap_minutes"> | null,
+): string | null {
+  const configuredParts = parseEventPartsJson(event?.parts_json);
+  if (configuredParts.length === 0) return null;
+  const gapSec = (event?.slot_part_gap_minutes ?? 15) * 60;
+  const slotPart = buildSlotParts(receipt.partResolution.rows, gapSec)
+    .find((part) => part.rows.some((row) => row.id === receipt.anchor.id));
+  return slotPart ? (configuredParts[slotPart.index - 1] ?? null) : null;
 }
 
 /**
