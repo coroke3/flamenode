@@ -1,4 +1,5 @@
 import test from "node:test";
+import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -7,7 +8,7 @@ import { DatabaseSync } from "node:sqlite";
 import { spawnSync } from "node:child_process";
 import { materializeD1CompatibleMigrations } from "./d1-migration-compat.mjs";
 import {
-  operationModeMirrorFixtureCases, buildOperationModeMirrorFixture, operationModeBannerReceiptMismatch,
+  operationModeMirrorFixtureCases, buildOperationModeMirrorFixture, operationModeBannerReceiptMismatch, createOperationModeKvProbe, operationModeKvEvidenceMismatch,
   BUDGETS_MS, KINDS, MIN_SAMPLES, QUIET_BASELINE_MAX_MS, ROUTE_INVENTORY, SEED, WARM_KINDS, aggregate, applyBudgetVerdicts, benchmarkRequestHeaders, benchmarkRequestEnv, enforceCpuMeasurementEnvironment, buildPendingScenarios, buildScenarios, createInprocTarget, createReplayTarget, createReplayInputScope, runCold, runScenario, validateCpuProfilerCalibration, eventExportCacheRequestUrls, judge, parseArgs, percentile, playlistResponseMismatch, templateResponseMismatch, renderMarkdown, returnedRows, replayIdentity, replayEvidenceMismatch, requireBenchmarkControl, snapshotReplayResult, snapshotReplayScript, summarize, workerSource,
 } from "./benchmark-api-cpu.mjs";
 
@@ -61,6 +62,68 @@ test("MIG-0639 / #918: lazy operation-mode KV workload catalog has exact UTF-8 s
     assert.equal(operationModeBannerReceiptMismatch(f, receipt, "unknown"), true, id);
   }
   assert.throws(() => buildOperationModeMirrorFixture("plain-reason:999999999"), /unknown/);
+});
+
+test("MIG-0639 / #918 native KV diagnostic transport: seed, exact read receipt, cache hit, failure and isolation", async () => {
+  const sha256 = async raw => createHash("sha256").update(raw, "utf8").digest("hex");
+  const fixture = buildOperationModeMirrorFixture("malformed-tail:65537");
+  let stored = null, cached = false, actualGets = 0, actualPuts = 0, failGet = false;
+  const probe = createOperationModeKvProbe(() => { cached = false; }, sha256);
+  const native = {
+    async put(key, raw) { assert.equal(key, "operation_mode:mirror"); actualPuts++; stored = raw; },
+    async get(key, options) { assert.equal(this, native); assert.equal(key, "operation_mode:mirror"); assert.deepEqual(options, { cacheTtl: 30 }); actualGets++; if (failGet) throw Error("provider failure"); return stored; },
+  };
+  const env = { KV: native, DB: { prepare() { throw Error("must not reach native D1"); } } };
+  const request = (pathname, method = "GET", body, headers) => new Request("http://bench.local" + pathname, { method, body, headers });
+  const dispatch = async (_request, bindings) => {
+    if (!cached) {
+      try { await bindings.KV.get("operation_mode:mirror", { cacheTtl: 30 }); } catch {}
+      cached = true;
+    }
+    return Response.json(fixture.expected, { headers: { "cache-control": "no-store" } });
+  };
+  assert.equal(await probe(request("/unrelated"), env, 1, dispatch), null);
+  const seedResponse = await probe(request("/__bench/operation-mode-kv-seed?reset=1", "PUT", fixture.raw), env, 2, dispatch);
+  const seed = await seedResponse.json();
+  assert.deepEqual(seed, { bytes: fixture.bytes, sha256: await sha256(fixture.raw), reset: true });
+  assert.equal(actualPuts, 1);
+  assert.equal(stored, fixture.raw);
+  assert.equal(actualGets, 0);
+  const banner = "/api/operation-mode/banner", receiptPath = "/__bench/operation-mode-kv-receipt?request=";
+  const measure = async (ordinal, phase, handler = dispatch) => {
+    const response = await probe(request(banner), env, ordinal, handler);
+    const body = await response.text();
+    const result = await probe(request(receiptPath + ordinal), env, ordinal + 1, dispatch);
+    assert.equal(result.status, 200);
+    const evidence = await result.json();
+    const receipt = { ...evidence, status: response.status, body, bytes: Buffer.byteLength(body), cacheControl: response.headers.get("cache-control"), contentType: response.headers.get("content-type") };
+    return { evidence, mismatch: operationModeBannerReceiptMismatch(fixture, receipt, phase) || operationModeKvEvidenceMismatch(fixture, seed, evidence, ordinal, phase) };
+  };
+  assert.equal((await measure(3, "miss")).mismatch, false);
+  assert.equal(actualGets, 1);
+  assert.equal((await probe(request(receiptPath + 3), env, 5, dispatch)).status, 409, "receipt is one-use");
+  assert.equal((await measure(6, "hit")).mismatch, false);
+  assert.equal(actualGets, 1);
+  cached = false; failGet = true;
+  const failed = await measure(8, "miss");
+  assert.equal(failed.evidence.kvGetFailures, 1);
+  assert.equal(failed.mismatch, true, "normal 200 from caught KV failure is not a passing malformed-input sample");
+  failGet = false;
+  cached = false;
+  const wrong = await measure(10, "miss", async (req, bindings) => {
+    try { await bindings.DB.prepare("SELECT 1"); } catch {}
+    try { await bindings.KV.get("wrong", { cacheTtl: 30 }); } catch {}
+    return Response.json(fixture.expected, { headers: { "cache-control": "no-store" } });
+  });
+  assert.equal(wrong.evidence.d1, 1);
+  assert.equal(wrong.evidence.kvGetFailures, 1);
+  assert.equal(wrong.mismatch, true);
+  assert.equal((await probe(request(banner, "GET", undefined, { "x-bench-script": "cold" }), env, 12, dispatch)).status, 400);
+  assert.equal((await probe(request(receiptPath + 12), env, 13, dispatch)).status, 409);
+  assert.ok(!workerSource("default").includes("nativeKvProbe"), "default 155-scenario worker remains uninstrumented");
+  const enabled = workerSource("kv", null, { operationModeKv: true });
+  assert.match(enabled, /resetOperationModeCachesForTests/);
+  assert.match(enabled, /nativeKvProbe\(request, env, ordinal,/);
 });
 
 test("D1 returned-row proxy counts first/all/raw/batch and preserves per-query sample evidence", () => {

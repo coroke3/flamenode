@@ -115,6 +115,77 @@ export function operationModeBannerReceiptMismatch(fixture, receipt, phase) {
   } catch { return true; }
 }
 
+export function createOperationModeKvProbe(resetCaches, digestText) {
+  const key = "operation_mode:mirror";
+  let receipt = null;
+  return async function probe(request, env, ordinal, dispatch) {
+    const url = new URL(request.url);
+    if (url.pathname === "/__bench/operation-mode-kv-seed") {
+      receipt = null;
+      const reset = url.searchParams.get("reset");
+      if (request.method !== "PUT" || !["0", "1"].includes(reset)) return new Response("bad seed request", { status: 400 });
+      if (!env.KV) throw new Error("bench missing local KV binding");
+      const bytes = new Uint8Array(await request.arrayBuffer());
+      if (bytes.length < 1 || bytes.length > 4 * 1024 * 1024) return new Response("bad seed size", { status: 400 });
+      const raw = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+      await env.KV.put(key, raw);
+      if (reset === "1") resetCaches();
+      return Response.json({ bytes: bytes.length, sha256: await digestText(raw), reset: reset === "1" });
+    }
+    if (url.pathname === "/__bench/operation-mode-kv-receipt") {
+      if (request.method !== "GET" || receipt === null || url.searchParams.get("request") !== String(receipt.ordinal)) {
+        return new Response("missing or stale KV receipt", { status: 409 });
+      }
+      const { raw, ...evidence } = receipt;
+      receipt = null;
+      return Response.json({ ...evidence, readBytes: raw === null ? null : new TextEncoder().encode(raw).length,
+        readSha256: raw === null ? null : await digestText(raw) });
+    }
+    if (url.pathname !== "/api/operation-mode/banner") return null;
+    receipt = null;
+    if (request.method !== "GET" || request.headers.has("x-bench-script")) return new Response("native KV diagnostic only", { status: 400 });
+    if (!env.KV) throw new Error("bench missing local KV binding");
+    const evidence = { ordinal, kvGets: 0, kvPuts: 0, kvDeletes: 0, kvOther: 0, kvGetFailures: 0, d1: 0, raw: null };
+    const reject = (field) => (..._args) => { evidence[field] += 1; throw new Error("unexpected operation in KV diagnostic: " + field); };
+    const native = env.KV;
+    const kv = {
+      get: async (...args) => {
+        evidence.kvGets += 1;
+        try {
+          if (args.length !== 2 || args[0] !== key || args[1]?.cacheTtl !== 30 || Object.keys(args[1]).length !== 1) {
+            throw new Error("unexpected operation-mode KV key/options");
+          }
+          const raw = await native.get(...args);
+          if (typeof raw !== "string") throw new Error("missing or non-text KV fixture");
+          evidence.raw = evidence.kvGets === 1 ? raw : null;
+          return raw;
+        } catch (error) {
+          evidence.kvGetFailures += 1;
+          evidence.raw = null;
+          throw error;
+        }
+      },
+      put: reject("kvPuts"), delete: reject("kvDeletes"),
+      list: reject("kvOther"), getWithMetadata: reject("kvOther"),
+    };
+    const db = { prepare: reject("d1"), batch: reject("d1"), exec: reject("d1"), dump: reject("d1"), withSession: reject("d1") };
+    const response = await dispatch(request, { ...env, KV: kv, DB: db });
+    receipt = evidence;
+    return response;
+  };
+}
+
+export function operationModeKvEvidenceMismatch(fixture, seed, evidence, ordinal, phase) {
+  if (!["miss", "hit", "expiry"].includes(phase)) return true;
+  const gets = phase === "hit" ? 0 : 1;
+  return seed?.bytes !== fixture.bytes || typeof seed?.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(seed.sha256)
+    || !Number.isSafeInteger(ordinal) || ordinal < 1 || evidence?.ordinal !== ordinal
+    || evidence.kvGets !== gets || evidence.kvPuts !== 0 || evidence.kvDeletes !== 0 || evidence.kvOther !== 0
+    || evidence.kvGetFailures !== 0 || evidence.d1 !== 0
+    || evidence.readBytes !== (gets ? fixture.bytes : null)
+    || evidence.readSha256 !== (gets ? seed.sha256 : null);
+}
+
 export const BUDGETS_MS = Object.freeze({ S2: 7, S3: 8, S4: 2 });
 export const WARM_KINDS = Object.freeze(["normal", "limit", "invalid"]);
 export const KINDS = Object.freeze([...WARM_KINDS, "cold"]);
@@ -2004,14 +2075,19 @@ export async function createInprocTarget(plan) {
 }
 
 // ---------------------------------------------------------- target: wrangler
-export function workerSource(buildId, coldScript = null) {
+export function workerSource(buildId, coldScript = null, { operationModeKv = false } = {}) {
   const appUrl = APP_PATH.replaceAll("\\", "/");
   const sessionUrl = SESSION_PATH.replaceAll("\\", "/");
   const coldScriptJson = coldScript === null ? null : JSON.stringify(snapshotReplayScript(coldScript));
+  const kvPrelude = operationModeKv ? [
+    "import { resetOperationModeCachesForTests } from " + JSON.stringify(path.join(REPO_ROOT, "apps/api/src/routes/live/operationMode.ts").replaceAll("\\", "/")) + ";",
+    createOperationModeKvProbe.toString(),
+    'const nativeKvProbe = createOperationModeKvProbe(resetOperationModeCachesForTests, async raw => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(raw))), b => b.toString(16).padStart(2, "0")).join(""));',
+  ].join("\n") + "\n" : "";
   return `// generated by scripts/benchmark-api-cpu.mjs (bench-only wrapper; not part of apps/api)
 import { app } from ${JSON.stringify(appUrl)};
 import { sessionMiddleware } from ${JSON.stringify(sessionUrl)};
-const BUILD_ID = ${JSON.stringify(buildId)};
+${kvPrelude}const BUILD_ID = ${JSON.stringify(buildId)};
 const identity = globalThis.__flamenodeBenchIdentity = { build: BUILD_ID, requests: 0 };
 const sm = sessionMiddleware();
 const STATS_KEY = ${JSON.stringify(STATS_KEY)};
@@ -2267,7 +2343,7 @@ export default {
     replayInputs.assertIdle();
     const state = activeRequest = { invalid: false };
     try {
-      const response = await handleRequest(request, env, ctx);
+      ${operationModeKv ? 'const nativeResponse = await nativeKvProbe(request, env, ordinal, (req, bindings) => app.fetch(req, bindings, ctx));\n      const response = nativeResponse ?? await handleRequest(request, env, ctx);' : 'const response = await handleRequest(request, env, ctx);'}
       if (state.invalid) throw new Error("bench concurrent worker request");
       const out = new Response(response.body, response);
       out.headers.set("x-bench-build", BUILD_ID);
@@ -2333,10 +2409,16 @@ async function createWranglerTarget(plan, opts) {
     'binding = "BUCKET"',
     'bucket_name = "flamenode-bench-local"',
     "",
+    ...(opts.operationModeKv === true ? [
+      "[[kv_namespaces]]",
+      'binding = "KV"',
+      'id = "00000000000000000000000000000001"',
+      "",
+    ] : []),
   ].join("\n"));
   let build = 0;
   const workerPath = path.join(workDir, "worker.mjs");
-  fs.writeFileSync(workerPath, workerSource(`b${build}`));
+  fs.writeFileSync(workerPath, workerSource(`b${build}`, null, { operationModeKv: opts.operationModeKv === true }));
 
   const apply = spawnSync(process.execPath, [wranglerBin, "d1", "migrations", "apply", "flamenode_db", "--local", "--config", toml, "--persist-to", state], { cwd: workDir, encoding: "utf8" });
   fs.rmSync(mig.workspace, { recursive: true, force: true });
@@ -2443,6 +2525,8 @@ async function createWranglerTarget(plan, opts) {
   };
   let scriptSeq = 0;
   const run = async (spec, rec = null, firstBuild = null) => {
+    if (spec.operationModeKv === true && (opts.operationModeKv !== true || rec !== null ||
+      spec.path !== "/api/operation-mode/banner" || spec.method !== "GET")) throw new Error("bench native KV request must use the local non-replay banner lane");
     const headers = benchmarkRequestHeaders(spec);
     if (rec && firstBuild !== null) headers.set("x-bench-script", "cold");
     else if (rec) {
@@ -2456,10 +2540,22 @@ async function createWranglerTarget(plan, opts) {
     const buf = await res.arrayBuffer();
     const stop = await call("Profiler.stop");
     if (stop.error) throw new Error(`Profiler.stop failed: ${json(stop.error)}`);
-    const d1 = res.headers.has("x-bench-d1") ? Number(res.headers.get("x-bench-d1")) : rec ? null : 0;
+    // Receipt retrieval and large raw-value hashing are deliberately AFTER Profiler.stop.
+    let nativeKv = null;
+    if (spec.operationModeKv === true) {
+      const ordinal = Number(res.headers.get("x-bench-request"));
+      if (!Number.isSafeInteger(ordinal) || ordinal < 1) throw new Error("bench native KV request missing ordinal");
+      const response = await post("/__bench/operation-mode-kv-receipt?request=" + ordinal, undefined, "GET");
+      requireBenchmarkControl(response, "operation-mode-kv-receipt");
+      const evidence = await response.json();
+      nativeKv = { ...evidence, body: Buffer.from(buf).toString("utf8"),
+        cacheControl: res.headers.get("cache-control"), contentType: res.headers.get("content-type") };
+    }
+    const d1 = nativeKv ? nativeKv.d1 : res.headers.has("x-bench-d1") ? Number(res.headers.get("x-bench-d1")) : rec ? null : 0;
     const rows = (res.headers.get("x-bench-query-rows") || "").split(",").filter(Boolean).map(Number);
     return {
       status: res.status, bytes: buf.byteLength,
+      ...(nativeKv ? { nativeKv } : {}),
       d1,
       d1RowsReturned: res.headers.has("x-bench-returned-rows")
         ? Number(res.headers.get("x-bench-returned-rows")) : null,
@@ -2518,6 +2614,18 @@ async function createWranglerTarget(plan, opts) {
     digits: 2,
     cpuSource: `V8 sampling profiler (${SAMPLING_US}us interval, non-idle samples) attached to wrangler dev --local (workerd) via inspector; local D1/R2 SIMULATOR CPU INCLUDED (--d1 sim); local, not production`,
     supportsCold: true,
+    ...(opts.operationModeKv === true ? {
+      seedOperationModeKv: async (fixture, { reset = true } = {}) => {
+        const response = await post("/__bench/operation-mode-kv-seed?reset=" + (reset ? "1" : "0"), fixture.raw, "PUT");
+        requireBenchmarkControl(response, "operation-mode-kv-seed");
+        const receipt = await response.json();
+        const expectedSha = createHash("sha256").update(fixture.raw, "utf8").digest("hex");
+        if (receipt.bytes !== fixture.bytes || receipt.sha256 !== expectedSha || receipt.reset !== reset) {
+          throw new Error("bench KV seed receipt mismatch");
+        }
+        return receipt;
+      },
+    } : {}),
     setR2: async (body, key = STATS_KEY) => {
       const q = `/__bench/r2?key=${encodeURIComponent(key)}`;
       const response = body == null
@@ -2534,7 +2642,7 @@ async function createWranglerTarget(plan, opts) {
     runFirstRequest: async (spec, rec) => {
       await stopWorker();
       const generation = `b${++build}`;
-      fs.writeFileSync(workerPath, workerSource(generation, rec?.script ?? null));
+      fs.writeFileSync(workerPath, workerSource(generation, rec?.script ?? null, { operationModeKv: opts.operationModeKv === true }));
       startWorker(); // New workerd process, not merely reset counters or a hot reload.
       // The first fetch creates workerd's execution context. Inspector attach
       // must not warm it with a ping, script upload or Runtime.evaluate probe.
@@ -2543,7 +2651,7 @@ async function createWranglerTarget(plan, opts) {
     },
     reload: async () => {
       build += 1;
-      fs.writeFileSync(workerPath, workerSource(`b${build}`));
+      fs.writeFileSync(workerPath, workerSource(`b${build}`, null, { operationModeKv: opts.operationModeKv === true }));
       await waitBuild(`b${build}`);
       await connect();
     },
