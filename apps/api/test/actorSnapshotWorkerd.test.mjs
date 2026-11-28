@@ -61,6 +61,8 @@ test("U04a: local workerd/D1 preserves raw actor snapshot bytes and version-fenc
     "});",
     "const sourceSql = 'SELECT u.discord_id AS discord_id, u.name AS discord_name, u.active_x_user_id, u.image AS user_image, x.x_name, x.icon_url AS x_icon_url FROM u04a_user u LEFT JOIN u04a_x_users x ON x.id = u.active_x_user_id WHERE u.id = ?';",
     "const versionsSql = 'SELECT u.actor_snapshot_version AS user_version, COALESCE(x.actor_snapshot_version, -1) AS x_version FROM u04a_user u LEFT JOIN u04a_x_users x ON x.id = u.active_x_user_id WHERE u.id = ?';",
+    "const historySql = 'SELECT u.discord_id AS discord_id, u.name AS discord_name, u.active_x_user_id, u.image AS user_image, x.x_name, x.icon_url AS x_icon_url FROM u04a_user_history u LEFT JOIN u04a_x_users_history x ON x.id = u.active_x_user_id AND x.version = ? WHERE u.id = ? AND u.version = ?';",
+    "const historyBytesSql = 'SELECT typeof(u.discord_id) AS discord_id_type, hex(CAST(u.discord_id AS BLOB)) AS discord_id_hex, typeof(u.name) AS discord_name_type, hex(CAST(u.name AS BLOB)) AS discord_name_hex, typeof(u.active_x_user_id) AS active_x_user_id_type, hex(CAST(u.active_x_user_id AS BLOB)) AS active_x_user_id_hex, typeof(u.image) AS user_image_type, hex(CAST(u.image AS BLOB)) AS user_image_hex, typeof(x.x_name) AS x_name_type, hex(CAST(x.x_name AS BLOB)) AS x_name_hex, typeof(x.icon_url) AS x_icon_url_type, hex(CAST(x.icon_url AS BLOB)) AS x_icon_url_hex FROM u04a_user_history u LEFT JOIN u04a_x_users_history x ON x.id = u.active_x_user_id AND x.version = ? WHERE u.id = ? AND u.version = ?';",
     "const captureSql = 'INSERT INTO audit_actor_snapshots_u04a (id, discord_id, discord_name, active_x_user_id, user_image, x_name, x_icon_url, user_version, x_version) SELECT ?, u.discord_id, u.name, u.active_x_user_id, u.image, x.x_name, x.icon_url, u.actor_snapshot_version, COALESCE(x.actor_snapshot_version, -1) FROM u04a_user u LEFT JOIN u04a_x_users x ON x.id = u.active_x_user_id WHERE u.id = ? AND u.actor_snapshot_version = ? AND COALESCE(x.actor_snapshot_version, -1) = ?';",
     "const sourceBytesSql = 'SELECT typeof(u.discord_id) AS discord_id_type, hex(CAST(u.discord_id AS BLOB)) AS discord_id_hex, typeof(u.name) AS discord_name_type, hex(CAST(u.name AS BLOB)) AS discord_name_hex, typeof(u.active_x_user_id) AS active_x_user_id_type, hex(CAST(u.active_x_user_id AS BLOB)) AS active_x_user_id_hex, typeof(u.image) AS user_image_type, hex(CAST(u.image AS BLOB)) AS user_image_hex, typeof(x.x_name) AS x_name_type, hex(CAST(x.x_name AS BLOB)) AS x_name_hex, typeof(x.icon_url) AS x_icon_url_type, hex(CAST(x.icon_url AS BLOB)) AS x_icon_url_hex FROM u04a_user u LEFT JOIN u04a_x_users x ON x.id = u.active_x_user_id WHERE u.id = ?';",
     "const snapshotBytesSql = 'SELECT typeof(discord_id) AS discord_id_type, hex(CAST(discord_id AS BLOB)) AS discord_id_hex, typeof(discord_name) AS discord_name_type, hex(CAST(discord_name AS BLOB)) AS discord_name_hex, typeof(active_x_user_id) AS active_x_user_id_type, hex(CAST(active_x_user_id AS BLOB)) AS active_x_user_id_hex, typeof(user_image) AS user_image_type, hex(CAST(user_image AS BLOB)) AS user_image_hex, typeof(x_name) AS x_name_type, hex(CAST(x_name AS BLOB)) AS x_name_hex, typeof(x_icon_url) AS x_icon_url_type, hex(CAST(x_icon_url AS BLOB)) AS x_icon_url_hex FROM audit_actor_snapshots_u04a WHERE id = ?';",
@@ -73,8 +75,14 @@ test("U04a: local workerd/D1 preserves raw actor snapshot bytes and version-fenc
     "  await run(db, 'CREATE TABLE IF NOT EXISTS u04a_actor_sequence (id INTEGER PRIMARY KEY CHECK (id = 1), n INTEGER NOT NULL CHECK (typeof(n) = \\'integer\\' AND n BETWEEN 0 AND 9007199254740991))');",
     "  await run(db, 'INSERT OR IGNORE INTO u04a_actor_sequence VALUES (1, 0)');",
     "  for (const [table, fields] of [['u04a_user', 'id, discord_id, name, active_x_user_id, image'], ['u04a_x_users', 'id, x_name, icon_url']]) {",
+    "    const isUser = table === 'u04a_user';",
+    "    const historyTable = table + '_history';",
+    "    const historyColumns = isUser ? 'version INTEGER PRIMARY KEY, id, discord_id, name, active_x_user_id, image' : 'version INTEGER PRIMARY KEY, id, x_name, icon_url';",
+    "    const historyInsertColumns = isUser ? 'version, id, discord_id, name, active_x_user_id, image' : 'version, id, x_name, icon_url';",
+    "    const historySelectColumns = isUser ? 'actor_snapshot_version, id, discord_id, name, active_x_user_id, image' : 'actor_snapshot_version, id, x_name, icon_url';",
+    "    await run(db, 'CREATE TABLE IF NOT EXISTS ' + historyTable + ' (' + historyColumns + ')');",
     "    for (const [kind, event] of [['insert', 'INSERT'], ['update', 'UPDATE OF ' + fields]]) {",
-    "      await run(db, 'CREATE TRIGGER IF NOT EXISTS ' + table + '_' + kind + ' AFTER ' + event + ' ON ' + table + ' BEGIN SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM u04a_actor_sequence WHERE id = 1 AND typeof(n) = \\'integer\\' AND n >= 0 AND n < 9007199254740991) THEN RAISE(ABORT, \\'ACTOR_VERSION_UNAVAILABLE\\') END; UPDATE u04a_actor_sequence SET n = n + 1 WHERE id = 1; UPDATE ' + table + ' SET actor_snapshot_version = (SELECT n FROM u04a_actor_sequence WHERE id = 1) WHERE id = NEW.id; END');",
+    "      await run(db, 'CREATE TRIGGER IF NOT EXISTS ' + table + '_' + kind + ' AFTER ' + event + ' ON ' + table + ' BEGIN SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM u04a_actor_sequence WHERE id = 1 AND typeof(n) = \\'integer\\' AND n >= 0 AND n < 9007199254740991) THEN RAISE(ABORT, \\'ACTOR_VERSION_UNAVAILABLE\\') END; UPDATE u04a_actor_sequence SET n = n + 1 WHERE id = 1; UPDATE ' + table + ' SET actor_snapshot_version = (SELECT n FROM u04a_actor_sequence WHERE id = 1) WHERE id = NEW.id; INSERT INTO ' + historyTable + ' (' + historyInsertColumns + ') SELECT ' + historySelectColumns + ' FROM ' + table + ' WHERE id = NEW.id; END');",
     "    }",
     "  }",
     "  await run(db, 'CREATE TABLE IF NOT EXISTS u04a_resource (id TEXT PRIMARY KEY, value TEXT NOT NULL)');",
@@ -82,6 +90,7 @@ test("U04a: local workerd/D1 preserves raw actor snapshot bytes and version-fenc
     "  await run(db, 'CREATE TABLE IF NOT EXISTS audit_actor_snapshots_u04a (id TEXT PRIMARY KEY, discord_id, discord_name, active_x_user_id, user_image, x_name, x_icon_url, user_version INTEGER NOT NULL, x_version INTEGER NOT NULL)');",
     "  await run(db, 'CREATE TABLE IF NOT EXISTS audit_actor_refs_u04a (audit_id TEXT PRIMARY KEY, snapshot_id TEXT NOT NULL REFERENCES audit_actor_snapshots_u04a(id))');",
     "  await run(db, 'CREATE TABLE IF NOT EXISTS u04a_audit_inline (id TEXT PRIMARY KEY, actor_snapshot_json TEXT NOT NULL)');",
+    "  await run(db, 'CREATE TABLE IF NOT EXISTS u04a_actor_history_refs (id TEXT PRIMARY KEY, user_version INTEGER NOT NULL, x_version INTEGER NOT NULL)');",
     "  await run(db, 'CREATE TABLE IF NOT EXISTS u04a_forced_failure (value INTEGER NOT NULL CHECK (value = 1))');",
     "  await run(db, 'INSERT OR IGNORE INTO u04a_user (id, discord_id, name, active_x_user_id, image) VALUES (?, ?, ?, ?, ?)', ['admin-1', 'd', 'Name', 'u04a-x', 'image']);",
     "  await run(db, 'INSERT OR IGNORE INTO u04a_x_users (id, x_name, icon_url) VALUES (?, ?, ?)', ['u04a-x', 'X name', 'https://i/x.png']);",
@@ -119,7 +128,11 @@ test("U04a: local workerd/D1 preserves raw actor snapshot bytes and version-fenc
     "    const snapshotJson = JSON.stringify(actorSnapshotFromRow(snapshot));",
     "    const sourceBytes = (await all(db, sourceBytesSql, ['admin-1']))[0];",
     "    const snapshotBytes = (await all(db, snapshotBytesSql, [id]))[0];",
-    "    casesOut.push({ label: item.label, sourceJson, snapshotJson, sourceBytes, snapshotBytes, iconUrl: actorSnapshotFromRow(snapshot).icon_url });",
+    "    const history = (await all(db, historySql, [versions.x_version, 'admin-1', versions.user_version]))[0];",
+    "    const historyJsonMatch = JSON.stringify(actorSnapshotFromRow(history)) === sourceJson;",
+    "    const historyBytes = (await all(db, historyBytesSql, [versions.x_version, 'admin-1', versions.user_version]))[0];",
+    "    const historyBytesMatch = JSON.stringify(historyBytes) === JSON.stringify(sourceBytes);",
+    "    casesOut.push({ label: item.label, sourceJson, snapshotJson, sourceBytes, snapshotBytes, historyJsonMatch, historyBytesMatch, iconUrl: actorSnapshotFromRow(snapshot).icon_url });",
     "    await run(db, 'DELETE FROM audit_actor_snapshots_u04a WHERE id = ?', [id]);",
     "  }",
     "  const blobCase = casesOut.find(x => x.label === 'invalid-utf8-blob');",
@@ -239,6 +252,30 @@ test("U04a: local workerd/D1 preserves raw actor snapshot bytes and version-fenc
     "  const interleavingFailureFenceFailed = await batchFailed(fencedBatch('interleave-failed-fence', interleavingFailureFenceVersions));",
     "  const interleavingFailureFence = { failed: interleavingFailureFenceFailed, snapshotCount: await countSnapshot('interleave-failed-fence'), refCount: await countRef('interleave-failed-fence'), resource: await getResource(), liveName: (await all(db, sourceSql, ['admin-1']))[0]?.x_name };",
     "  await resetActor();",
+    "  const immutableHistoryVersions = await getVersions();",
+    "  const immutableHistoryAdmissionJson = JSON.stringify(actorSnapshotFromRow((await all(db, sourceSql, ['admin-1']))[0]));",
+    "  await updateX(['X history concurrent', 'https://i/history-concurrent.png']);",
+    "  const immutableHistoryLiveJson = JSON.stringify(actorSnapshotFromRow((await all(db, sourceSql, ['admin-1']))[0]));",
+    "  const immutableHistoryResults = await db.batch([",
+    "    db.prepare('UPDATE u04a_resource SET value=? WHERE id=?').bind('history-success', 'target'),",
+    "    db.prepare('INSERT INTO u04a_actor_history_refs (id, user_version, x_version) VALUES (?, ?, ?)').bind('history-success', immutableHistoryVersions.user_version, immutableHistoryVersions.x_version),",
+    "  ]);",
+    "  const immutableHistoryRow = (await all(db, historySql, [immutableHistoryVersions.x_version, 'admin-1', immutableHistoryVersions.user_version]))[0];",
+    "  const immutableHistoryJson = JSON.stringify(actorSnapshotFromRow(immutableHistoryRow));",
+    "  const immutableHistory = { allSuccess: immutableHistoryResults.every(r => r.success === true), admissionJson: immutableHistoryAdmissionJson, historyJson: immutableHistoryJson, liveJson: immutableHistoryLiveJson, resource: await getResource(), refCount: Number((await all(db, 'SELECT COUNT(*) AS n FROM u04a_actor_history_refs WHERE id=?', ['history-success']))[0].n), userHistoryCount: Number((await all(db, 'SELECT COUNT(*) AS n FROM u04a_user_history WHERE version=?', [immutableHistoryVersions.user_version]))[0].n), xHistoryCount: Number((await all(db, 'SELECT COUNT(*) AS n FROM u04a_x_users_history WHERE version=?', [immutableHistoryVersions.x_version]))[0].n) };",
+    "  await resetActor();",
+    "  const immutableHistoryFailureVersions = await getVersions();",
+    "  const immutableHistoryFailureAdmissionJson = JSON.stringify(actorSnapshotFromRow((await all(db, sourceSql, ['admin-1']))[0]));",
+    "  await run(db, \\\"DELETE FROM u04a_x_users WHERE id='u04a-x'\\\");",
+    "  await run(db, \\\"INSERT INTO u04a_x_users (id, x_name, icon_url) VALUES ('u04a-x', 'X history reinserted', 'https://i/reinserted.png')\\\");",
+    "  const immutableHistoryFailureFailed = await batchFailed([",
+    "    db.prepare('UPDATE u04a_resource SET value=? WHERE id=?').bind('history-failed', 'target'),",
+    "    db.prepare('INSERT INTO u04a_actor_history_refs (id, user_version, x_version) VALUES (?, ?, ?)').bind('history-failed', immutableHistoryFailureVersions.user_version, immutableHistoryFailureVersions.x_version),",
+    "    db.prepare('INSERT INTO u04a_forced_failure(value) VALUES (?)').bind(2),",
+    "  ]);",
+    "  const immutableHistoryFailureRow = (await all(db, historySql, [immutableHistoryFailureVersions.x_version, 'admin-1', immutableHistoryFailureVersions.user_version]))[0];",
+    "  const immutableHistoryFailureOut = { failed: immutableHistoryFailureFailed, refCount: Number((await all(db, 'SELECT COUNT(*) AS n FROM u04a_actor_history_refs WHERE id=?', ['history-failed']))[0].n), resource: await getResource(), historyAvailable: !!immutableHistoryFailureRow, admissionJson: immutableHistoryFailureAdmissionJson, historyJson: JSON.stringify(actorSnapshotFromRow(immutableHistoryFailureRow)), liveName: (await all(db, sourceSql, ['admin-1']))[0]?.x_name };",
+    "  await resetActor();",
     "  const beforeRollback = await getVersions();",
     "  const seqBefore = await getSeq();",
     "  const rollbackStatements = fencedBatch('fence-rollback', beforeRollback, [db.prepare(\"UPDATE u04a_x_users SET x_name='X after' WHERE id='u04a-x'\")]);",
@@ -266,7 +303,7 @@ test("U04a: local workerd/D1 preserves raw actor snapshot bytes and version-fenc
     "  const missingFailed = await batchFailed([db.prepare(\"UPDATE OR IGNORE u04a_x_users SET x_name='after-missing' WHERE id='u04a-x'\")]);",
     "  const missing = { failed: missingFailed, versions: await getVersions(), name: (await all(db, sourceSql, ['admin-1']))[0]?.x_name, rows: (await all(db, 'SELECT n FROM u04a_actor_sequence')).length };",
     "  const allocator = { fractionalRejected, oldVersions, atMaxSeq, maxToken, allocatorOut, overflowBatch, missing };",
-    "  return { cases: casesOut, blobCanonicalJson: blobCase?.sourceJson ?? null, blobJson1FixtureMatches, json1, json1Error, staleChanges, staleCount, rollbackFailed, rollbackCount, abandonedCount, successRef, fenceOut, positive, interleaving, interleavingFence, interleavingFailure, interleavingFailureFence, lateRollback, allocator };",
+    "  return { cases: casesOut, blobCanonicalJson: blobCase?.sourceJson ?? null, blobJson1FixtureMatches, json1, json1Error, staleChanges, staleCount, rollbackFailed, rollbackCount, abandonedCount, successRef, fenceOut, positive, interleaving, interleavingFence, interleavingFailure, interleavingFailureFence, immutableHistory, immutableHistoryFailureOut, lateRollback, allocator };",
     "}",
     "export default {",
     "  async fetch(request, env) {",
@@ -329,6 +366,8 @@ test("U04a: local workerd/D1 preserves raw actor snapshot bytes and version-fenc
     for (const item of body.cases) {
       assert.equal(item.sourceJson, item.snapshotJson, item.label + " workerd canonical JSON bytes");
       assert.deepEqual(item.sourceBytes, item.snapshotBytes, item.label + " workerd raw DB bytes/storage classes");
+    assert.equal(item.historyJsonMatch, true, item.label);
+    assert.equal(item.historyBytesMatch, true, item.label);
     }
     assert.equal(body.cases.find(x => x.label === "empty-shadowed-fallback").iconUrl, "user-image");
     assert.equal(body.blobJson1FixtureMatches, true);
@@ -365,6 +404,24 @@ test("U04a: local workerd/D1 preserves raw actor snapshot bytes and version-fenc
     });
     assert.deepEqual(body.interleavingFailureFence, {
       failed: true, snapshotCount: 0, refCount: 0, resource: "before", liveName: "X concurrent",
+    });
+    assert.equal(body.immutableHistory.allSuccess, true);
+    assert.equal(body.immutableHistory.historyJson, body.immutableHistory.admissionJson);
+    assert.notEqual(body.immutableHistory.liveJson, body.immutableHistory.admissionJson);
+    assert.equal(body.immutableHistory.resource, "history-success");
+    assert.deepEqual({
+      refCount: body.immutableHistory.refCount,
+      userHistoryCount: body.immutableHistory.userHistoryCount,
+      xHistoryCount: body.immutableHistory.xHistoryCount,
+    }, { refCount: 1, userHistoryCount: 1, xHistoryCount: 1 });
+    assert.deepEqual(body.immutableHistoryFailureOut, {
+      failed: true,
+      refCount: 0,
+      resource: "before",
+      historyAvailable: true,
+      admissionJson: body.immutableHistoryFailureOut.admissionJson,
+      historyJson: body.immutableHistoryFailureOut.admissionJson,
+      liveName: "X history reinserted",
     });
     const late = body.lateRollback;
     assert.equal(late.failed, true);
