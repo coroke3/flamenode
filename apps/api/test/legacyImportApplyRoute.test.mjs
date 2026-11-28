@@ -23,6 +23,19 @@ const runDigest = (token) => previewFingerprint(token).slice(0, 24);
 function extendLegacyImportUserSchema(sqlite) {
   sqlite.exec('ALTER TABLE "user" ADD COLUMN "emailVerified" INTEGER; ALTER TABLE "user" ADD COLUMN can_create_events INTEGER; ALTER TABLE "user" ADD COLUMN is_notification_enabled INTEGER; ALTER TABLE "user" ADD COLUMN terms_reaccept_required INTEGER; ALTER TABLE "user" ADD COLUMN onboarding_completed_at INTEGER; ALTER TABLE "user" ADD COLUMN last_guild_check INTEGER; ALTER TABLE "user" ADD COLUMN created_at INTEGER; ALTER TABLE x_users ADD COLUMN profile_text TEXT; ALTER TABLE x_users ADD COLUMN portfolio_contact TEXT; ALTER TABLE x_users ADD COLUMN youtube_channel_url TEXT; ALTER TABLE x_users ADD COLUMN other_social_links TEXT; ALTER TABLE x_users ADD COLUMN creative_start_date INTEGER;');
 }
+
+function extendLegacyImportSoftwareSchema(sqlite) {
+  sqlite.exec('CREATE TABLE software_catalog (id TEXT PRIMARY KEY, name TEXT NOT NULL, normalized_name TEXT NOT NULL, category TEXT, usage_count INTEGER NOT NULL DEFAULT 0, is_active INTEGER NOT NULL DEFAULT 1, is_verified INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL); CREATE UNIQUE INDEX software_catalog_norm_uniq ON software_catalog(normalized_name);');
+}
+
+function legacySoftwareId(normalizedName) {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < normalizedName.length; index += 1) {
+    hash ^= normalizedName.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return "sw_imp_" + (hash >>> 0).toString(16).padStart(8, "0");
+}
 const ADMIN = { id: "admin-1", name: "Admin", email: null, image: null,
   role: "admin", is_banned: 0, active_x_user_id: null };
 
@@ -578,6 +591,158 @@ test("MIG-0645 U02x Hono: empty x_users stage writes only its durable marker", a
     sqlite.close();
   }
 });
+
+
+test("MIG-0645 U02ac Hono: software catalog mutation, audit receipt and R2 CAS replay are atomic", async () => {
+  const { bucket, record } = previewBucket({ failAdvanceOnce: true, failAdvanceStage: "events" });
+  const plan = normalizeLegacyFiles([], {
+    eventVisibility: "private", videoVisibility: "private", now: 1700000000,
+  });
+  plan.videoSoftwares.push(
+    { video_id: "legacy-video-1", label: "OBS Studio" },
+    { video_id: "legacy-video-2", label: "OBS   Studio" },
+    { video_id: "legacy-video-3", label: "  DaVinci   Resolve " },
+  );
+  const { credential, form } = await createApplyCredential(bucket, ADMIN.id, plan);
+  const { request, sqlite, stats, getD1ApplyCalls } = setup({ bucket, applyStep: legacyImportD1ApplyStep });
+  extendLegacyImportUserSchema(sqlite);
+  extendLegacyImportSoftwareSchema(sqlite);
+  sqlite.prepare(
+    "INSERT INTO software_catalog (id, name, normalized_name, category, usage_count, is_active, is_verified, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  ).run(legacySoftwareId("obs studio"), "OBS canonical", "obs studio", "streaming", 7, 0, 1, 10, 11);
+
+  try {
+    const systemUser = await request(form());
+    assert.equal(systemUser.status, 200, JSON.stringify(await systemUser.clone().json()));
+    assert.equal((await systemUser.json()).progress.stage, "x_users");
+
+    const emptyXUsers = await request(form());
+    assert.equal(emptyXUsers.status, 200, JSON.stringify(await emptyXUsers.clone().json()));
+    assert.equal((await emptyXUsers.json()).progress.stage, "softwares");
+
+    const failedAdvance = await request(form());
+    assert.equal(failedAdvance.status, 503, JSON.stringify(await failedAdvance.clone().json()));
+    const pending = await failedAdvance.json();
+    assert.equal(pending.kind, "committed_progress_pending");
+    assert.equal(pending.committed, true);
+    assert.equal(pending.requires_repreview, false);
+    assert.equal(pending.progress.stage, "events");
+    assert.equal(pending.result.created.softwares, 1);
+    assert.equal(record().status, "ready");
+    assert.equal(record().progress.stage, "softwares");
+    assert.equal(stats.reads, 9, "three pre-reads per request, including the combined software snapshot");
+    assert.equal(stats.batches, 3, "system user, empty X stage and software data+audit+receipt batches");
+
+    const existing = sqlite.prepare(
+      "SELECT id, name, category, usage_count, is_active, is_verified FROM software_catalog WHERE normalized_name = ?",
+    ).get("obs studio");
+    assert.deepEqual({ ...existing }, {
+      id: legacySoftwareId("obs studio"), name: "OBS canonical", category: "streaming",
+      usage_count: 7, is_active: 0, is_verified: 1,
+    });
+    const created = sqlite.prepare(
+      "SELECT id, name, normalized_name, category, usage_count, is_active, is_verified FROM software_catalog WHERE normalized_name = ?",
+    ).get("davinci resolve");
+    assert.deepEqual({ ...created }, {
+      id: legacySoftwareId("davinci resolve"), name: "DaVinci   Resolve",
+      normalized_name: "davinci resolve", category: null, usage_count: 0, is_active: 1, is_verified: 0,
+    });
+    const batchAudit = sqlite.prepare(
+      "SELECT after_json FROM audit_logs WHERE table_name = 'software_catalog_import_batch'",
+    ).get();
+    assert.deepEqual(JSON.parse(batchAudit.after_json).rows.map((row) => row.normalized_name), ["davinci resolve"]);
+    const stepAudit = sqlite.prepare(
+      "SELECT after_json FROM audit_logs WHERE table_name = 'legacy_import_steps' AND target_id LIKE '%:softwares:0'",
+    ).get();
+    const receipt = JSON.parse(stepAudit.after_json);
+    assert.deepEqual(receipt.outcome, { kind: "softwares", created: 1 });
+    assert.equal(receipt.next_stage, "events");
+    assert.equal(receipt.next_index, 0);
+
+    const replay = await request(form());
+    assert.equal(replay.status, 200, JSON.stringify(await replay.clone().json()));
+    const recovered = await replay.json();
+    assert.equal(recovered.progress.stage, "events");
+    assert.equal(recovered.result.created.softwares, 1);
+    assert.equal(record().progress.stage, "events");
+    assert.equal(stats.reads, 12, "receipt replay adds one combined read and no per-software reads");
+    assert.equal(stats.batches, 3, "durable receipt replay never duplicates the software insert or audit");
+    assert.equal(getD1ApplyCalls(), 4);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM software_catalog").get().n, 2);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 5);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE table_name = 'legacy_import_steps'").get().n, 3);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE table_name = 'software_catalog_import_batch'").get().n, 1);
+    assert.ok(!JSON.stringify(receipt).includes(credential.previewToken));
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("MIG-0645 U02ac Hono: empty software stage writes only its durable marker", async () => {
+  const { bucket, record } = previewBucket();
+  const { form } = await createApplyCredential(bucket);
+  const { request, sqlite, stats } = setup({ bucket, applyStep: legacyImportD1ApplyStep });
+  extendLegacyImportUserSchema(sqlite);
+  extendLegacyImportSoftwareSchema(sqlite);
+  try {
+    const systemUser = await request(form());
+    assert.equal(systemUser.status, 200);
+    assert.equal((await systemUser.json()).progress.stage, "x_users");
+    const emptyXUsers = await request(form());
+    assert.equal(emptyXUsers.status, 200);
+    assert.equal((await emptyXUsers.json()).progress.stage, "softwares");
+    const emptySoftwares = await request(form());
+    assert.equal(emptySoftwares.status, 200, JSON.stringify(await emptySoftwares.clone().json()));
+    assert.equal((await emptySoftwares.json()).progress.stage, "events");
+    assert.equal(record().progress.stage, "events");
+    assert.equal(stats.reads, 9);
+    assert.equal(stats.batches, 3);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM software_catalog").get().n, 0);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE table_name = 'software_catalog_import_batch'").get().n, 0);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE table_name = 'legacy_import_steps'").get().n, 3);
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("MIG-0645 U02ac Hono: all-existing software group writes marker only and preserves catalog row", async () => {
+  const { bucket, record } = previewBucket();
+  const plan = normalizeLegacyFiles([], {
+    eventVisibility: "private", videoVisibility: "private", now: 1700000000,
+  });
+  plan.videoSoftwares.push({ video_id: "legacy-video-1", label: "OBS Studio" });
+  const { form } = await createApplyCredential(bucket, ADMIN.id, plan);
+  const { request, sqlite, stats } = setup({ bucket, applyStep: legacyImportD1ApplyStep });
+  extendLegacyImportUserSchema(sqlite);
+  extendLegacyImportSoftwareSchema(sqlite);
+  sqlite.prepare(
+    "INSERT INTO software_catalog (id, name, normalized_name, category, usage_count, is_active, is_verified, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  ).run(legacySoftwareId("obs studio"), "OBS canonical", "obs studio", "streaming", 7, 0, 1, 10, 11);
+  try {
+    const systemUser = await request(form());
+    assert.equal(systemUser.status, 200);
+    const emptyXUsers = await request(form());
+    assert.equal(emptyXUsers.status, 200);
+    const allExisting = await request(form());
+    assert.equal(allExisting.status, 200, JSON.stringify(await allExisting.clone().json()));
+    assert.equal((await allExisting.json()).progress.stage, "events");
+    assert.equal(record().progress.stage, "events");
+    assert.equal(stats.reads, 9);
+    assert.equal(stats.batches, 3);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM software_catalog").get().n, 1);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE table_name = 'software_catalog_import_batch'").get().n, 0);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE table_name = 'legacy_import_steps'").get().n, 3);
+    const preserved = sqlite.prepare(
+      "SELECT name, category, usage_count, is_active, is_verified FROM software_catalog WHERE normalized_name = ?",
+    ).get("obs studio");
+    assert.deepEqual({ ...preserved }, {
+      name: "OBS canonical", category: "streaming", usage_count: 7, is_active: 0, is_verified: 1,
+    });
+  } finally {
+    sqlite.close();
+  }
+});
+
 
 test("MIG-0645 U02p Hono: audit receipt INSERT failure rolls back the complete SQLite D1 batch", async () => {
   // This intentionally injected adapter is a transaction-boundary regression.
