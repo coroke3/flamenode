@@ -186,7 +186,7 @@ export function operationModeScannerBlobSha(content) {
   return createHash("sha1").update(Buffer.from("blob " + bytes.length + "\0", "ascii")).update(bytes).digest("hex");
 }
 
-export const EXPECTED_OPERATION_MODE_SCANNER_BLOB_SHA = "aa576714a174166a37aa0e15c116be40a13488be";
+export const EXPECTED_OPERATION_MODE_SCANNER_BLOB_SHA = "b5e4cc9bc8979f3ef429f7cb1f632e409b653faf";
 
 export function assertOperationModeScannerSource(content, expectedSha = EXPECTED_OPERATION_MODE_SCANNER_BLOB_SHA) {
   const actualSha = operationModeScannerBlobSha(content);

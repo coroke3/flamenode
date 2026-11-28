@@ -157,7 +157,7 @@ test("MIG-0639 / #918 native KV diagnostic transport: seed, exact read receipt, 
 
 test("MIG-0639 native KV diagnostic pins the separate #918 scanner source blob", () => {
   assert.equal(operationModeScannerBlobSha("hello\n"), "ce013625030ba8dba906f756967f9e9ca394464a");
-  assert.equal(EXPECTED_OPERATION_MODE_SCANNER_BLOB_SHA, "aa576714a174166a37aa0e15c116be40a13488be");
+  assert.equal(EXPECTED_OPERATION_MODE_SCANNER_BLOB_SHA, "b5e4cc9bc8979f3ef429f7cb1f632e409b653faf");
   assert.throws(() => assertOperationModeScannerSource("hello\n"), /pinned #918 scanner source/);
 });
 test("MIG-0639 native KV CLI requires an explicit workload and native sim; default stays unchanged", () => {
