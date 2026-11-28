@@ -1,5 +1,5 @@
 // MIG-0645: intentionally test-only mounted apply HTTP adapter.
-// The real D1 adapter covers staged import through question definitions and marker-only video completion/skip; production has no mount.
+// The real D1 adapter covers staged import through new-video creation/skip; production has no mount.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
@@ -1300,6 +1300,152 @@ test("MIG-0645 U02ak: new video projection matches CURRENT audit key order and r
   assert.equal(noYoutube.youtubeWakeRequired, false);
 });
 
+// Extend only the isolated D1 fixture, not the canonical runtime schema.
+function extendLegacyImportVideoCreateSchema(sqlite) {
+  sqlite.exec(`
+    DROP TABLE videos;
+    CREATE TABLE videos (
+      id TEXT PRIMARY KEY, primary_event_id TEXT, creator_x_user_id TEXT,
+      submitted_by_user_id TEXT NOT NULL, collaboration_type TEXT NOT NULL,
+      part TEXT, source_type TEXT NOT NULL, creator_display_name TEXT NOT NULL,
+      creator_display_name_yomi TEXT, creator_icon_url TEXT, creator_youtube_channel_url TEXT,
+      creator_profile_text TEXT, creator_other_social_links TEXT, title TEXT NOT NULL,
+      music TEXT, credit TEXT, music_reference_url TEXT, closing_comment TEXT,
+      youtube_video_id TEXT, intro_comment TEXT, highlights TEXT, production_story TEXT,
+      visibility_status TEXT NOT NULL, scheduling_type TEXT, scheduled_time INTEGER,
+      app_like_count INTEGER NOT NULL DEFAULT 0, score REAL NOT NULL DEFAULT 0,
+      score_updated_at INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX videos_active_youtube ON videos(youtube_video_id)
+      WHERE youtube_video_id IS NOT NULL AND youtube_video_id <> ''
+        AND visibility_status NOT IN ('archived', 'voided');
+    CREATE TABLE video_events (video_id TEXT, event_id TEXT, PRIMARY KEY(video_id, event_id));
+    CREATE TABLE video_members (id TEXT PRIMARY KEY, video_id TEXT, x_user_id TEXT, name TEXT,
+      role TEXT, comment TEXT, order_index INTEGER, can_edit INTEGER, is_public_member INTEGER,
+      edit_granted_by_auth_user_id TEXT, edit_granted_at INTEGER, edit_updated_at INTEGER);
+    CREATE TABLE video_chapters (id TEXT PRIMARY KEY, video_id TEXT, x_user_id TEXT,
+      chapter_time REAL, chapter_label TEXT, note TEXT, visibility TEXT, created_at INTEGER, updated_at INTEGER);
+    CREATE TABLE video_softwares (video_id TEXT, software_id TEXT, raw_label TEXT, PRIMARY KEY(video_id, software_id));
+    CREATE TABLE video_youtube_metadata (video_id TEXT PRIMARY KEY, youtube_privacy_status TEXT,
+      youtube_availability_status TEXT, duration_seconds INTEGER, view_count INTEGER, synced_at INTEGER,
+      sync_status TEXT, sync_error TEXT, updated_at INTEGER);
+    CREATE TABLE video_custom_answers (video_id TEXT, event_id TEXT, question_id TEXT,
+      answer_text TEXT, answer_json TEXT, created_at INTEGER, updated_at INTEGER,
+      PRIMARY KEY(video_id, event_id, question_id));
+  `);
+}
+
+test("MIG-0645 U02al Hono: new video rows, provenance, queue and receipt are atomic; final R2 replay does not repeat wakes", async () => {
+  const { bucket } = previewBucket({ failCompleteOnce: true });
+  const wakes = [];
+  let race = false;
+  const { request, sqlite, stats } = setup({
+    bucket, applyStep: legacyImportD1ApplyStep,
+    bindings: {
+      QUEUE_DISPATCH_ENABLED: "1", QUEUE_YOUTUBE_SYNC_ENABLED: "1",
+      STATIC_REBUILD_WAKE_QUEUE: { send: async (message) => { wakes.push(message); } },
+      YOUTUBE_SYNC_WAKE_QUEUE: { send: async (message) => { wakes.push(message); } },
+    },
+    beforeBatch: (db) => {
+      if (!race) return;
+      race = false;
+      db.prepare("UPDATE event_custom_questions SET label = ? WHERE id = ?").run("Concurrent edit", "question-0");
+    },
+  });
+  extendLegacyImportUserSchema(sqlite);
+  extendLegacyImportSoftwareSchema(sqlite);
+  extendLegacyImportEventSchema(sqlite);
+  extendLegacyImportQuestionSchema(sqlite);
+  extendLegacyImportVideoCreateSchema(sqlite);
+  seedEvent(sqlite, { visibility_status: "private" });
+  const plan = questionPlan(1);
+  plan.xUsers.push({
+    id: "creator-video", x_name: "Creator", icon_url: null,
+    youtube_channel_url: null, other_social_links: null,
+  });
+  const video = {
+    id: "created-video", primary_event_id: "ev-1", creator_x_user_id: "creator-video",
+    collaboration_type: "individual", source_type: "youtube", creator_display_name: "Creator",
+    creator_display_name_yomi: null, creator_icon_url: null, creator_youtube_channel_url: null,
+    creator_profile_text: null, creator_other_social_links: null, title: "New video",
+    music: null, credit: null, music_reference_url: null, closing_comment: null,
+    youtube_video_id: "abcdefghijk", intro_comment: null, highlights: null, production_story: null,
+    visibility_status: "private", scheduling_type: "manual", scheduled_time: null, created_at: 1700000000,
+  };
+  plan.videos.push(video);
+  plan.videoEvents.push({ video_id: video.id, event_id: "ev-1" });
+  plan.videoMembers.push({ id: "member-video", video_id: video.id, x_user_id: "creator-video", name: "Creator", role: null, order_index: 0 });
+  plan.videoChapters.push({ id: "chapter-video", video_id: video.id, x_user_id: null, chapter_time: 5, chapter_label: "Intro", note: null, visibility: "public" });
+  plan.videoSoftwares.push({ video_id: video.id, label: "Test Software" });
+  plan.videoCustomAnswers.push({ video_id: video.id, event_id: "ev-1", question_id: "question-0", question_key: "question_0", answer_text: "Answer", answer_json: null });
+  try {
+    const { form } = await createApplyCredential(bucket, ADMIN.id, plan);
+    await reachQuestionStage(request, form);
+    const questionResponse = await request(form());
+    assert.equal(questionResponse.status, 200, JSON.stringify(await questionResponse.clone().json()));
+    assert.equal((await questionResponse.json()).progress.stage, "videos");
+    sqlite.prepare("UPDATE x_users SET profile_text = ? WHERE id = ?").run("Fallback profile", "creator-video");
+    const wakesBefore = wakes.length;
+    const queueBefore = sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n;
+    race = true;
+    const failed = await request(form());
+    assert.equal(failed.status, 409, "changed question definition refuses the batch");
+    for (const table of ["videos", "video_events", "video_members", "video_chapters", "video_softwares", "video_youtube_metadata", "video_custom_answers"]) {
+      assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM " + table).get().n, 0);
+    }
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, queueBefore);
+    assert.equal(wakes.length, wakesBefore);
+    sqlite.prepare("UPDATE event_custom_questions SET label = ? WHERE id = ?").run("Question 0", "question-0");
+
+    const readsBefore = stats.reads;
+    const batchesBefore = stats.batches;
+    const pending = await request(form());
+    assert.equal(pending.status, 503, JSON.stringify(await pending.clone().json()));
+    const pendingBody = await pending.json();
+    assert.equal(pendingBody.kind, "committed_progress_pending");
+    assert.equal(pendingBody.progress.stage, "complete");
+    assert.equal(pendingBody.result.created.videos, 1);
+    assert.equal(stats.reads - readsBefore, 4, "only create uses the additional bounded creator/catalog read");
+    assert.equal(stats.batches, batchesBefore + 1);
+    const saved = sqlite.prepare("SELECT * FROM videos WHERE id = ?").get(video.id);
+    assert.equal(saved.creator_profile_text, "Fallback profile");
+    assert.equal(saved.submitted_by_user_id, "system_legacy_import");
+    assert.equal(saved.created_at, video.created_at);
+    assert.equal(saved.app_like_count, 0);
+    assert.equal(sqlite.prepare("SELECT sync_status FROM video_youtube_metadata WHERE video_id = ?").get(video.id).sync_status, "pending");
+    assert.equal(sqlite.prepare("SELECT answer_text FROM video_custom_answers WHERE video_id = ?").get(video.id).answer_text, "Answer");
+    for (const table of ["video_events", "video_members", "video_chapters", "video_softwares"]) {
+      assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM " + table + " WHERE video_id = ?").get(video.id).n, 1);
+    }
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue WHERE target_type = 'video' AND target_id = ?").get(video.id).n, 1);
+    const proof = JSON.parse(sqlite.prepare("SELECT after_json FROM audit_logs WHERE table_name = 'legacy_import_entity_snapshots' AND target_id = ?").get("video:created-video").after_json);
+    const projected = await projectLegacyVideoCreate({
+      plan, videoId: video.id, creator: { profile_text: "Fallback profile", other_social_links: null },
+      softwareIds: new Map([["test software", sqlite.prepare("SELECT id FROM software_catalog WHERE normalized_name = ?").get("test software").id]]),
+      now: saved.updated_at,
+    });
+    assert.deepEqual(proof, projected.snapshotProof);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE table_name = 'video_custom_answers' AND operation = 'CREATE'").get().n, 1);
+    assert.deepEqual(wakes.slice(wakesBefore).map((message) => message.kind),
+      ["static_rebuild_available", "youtube_sync_pending"]);
+    const replay = await request(form());
+    assert.equal(replay.status, 200, JSON.stringify(await replay.clone().json()));
+    assert.equal((await replay.json()).result.created.videos, 1);
+    assert.equal(stats.batches, batchesBefore + 1);
+    assert.equal(wakes.length, wakesBefore + 2);
+
+    const replacement = await createApplyCredential(bucket, ADMIN.id, plan, "replace_imported");
+    await reachQuestionStage(request, replacement.form);
+    const ready = await request(replacement.form());
+    assert.equal(ready.status, 200, JSON.stringify(await ready.clone().json()));
+    const beforeReplace = stats.batches;
+    assert.equal((await request(replacement.form())).status, 409, "existing-video replacement remains disabled");
+    assert.equal(stats.batches, beforeReplace);
+  } finally {
+    sqlite.close();
+  }
+});
+
 function questionPlan(count) {
   const plan = normalizeLegacyFiles([], {
     eventVisibility: "private", videoVisibility: "private", now: 1700000000,
@@ -1498,7 +1644,7 @@ test("MIG-0645 U02ai/U02aj Hono: question and video skip use preview-confirmed e
     assert.equal(wakes.length, 0, "question and video skips must not dispatch wakes");
 
     const beforeUnsupported = stats.batches;
-    assert.equal((await request(fresh.form())).status, 409, "new video writes are still fail closed");
+    assert.equal((await request(fresh.form())).status, 409, "a video answer outside its planned event relations is rejected");
     sqlite.prepare("INSERT INTO videos(id) VALUES (?)").run("new-video");
     assert.equal((await request(fresh.form())).status, 409, "post-preview video creation is rejected");
     assert.equal(stats.batches, beforeUnsupported);

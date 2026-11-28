@@ -8,6 +8,8 @@ import {
 import { mutateWithAudit } from "../audit/mutate.ts";
 import type { ServerCoreDb } from "../db.ts";
 import type { QueueWakeHostLoader } from "../ports.ts";
+import type { QueueWakeKind } from "../queues/wakeBudget.ts";
+import { sendYoutubeSyncPendingWakeBestEffort } from "../queues/youtubeSyncWake.ts";
 import {
   MAX_LEGACY_CUSTOM_ANSWERS_PER_VIDEO,
   type CanonicalLegacyPlan,
@@ -116,7 +118,7 @@ type StoredStepOutcome =
   | { kind: "softwares"; created: number }
   | { kind: "event"; action: "created" | "replaced" | "skipped" }
   | { kind: "custom_questions"; created: number; reused: number }
-  | { kind: "video"; action: "skipped" };
+  | { kind: "video"; action: "created" | "skipped" };
 
 type PlannedSoftwareRow = { id: string; name: string; normalized_name: string };
 
@@ -163,7 +165,7 @@ async function snapshotDigest(value: unknown): Promise<string> {
     .join("");
 }
 
-function entitySnapshotTargetId(kind: "event", id: string): string {
+function entitySnapshotTargetId(kind: "event" | "video", id: string): string {
   return `${kind}:${encodeURIComponent(id)}`;
 }
 
@@ -481,7 +483,7 @@ export async function projectLegacyVideoCreate(input: {
   };
 }
 
-/** The U02aj video boundary only permits marker-only empty/confirmed-skip steps. */
+/** U02al supports new-video creation and the existing marker-only paths; replacement is disabled. */
 function nextVideoProgress(
   input: ApplyInput,
   outcome: StoredStepOutcome,
@@ -496,14 +498,16 @@ function nextVideoProgress(
     if (outcome.kind !== "none") return fixedFailure("旧形式インポートの作品進捗が不正です。");
   } else {
     const video = input.plan.videos[input.progress.index];
-    if (
-      outcome.kind !== "video" || outcome.action !== "skipped" ||
-      input.strategy !== "skip_existing" || !video ||
-      !input.progress.skipExistingVideoIds.includes(video.id)
-    ) {
+    if (!video || outcome.kind !== "video") {
       return fixedFailure("旧形式インポートの作品進捗が不正です。");
     }
-    next.counts.skippedVideos += 1;
+    const shouldSkip = input.strategy === "skip_existing" &&
+      input.progress.skipExistingVideoIds.includes(video.id);
+    if ((shouldSkip && outcome.action !== "skipped") ||
+        (!shouldSkip && outcome.action !== "created")) {
+      return fixedFailure("旧形式インポートの作品進捗が不正です。");
+    }
+    next.counts[`${outcome.action}Videos`] += 1;
   }
   if (input.progress.index + 1 < input.plan.videos.length) next.index += 1;
   else {
@@ -596,8 +600,9 @@ function parseReceipt(value: Record<string, unknown>) {
       created: outcomeRecord.created as number,
       reused: outcomeRecord.reused as number,
     };
-  } else if (outcomeRecord.kind === "video" && outcomeRecord.action === "skipped") {
-    outcome = { kind: "video", action: "skipped" };
+  } else if (outcomeRecord.kind === "video" &&
+    (outcomeRecord.action === "skipped" || outcomeRecord.action === "created")) {
+    outcome = { kind: "video", action: outcomeRecord.action };
   } else if (
     outcomeRecord.kind === "event" &&
     ["created", "replaced", "skipped"].includes(String(outcomeRecord.action))
@@ -642,8 +647,8 @@ function parseReceipt(value: Record<string, unknown>) {
  * Bounded real Hono D1 apply units for RH-002.
  * system_user, x_users, software catalog, event create/preview-confirmed skip,
  * proven imported-event same-visibility replacement and custom question steps.
- * Empty/preview-confirmed skipped video steps are supported; visibility-changing
- * event replacements and video create/replace mutations remain fail closed.
+ * Empty/preview-confirmed skipped and new-video creation steps are supported.
+ * Visibility-changing event replacements and existing-video replacement remain fail closed.
  */
 export async function legacyImportD1ApplyStep(
   input: ApplyInput,
@@ -1780,9 +1785,280 @@ export async function legacyImportD1ApplyStep(
         return fixedFailure("作品の存在状態がプレビュー時点から変更されたため、再プレビューが必要です。");
       }
       if (!expectedExistingForSkip) {
-        // Neither create nor replace may reach a D1 write, receipt or Queue wake
-        // before the full video support snapshot and side effects are migrated.
-        return fixedFailure("旧形式インポートの作品作成・置換はHono側でまだ利用できません。");
+        if (videoRows.length !== 0) {
+          return fixedFailure("既存作品の置換はHono側でまだ利用できません。");
+        }
+        // The marker/existence read above remains cheap for skip and replay.
+        // Only a new video needs one additional bounded creator/catalog read.
+        const video = plannedVideo;
+        const softwareNames = [...new Set(input.plan.videoSoftwares
+          .filter((row) => row.video_id === video.id)
+          .map((row) => normalizeSoftwareName(row.label)))];
+        if (softwareNames.length > MAX_LEGACY_VIDEO_SOFTWARES_PER_VIDEO) {
+          return fixedFailure("旧形式インポートの使用ソフトsnapshotが上限超過です。");
+        }
+        const namesPayload = JSON.stringify(softwareNames);
+        if (new TextEncoder().encode(namesPayload).byteLength > MAX_LEGACY_IMPORT_STEP_BYTES) {
+          return fixedFailure("旧形式インポートの使用ソフトsnapshotが上限超過です。");
+        }
+        const supportRows = await input.db.all(sql`
+          WITH support AS (
+            SELECT 'creator' AS kind,
+              json_object('id', id, 'profile_text', profile_text,
+                'other_social_links', other_social_links) AS payload
+              FROM x_users WHERE id = ${video.creator_x_user_id}
+            UNION ALL
+            SELECT 'software' AS kind,
+              json_object('id', id, 'normalized_name', normalized_name) AS payload
+              FROM software_catalog
+              WHERE normalized_name IN (SELECT value FROM json_each(${namesPayload}))
+            LIMIT ${MAX_LEGACY_VIDEO_SOFTWARES_PER_VIDEO + 2}
+          )
+          SELECT kind, CASE WHEN SUM(length(CAST(payload AS BLOB))) OVER ()
+            <= ${MAX_LEGACY_IMPORT_STEP_BYTES} THEN payload ELSE NULL END AS payload
+          FROM support
+        `) as unknown as ReadRow[];
+        const creatorRows = supportRows.filter((row) => row.kind === "creator");
+        const catalogRows = supportRows.filter((row) => row.kind === "software");
+        if (creatorRows.length + catalogRows.length !== supportRows.length ||
+            creatorRows.length !== (video.creator_x_user_id ? 1 : 0) ||
+            catalogRows.length !== softwareNames.length) {
+          return fixedFailure("旧形式インポートの作成者または使用ソフトsnapshotが不正です。");
+        }
+        const creatorSnapshot = creatorRows.length
+          ? parseJsonRecord(creatorRows[0].payload, "旧形式インポートの作成者snapshotが不正です。")
+          : null;
+        if (creatorSnapshot && (
+          creatorSnapshot.id !== video.creator_x_user_id ||
+          (creatorSnapshot.profile_text !== null && typeof creatorSnapshot.profile_text !== "string") ||
+          (creatorSnapshot.other_social_links !== null && typeof creatorSnapshot.other_social_links !== "string")
+        )) {
+          return fixedFailure("旧形式インポートの作成者snapshotが不正です。");
+        }
+        const creator = creatorSnapshot ? {
+          profile_text: creatorSnapshot.profile_text as string | null,
+          other_social_links: creatorSnapshot.other_social_links as string | null,
+        } : null;
+        const catalog = catalogRows.map((row) =>
+          parseJsonRecord(row.payload, "旧形式インポートの使用ソフトsnapshotが不正です。"));
+        const softwareIds = new Map<string, string>();
+        for (const row of catalog) {
+          if (typeof row.id !== "string" || typeof row.normalized_name !== "string" ||
+              !softwareNames.includes(row.normalized_name) || softwareIds.has(row.normalized_name)) {
+            return fixedFailure("旧形式インポートの使用ソフトsnapshotが不正です。");
+          }
+          softwareIds.set(row.normalized_name, row.id);
+        }
+        const now = Math.floor(Date.now() / 1000);
+        const projection = await projectLegacyVideoCreate({
+          plan: input.plan, videoId: video.id, creator, softwareIds, now,
+        });
+        const {
+          managed, nextEvents, nextMembers, nextChapters, nextSoftwares, nextMetadata,
+          nextAnswers, plannedQuestions, rebuildTargets, snapshotProof, youtubeWakeRequired,
+        } = projection;
+        const eventIds = [...new Set(
+          [video.primary_event_id, ...nextEvents.map((row) => row.event_id)]
+            .filter((id): id is string => !!id),
+        )];
+        const xUserIds = [...new Set(
+          [video.creator_x_user_id, ...nextMembers.map((row) => row.x_user_id),
+            ...nextChapters.map((row) => row.x_user_id)]
+            .filter((id): id is string => !!id),
+        )];
+        const relationPayload = JSON.stringify(eventIds);
+        const xUserPayload = JSON.stringify(xUserIds);
+        const catalogPayload = JSON.stringify(catalog);
+        const questionSnapshotPayload = JSON.stringify(plannedQuestions);
+        // Refuse orphan support rows rather than deleting data for an absent video.
+        // Assert every consumed relation/definition/fallback again in the same
+        // atomic batch; no stale snapshot can authorize insertion or a receipt.
+        const stateAssertion = input.db.run(sql`
+          SELECT CASE WHEN
+            NOT EXISTS (SELECT 1 FROM videos WHERE id = ${video.id})
+            AND NOT EXISTS (SELECT 1 FROM video_events WHERE video_id = ${video.id})
+            AND NOT EXISTS (SELECT 1 FROM video_members WHERE video_id = ${video.id})
+            AND NOT EXISTS (SELECT 1 FROM video_chapters WHERE video_id = ${video.id})
+            AND NOT EXISTS (SELECT 1 FROM video_softwares WHERE video_id = ${video.id})
+            AND NOT EXISTS (SELECT 1 FROM video_youtube_metadata WHERE video_id = ${video.id})
+            AND NOT EXISTS (SELECT 1 FROM video_custom_answers WHERE video_id = ${video.id})
+            AND EXISTS (SELECT 1 FROM "user"
+              WHERE id = ${SYSTEM_USER_ID} AND name = 'Legacy import system'
+                AND email IS NULL AND "emailVerified" IS NULL AND image IS NULL
+                AND discord_id IS NULL AND role = 'user' AND can_create_events = 0
+                AND is_notification_enabled = 0 AND is_tos_accepted = 0
+                AND accepted_terms_version_id IS NULL AND terms_reaccept_required = 0
+                AND is_banned = 0 AND active_x_user_id IS NULL
+                AND onboarding_completed_at IS NULL AND last_guild_check IS NULL)
+            AND (${video.youtube_video_id} IS NULL OR ${video.youtube_video_id} = ''
+              OR NOT EXISTS (SELECT 1 FROM videos
+                WHERE youtube_video_id = ${video.youtube_video_id}
+                  AND visibility_status NOT IN ('archived', 'voided')))
+            AND NOT EXISTS (
+              SELECT 1 FROM json_each(${relationPayload}) AS incoming
+                WHERE NOT EXISTS (SELECT 1 FROM events WHERE id = incoming.value)
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM json_each(${xUserPayload}) AS incoming
+                WHERE NOT EXISTS (SELECT 1 FROM x_users WHERE id = incoming.value)
+            )
+            AND (${video.creator_x_user_id} IS NULL OR EXISTS (
+              SELECT 1 FROM x_users WHERE id = ${video.creator_x_user_id}
+                AND profile_text IS ${creator?.profile_text ?? null}
+                AND other_social_links IS ${creator?.other_social_links ?? null}
+            ))
+            AND NOT EXISTS (
+              SELECT 1 FROM json_each(${catalogPayload}) AS incoming
+                WHERE NOT EXISTS (SELECT 1 FROM software_catalog
+                  WHERE id = json_extract(incoming.value, '$.id')
+                    AND normalized_name = json_extract(incoming.value, '$.normalized_name'))
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM json_each(${questionSnapshotPayload}) AS incoming
+                WHERE NOT EXISTS (SELECT 1 FROM event_custom_questions AS q
+                  WHERE q.id = json_extract(incoming.value, '$.id')
+                    AND q.event_id = json_extract(incoming.value, '$.event_id')
+                    AND q.question_key = json_extract(incoming.value, '$.question_key')
+                    AND q.label = json_extract(incoming.value, '$.label')
+                    AND q.description IS json_extract(incoming.value, '$.description')
+                    AND q.type = json_extract(incoming.value, '$.type')
+                    AND q.required = json_extract(incoming.value, '$.required')
+                    AND q.options_json IS json_extract(incoming.value, '$.options_json')
+                    AND q.placeholder IS json_extract(incoming.value, '$.placeholder')
+                    AND q.max_length IS json_extract(incoming.value, '$.max_length')
+                    AND q.sort_order = json_extract(incoming.value, '$.sort_order')
+                    AND q.is_active = json_extract(incoming.value, '$.is_active')
+                    AND q.visibility = json_extract(incoming.value, '$.visibility'))
+            )
+          THEN 1 ELSE json_extract('legacy_import_video_create_snapshot_mismatch', '$') END
+        `);
+        // JSON1 batching keeps the full related-row set within D1's bind cap.
+        // Table/column names below are static constants, never preview data.
+        const inserts = [
+          { table: "videos", columns: [
+            "id", "primary_event_id", "creator_x_user_id", "submitted_by_user_id",
+            "collaboration_type", "part", "source_type", "creator_display_name",
+            "creator_display_name_yomi", "creator_icon_url", "creator_youtube_channel_url",
+            "creator_profile_text", "creator_other_social_links", "title", "music", "credit",
+            "music_reference_url", "closing_comment", "youtube_video_id", "intro_comment",
+            "highlights", "production_story", "visibility_status", "scheduling_type",
+            "scheduled_time", "created_at", "app_like_count", "score", "score_updated_at", "updated_at",
+          ], rows: [{ ...managed, app_like_count: 0, score: 0, score_updated_at: null, updated_at: now }] },
+          { table: "video_events", columns: ["video_id", "event_id"], rows: nextEvents },
+          { table: "video_members", columns: [
+            "id", "video_id", "x_user_id", "name", "role", "comment", "order_index",
+            "can_edit", "is_public_member", "edit_granted_by_auth_user_id", "edit_granted_at", "edit_updated_at",
+          ], rows: nextMembers },
+          { table: "video_chapters", columns: [
+            "id", "video_id", "x_user_id", "chapter_time", "chapter_label", "note", "visibility", "created_at", "updated_at",
+          ], rows: nextChapters },
+          { table: "video_softwares", columns: ["video_id", "software_id", "raw_label"], rows: nextSoftwares },
+          { table: "video_youtube_metadata", columns: [
+            "video_id", "youtube_privacy_status", "youtube_availability_status", "duration_seconds",
+            "view_count", "synced_at", "sync_status", "sync_error", "updated_at",
+          ], rows: nextMetadata },
+          { table: "video_custom_answers", columns: [
+            "video_id", "event_id", "question_id", "answer_text", "answer_json", "created_at", "updated_at",
+          ], rows: nextAnswers },
+        ].filter((entry) => entry.rows.length > 0);
+        const mutations = inserts.map(({ table, columns, rows }) => input.db.run(sql`
+          INSERT INTO ${sql.raw(table)} (${sql.raw(columns.join(", "))})
+          SELECT ${sql.raw(columns.map((column) => "json_extract(value, '$." + column + "')").join(", "))}
+          FROM json_each(${JSON.stringify(rows)})
+        `));
+        const queueRows = rebuildTargets.map((row, index) => ({
+          id: legacyImportRebuildQueueId(identity.targetId, index), ...row,
+        }));
+        const queuePayload = JSON.stringify(queueRows);
+        const queueMutation = input.db.run(sql`
+          INSERT INTO static_rebuild_queue (
+            id, target_type, target_id, reason, priority, status,
+            attempt_count, requested_by_user_id, created_at, updated_at
+          )
+          SELECT
+            json_extract(incoming.value, '$.id'),
+            json_extract(incoming.value, '$.target_type'),
+            json_extract(incoming.value, '$.target_id'),
+            json_extract(incoming.value, '$.reason'),
+            json_extract(incoming.value, '$.priority'),
+            'pending', 0, ${input.actorAuthUserId}, ${now}, ${now}
+          FROM json_each(${queuePayload}) AS incoming
+          WHERE 1 = 1
+          ON CONFLICT(target_type, target_id) WHERE status IN ('pending', 'processing')
+          DO UPDATE SET
+            reason = CASE
+              WHEN static_rebuild_queue.reason = 'video_visibility_update'
+                   AND excluded.reason <> 'video_visibility_update'
+                THEN static_rebuild_queue.reason
+              ELSE excluded.reason
+            END,
+            priority = CASE
+              WHEN static_rebuild_queue.priority = 'high' OR excluded.priority = 'high' THEN 'high'
+              WHEN static_rebuild_queue.priority = 'normal' OR excluded.priority = 'normal' THEN 'normal'
+              ELSE 'low'
+            END,
+            requested_by_user_id = excluded.requested_by_user_id,
+            updated_at = MAX(static_rebuild_queue.updated_at + 1, excluded.updated_at)
+        `);
+        const outcome = { kind: "video", action: "created" } as const;
+        const nextProgress = nextVideoProgress(input, outcome);
+        const answerTarget = (row: typeof nextAnswers[number]) =>
+          [row.video_id, row.event_id, row.question_id].map(encodeURIComponent).join(":");
+        const sentKinds = new Set<QueueWakeKind>();
+        await mutateWithAudit(input.db, {
+          preMutationAssertions: [markerAbsenceAssertion, stateAssertion],
+          mutationStatements: [...mutations, queueMutation],
+          expectedMutationChanges: [...inserts.map((entry) => entry.rows.length), queueRows.length],
+          audits: [
+            {
+              table_name: "videos", target_id: video.id, operation: "CREATE" as const,
+              before: null,
+              after: {
+                ...video, created_at: managed.created_at,
+                event_ids: nextEvents.map((row) => row.event_id),
+                member_ids: nextMembers.map((row) => row.id),
+                chapter_ids: nextChapters.map((row) => row.id),
+                software_ids: nextSoftwares.map((row) => row.software_id),
+                custom_answer_ids: nextAnswers.map(answerTarget),
+              },
+              actor_user_id: input.actorAuthUserId,
+              reason: "旧形式作品を新正本へ変換", context: "legacy_import",
+              retention_class: "long_audit" as const, restore_strategy: "delete_created" as const,
+              strict: true,
+            },
+            {
+              table_name: ENTITY_SNAPSHOT_AUDIT_TABLE,
+              target_id: entitySnapshotTargetId("video", video.id),
+              operation: "SYSTEM" as const, before: null, after: snapshotProof,
+              actor_user_id: input.actorAuthUserId,
+              reason: "旧形式作品の置換可能snapshotを確定", context: ENTITY_SNAPSHOT_AUDIT_CONTEXT,
+              retention_class: "long_audit" as const, restore_strategy: "none" as const,
+              strict: true,
+            },
+            ...nextAnswers.map((row) => ({
+              table_name: "video_custom_answers", target_id: answerTarget(row),
+              operation: "CREATE" as const, before: null, after: row,
+              actor_user_id: input.actorAuthUserId,
+              reason: "旧形式動画のカスタム質問回答を作成", context: "legacy_import:custom-answer",
+              retention_class: "long_audit" as const, restore_strategy: "delete_created" as const,
+              strict: true,
+            })),
+            buildMarkerAudit(nextProgress, outcome),
+          ],
+          callerQueryCount: 4,
+          preloaded: input.preloaded,
+          staticRebuildWakeSource: "import",
+          wakeSentKinds: sentKinds,
+        }, input.loadWakeHost);
+        if (youtubeWakeRequired) {
+          try {
+            await sendYoutubeSyncPendingWakeBestEffort("import", sentKinds, await input.loadWakeHost());
+          } catch {
+            // The pending metadata is durable. A wake failure never makes a
+            // committed D1 step look uncommitted or authorize a duplicate write.
+          }
+        }
+        return { progress: nextProgress, complete: nextProgress.stage === "complete" };
       }
     }
     const outcome: StoredStepOutcome = plannedVideo
