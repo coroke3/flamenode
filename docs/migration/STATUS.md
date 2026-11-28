@@ -18,13 +18,13 @@ Claude / Codex / Antigravityが共有する**mainにmerge済みのtask/依存関
 
 ```text
 Current Phase: 5–8 implementation tracks; Phase 4 follow-ups and Phase 9 inventory (production cutover not started)
-Current Task: MIG-0507
+Current Task: MIG-0516
 Current Owner: antigravity
 Task State: DONE
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0507
-Last Task PR: #448
+Last Completed Task: MIG-0516
+Last Task PR: #436
 Merged READY: MIG-0411, MIG-0501..MIG-0506, MIG-0509, MIG-0511, MIG-0512, MIG-0603 (remainder), MIG-0626 (remainder), MIG-0629, MIG-0633..MIG-0638, MIG-0701 (D-13, 2026-10-25); MIG-0507, MIG-0510, MIG-0621, MIG-0628, MIG-0632, MIG-0639..MIG-0649, MIG-0802 (D-14, 2026-10-25); MIG-0516..MIG-0518, MIG-0605, MIG-0650..MIG-0660, MIG-0707, MIG-0908 (D-15, 2026-10-26); MIG-0513..MIG-0515, MIG-0519, MIG-0661, MIG-0708..MIG-0713, MIG-0715, MIG-0718, MIG-0807 (D-16, 2026-10-26); MIG-0663, MIG-0664, MIG-0719..MIG-0729, MIG-0731..MIG-0737 (D-17, 2026-10-27); MIG-0662, MIG-0666, MIG-0738 (D-19, 2026-11-18)
 Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 ```
@@ -48,7 +48,7 @@ Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 
 テストは既存suite・fixture・helperを優先し、既存ファイルへの最小限の回帰ケース追加を原則とする。既存テストで受入条件を証明できる場合は新規テストを作らない。重複・同等ケース、証跡だけのtest-only PR、別ファイルへの細分化を避ける。新規ファイルは既存suiteでは必要な契約を検証できない場合に限り、理由・非重複性をPRへ記録する。必須検証・安全性・失敗系カバレッジを削減したり、未実行をPASSにしたりしない。
 
-2026-11-28 集計: 183 MIG / DONE 130 / READY 31 / BLOCKED 22 (71.0% task-count; individual rows authoritative). READYはmainの依存状態であり、稼働中のowner/進捗はopen PRのwork-itemを確認する。
+2026-11-28 集計: 183 MIG / DONE 132 / READY 31 / BLOCKED 20 (72.1% task-count; individual rows authoritative). READYはmainの依存状態であり、稼働中のowner/進捗はopen PRのwork-itemを確認する。
 
 - 1 iteration = exactly 1 MIG task
 - 原則 1 task = 1 short-lived branch = 1 PR = 1 squash merge
@@ -118,7 +118,7 @@ Phase 0 GateはMIG-0012でPASSED（未監査必須機能・UX/FN mapping・backe
 | 2 | Design System / HTML mock integration (公開画面用) | DONE | PASSED |
 | 3 | Domain extraction | DONE | PASSED |
 | 4 | Public PoC: performance-first P0 + later visual | PARTIALLY_READY (Gate MIG-0407 DONE: owner-approved 2026-10-23 with deferrals in PHASE_4_GATE.md §5; MIG-0401, MIG-0404, MIG-0405, MIG-0406, MIG-0402, MIG-0403, MIG-0409 DONE (MIG-0409 closed by D-13-10; its remaining Cloudflare owner steps are tracked by MIG-0509 / MIG-0410) / MIG-0410 BLOCKED on owner production steps / MIG-0411 BLOCKED on owner steps 1–3 and the non-production B-new measurement (code remainder merged in #465: render path removed, DELETE + tracker close only, Cron recovery; #326 merged, migration 0066 applied to production)) | PASSED (owner approval 2026-10-23, with deferrals) |
-| 5 | Public migration | PARTIALLY_READY (2026-10-30: MIG-0501 / 0502 / 0503 / 0504 / 0505 / 0506 / 0507 / 0509 / 0510 / 0511 / 0512 / 0513 / 0515 / 0517 / 0518 / 0519 DONE (MIG-0507 DONE (2026-11-28, PR #448); MIG-0515 DONE (2026-11-21, PR #446); MIG-0518 PR#468 merged 2026-11-09; MIG-0509 PR#469 integrated 2026-11-02, merge pending human approval; MIG-0501 PR#429, MIG-0506 PR#431, MIG-0519 PR#447, MIG-0510 PR#450 merged 2026-11-01; MIG-0513 PR#452 builder-complete 2026-11-01, merge pending human approval); MIG-0514, 0516 READY (0514 contract-first, D-16-1); partial PRs #340 #344 #350 #352 #354 #355 #356 #357 merged; MIG-0508 Gate BLOCKED; Issue #710 tracked in PR #705 / MIG-0513 / MIG-0508) | CLOSED |
+| 5 | Public migration | PARTIALLY_READY (2026-10-30: MIG-0501 / 0502 / 0503 / 0504 / 0505 / 0506 / 0507 / 0509 / 0510 / 0511 / 0512 / 0513 / 0515 / 0516 / 0517 / 0518 / 0519 DONE (MIG-0516 DONE (2026-11-28, PR #436); MIG-0507 DONE (2026-11-28, PR #448); MIG-0515 DONE (2026-11-21, PR #446); MIG-0518 PR#468 merged 2026-11-09; MIG-0509 PR#469 integrated 2026-11-02, merge pending human approval; MIG-0501 PR#429, MIG-0506 PR#431, MIG-0519 PR#447, MIG-0510 PR#450 merged 2026-11-01; MIG-0513 PR#452 builder-complete 2026-11-01, merge pending human approval); MIG-0514 READY (0514 contract-first, D-16-1); partial PRs #340 #344 #350 #352 #354 #355 #356 #357 merged; MIG-0508 Gate BLOCKED; Issue #710 tracked in PR #705 / MIG-0513 / MIG-0508) | CLOSED |
 | 6 | Hono API | PARTIALLY_READY (47 DONE / 15 READY / 4 BLOCKED; individual rows authoritative, production cutover not authorized) | CLOSED |
 | 7 | Private SPA (現行UI流用) | PARTIALLY_READY (19 DONE / 13 READY / 6 BLOCKED; Ops /manage production cutover NOT STARTED) | CLOSED |
 | 8 | Auth | IN_PROGRESS (MIG-0801 / MIG-0802 (non-production PoC, D-14-5, PR#471) / MIG-0803 (Discord/account-linking parity, PR#688) / MIG-0807 DONE (MIG-0807 Hono session/write guard review, PR#444; SEC-0807-01 fixed in #445); MIG-0804 READY; MIG-0805..0806 BLOCKED; production cutover NOT STARTED) | CLOSED |
@@ -304,7 +304,7 @@ Validation:
 | MIG-0513 | `/[id]` like / bookmark Island on the SA-087 API (merge gate MIG-0640, D-16) | DONE | MIG-0407, MIG-0634 |
 | MIG-0514 | `/event/[id]/slots` viewer panel + reservation Island (merge gate MIG-0657, D-16) | READY | MIG-0407 |
 | MIG-0515 | header Active X switch on the SA-098 API (merge gate MIG-0636, D-16) | DONE | MIG-0407 |
-| MIG-0516 | public build request mark in the static rebuild enqueue batch (MIG-0509 U05) | READY | MIG-0409 |
+| MIG-0516 | public build request mark in the static rebuild enqueue batch (MIG-0509 U05) | DONE | MIG-0409 |
 | MIG-0517 | GA4 sync input from D1 instead of R2 `list/recent.json` (MIG-0509 U06) | DONE | MIG-0409 |
 | MIG-0518 | `/[id]` chapter composer + comments + `?playlist=` dock Islands, viewer-overlay client | DONE | MIG-0407, MIG-0634 |
 | MIG-0519 | `/rules` consent form Island on the SA-075 API (MIG-0515 U01, merge gate MIG-0641, D-16) | DONE | MIG-0407 |
@@ -325,6 +325,8 @@ Phase 5 の各 task は PR で merge 済みだが Work Order の受入を満た�
 2026-11-21 統合（MIG-0515、PR #446）: 公開ヘッダー `SiteHeader.ts` の Active X 切替を `@flamenode/contracts`（`SetActiveXBodySchema` / `XIdWriteResultSchema`）準拠の SA-098 クライアント（`apps/site/src/lib/activeX.ts` / `guardRedirect.ts`）へ接続し `DONE` とした。Source HEAD `1915335e72fe29b5f6f858cc3501d5a16221879e` は exact-HEAD CI（[Actions #44767993233](https://github.com/coroke3/flamenode/actions/runs/44767993233) `SUCCESS`）、独立 Neon レビュー（[comment](https://github.com/coroke3/flamenode/pull/446#issuecomment-7044115971), `APPROVE`）、および 390x844 / 1440x900 headless Chrome 実ブラウザパリティ検証を通過済み。`MIG-0508`（Phase 5 Gate）は他タスク未完のため `BLOCKED` のまま、D-04 本番 Active X ルート切替は別途承認待ちで未実施。
 
 2026-11-28 統合（MIG-0507、PR #448）: `/[id]` 公開動画ページ（`apps/site/src/lib/videoPage.ts`、snapshot verification / event-detail・related-card 可視性フェンス / canonical X profile & external URL boundary / related-card alias reconciliation / `VideoPageIsland`・`TopShelfIsland`）を `DONE` とした。`MIG-0508`（Phase 5 Gate）は他 Phase 5 タスク未完のため `BLOCKED` 維持。`Issue #710`（390px モバイル画面の参加メンバー表をボトムドック内へ収める visual parity）は `PR #705` / `MIG-0513` / `MIG-0508` で追跡する。本番 Worker Route / Remote D1 / R2 / Queue / secret 変更なし。
+
+2026-11-28 統合（MIG-0516、PR #436）: `buildStaticRebuildQueueBatch`（`packages/server-core/src/staticRebuild/enqueue.ts`）に `public_build_state` 単一行更新（`MAX(requested_at + 1, last_hook_at + 1, ?)`・strict `changes=1`、本番 D1 `0065_public_build_state.sql` 適用済み read-only 証跡および 50-query 予算境界・SA-028/029/100-XID/80-event SQLite 検証済み）を `DONE` とした。`MIG-0508`（Phase 5 Gate）は `MIG-0514` 等が残るため `BLOCKED` 維持。本番 Worker Route / Remote D1 / R2 / Queue / secret 変更なし。
 
 公開画面の like / 枠予約 / 規約同意 / Active X 切替は Server Action を直接呼ぶため、各ルートの本番切替は対応する Phase 6 API（MIG-0603/0604/0605/0608）の DONE 後に行う（[`PHASE_4_5_SPEC.md`](PHASE_4_5_SPEC.md) Phase 5 共通契約）。
 

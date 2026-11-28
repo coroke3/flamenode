@@ -315,7 +315,7 @@ if (runUnderRootTsx(import.meta.url)) {
     const norm = (s) => s.replace(/\s+/g, " ").trim();
     assert.equal(norm(capturedMine[0].sql), norm(captured[0].sql));
     assert.deepEqual(capturedMine[0].params, captured[0].params);
-    assert.deepEqual(actual.expectedChanges, [1]);
+    assert.deepEqual(actual.expectedChanges, [1, 1]);
   });
 
   test("parseChapterBulkCsv equals the real parser on fixtures and 3000 random inputs", () => {
