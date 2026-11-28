@@ -9,6 +9,9 @@ export const MODULES = [
   ["sectabs", "src/components/admin/AdminSectionTabs.module.css", "apps/ops/src/styles/shared.css"],
   ["adminnav", "src/components/admin/AdminSidebarNav.module.css", "apps/ops/src/styles/manage-shell.css"],
   ["costguard", "src/components/layout/CostGuardBanner.module.css", "apps/ops/src/styles/manage-shell.css"],
+];
+
+export const EVENT_FORM_MODULES = [
   ["ops-event-form", "src/components/admin/EventForm.module.css", "apps/ops/src/styles/event-form.css"],
   ["opsEvent", "src/components/admin/EventCustomQuestionsEditor.module.css", "apps/ops/src/styles/event-form.css", "pascal"],
   ["opsEvent", "src/components/forms/CustomQuestionFields.module.css", "apps/ops/src/styles/event-form.css", "pascal"],
@@ -37,8 +40,7 @@ function portEventFormCssModule(source, prefix, mode) {
 }
 
 export function buildEventFormCss() {
-  return MODULES
-    .filter(([, , target]) => target === "apps/ops/src/styles/event-form.css")
+  return EVENT_FORM_MODULES
     .map(([prefix, from, , mode]) => {
       const source = fs.readFileSync(new URL(from, root), "utf8");
       return `/* Generated from CURRENT ${from}; prefix=${prefix}. */\n${portEventFormCssModule(source, prefix, mode).trimEnd()}`;

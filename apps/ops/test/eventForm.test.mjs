@@ -14,7 +14,7 @@ import { EventForm } from "../.test-dist/apps/ops/src/components/event/EventForm
 import { eventFormStyles, eventFormCss } from "../.test-dist/apps/ops/src/components/event/eventFormStyles.js";
 import { editorCss, fieldCss } from "../.test-dist/apps/ops/src/components/event/eventCustomQuestionsStyles.js";
 import { youtubeTemplateEditorCss } from "../.test-dist/apps/ops/src/components/event/youtubeDescriptionTemplateEditorStyles.js";
-import { buildEventFormCss, portCssModule } from "../scripts/portCssModule.mjs";
+import { buildEventFormCss, EVENT_FORM_MODULES, portCssModule } from "../scripts/portCssModule.mjs";
 import { buildFormDraftStorageKey } from "../.test-dist/apps/ops/src/lib/useFormDraft.js";
 
 const read = path => readFileSync(new URL(path, import.meta.url), "utf8");
@@ -48,6 +48,7 @@ test("U01 preserves CURRENT JSX, submit flow and generated CSS selectors", () =>
     .replace("</Link>", "</a>");
   assert.equal(targetRender, current.slice(current.indexOf(renderStart)));
   assert.equal(eventFormCss, portCssModule(read("../../../src/components/admin/EventForm.module.css"), "ops-event-form"));
+  assert.equal(EVENT_FORM_MODULES.length, 4);
   assert.equal(buildEventFormCss(), generatedEventFormCss);
   for (const css of [eventFormCss, editorCss, fieldCss, youtubeTemplateEditorCss]) {
     assert.ok(generatedEventFormCss.includes(css), "generated stylesheet preserves every CURRENT EventForm editor CSS module");
