@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import {
+  createStrictD1TraceReplay, createStrictD1TraceRecorder,
   WORKERS, BUDGET_MS, FIXED_TIME, plan, parseArgs, seedForKind, wrapperSource,
   judgeBackground, limitRecommendation, cpuFromProfile, validateSample,
 } from "./benchmark-background-cpu.mjs";
@@ -385,4 +386,196 @@ test("U02: the wrapper source embeds a literal import() per declared module so w
   }
   assert.ok(src.indexOf("globalThis.fetch = async") < src.indexOf("await import("), "trap precedes entry import");
   assert.ok(!src.includes("https://discord.com") && !src.includes("https://youtube.googleapis.com"));
+});
+
+test("MIG-0610 T00a: strict D1 trace replay preserves SQL/binds, returns cloned rows and exhausts trace", async () => {
+  const trace = [
+    { request: { op: "first", sql: "SELECT ? AS value", binds: [["str", "abc"]], args: [] },
+      result: { value: "abc" } },
+    { request: { op: "batch", statements: [
+      { sql: "UPDATE q SET n = ?", binds: [["num", 2]] },
+      { sql: "INSERT INTO q (blob) VALUES (?)", binds: [["bytes", [0, 255]]] },
+    ] }, result: [{ success: true, meta: { changes: 1 } }, { success: true, meta: { changes: 1 } }] },
+    { request: { op: "exec", sql: "PRAGMA foreign_keys=ON" }, result: { count: 0 } },
+  ];
+  const replay = createStrictD1TraceReplay(trace);
+  const first = await replay.db.prepare("SELECT ? AS value").bind("abc").first();
+  assert.deepEqual(first, { value: "abc" });
+  first.value = "corrupted";
+  assert.equal(trace[0].result.value, "abc");
+  assert.deepEqual(await replay.db.batch([
+    replay.db.prepare("UPDATE q SET n = ?").bind(2),
+    replay.db.prepare("INSERT INTO q (blob) VALUES (?)").bind(new Uint8Array([0, 255])),
+  ]), [{ success: true, meta: { changes: 1 } }, { success: true, meta: { changes: 1 } }]);
+  assert.deepEqual(await replay.db.exec("PRAGMA foreign_keys=ON"), { count: 0 });
+  assert.equal(replay.consumed(), 3);
+  replay.assertExhausted();
+});
+
+test("MIG-0610 T00a: D1 replay rejects tampered SQL/binds/operation, missing batch and unused work", async () => {
+  const entry = { request: { op: "first", sql: "SELECT ?", binds: [["num", 1]], args: [] }, result: { x: 1 } };
+  for (const invoke of [
+    db => db.prepare("SELECT 2").bind(1).first(),
+    db => db.prepare("SELECT ?").bind(2).first(),
+    db => db.prepare("SELECT ?").bind(1).all(),
+    db => db.batch([db.prepare("SELECT ?").bind(1)]),
+  ]) {
+    const replay = createStrictD1TraceReplay([entry]);
+    await assert.rejects(async () => invoke(replay.db), /D1 replay trace mismatch/);
+    assert.equal(replay.consumed(), 0);
+    assert.throws(() => replay.assertExhausted(), /D1 replay invalidated/);
+  }
+  const replay = createStrictD1TraceReplay([entry]);
+  assert.deepEqual(await replay.db.prepare("SELECT ?").bind(1).first(), { x: 1 });
+  await assert.rejects(async () => replay.db.prepare("SELECT ?").bind(1).first(), /mismatch/);
+  assert.throws(() => replay.assertExhausted(), /D1 replay invalidated/);
+  const missingResult = createStrictD1TraceReplay([{ request: entry.request }]);
+  await assert.rejects(async () => missingResult.db.prepare("SELECT ?").bind(1).first(), /mismatch/);
+});
+
+test("MIG-0610 T00a: malformed and unsupported D1 replay operations are not silently approximated", async () => {
+  assert.throws(() => createStrictD1TraceReplay(null), /invalid/);
+  assert.throws(() => createStrictD1TraceReplay(Array(2001).fill({})), /invalid/);
+  const replay = createStrictD1TraceReplay([]);
+  assert.throws(() => replay.db.prepare("SELECT ?").bind({ secret: "not a D1 scalar" }), /unsupported/);
+  assert.throws(() => replay.db.prepare("SELECT ?").bind(Number.NaN), /unsupported/);
+  assert.throws(() => replay.db.batch([]), /invalid/);
+  assert.throws(() => replay.db.batch([{}]), /invalid/);
+  assert.equal(replay.db.withSession, undefined, "unsupported D1 APIs must not fall back to real DB");
+  assert.throws(() => replay.assertExhausted(), /D1 replay invalidated/);
+});
+
+
+test("MIG-0610 T00b1: real DB recording round-trips a seeded multi-operation job into strict replay", async () => {
+  const calls = [];
+  const statement = (sql, args = []) => ({
+    bind(...values) { return statement(sql, values); },
+    async first() { calls.push(["first", sql, ...args]); return { item: "seeded", count: 2 }; },
+    async all() { calls.push(["all", sql, ...args]); return { results: [{ id: 3 }], success: true }; },
+    async run() { calls.push(["run", sql, ...args]); return { success: true, meta: { changes: 1 } }; },
+    async raw() { calls.push(["raw", sql, ...args]); return [[3, "ok"]]; },
+  });
+  const realDb = {
+    prepare: sql => statement(sql),
+    async batch(stmts) {
+      assert.equal(stmts.length, 2);
+      const a = await stmts[0].run(), b = await stmts[1].run();
+      return [a, b];
+    },
+    async exec(sql) { calls.push(["exec", sql]); return { count: 1 }; },
+  };
+  const recorder = createStrictD1TraceRecorder(realDb);
+  const first = await recorder.db.prepare("SELECT * FROM foo WHERE id=?").bind(3).first();
+  assert.deepEqual(first, { item: "seeded", count: 2 });
+  const all = await recorder.db.prepare("SELECT id FROM foo").all();
+  assert.deepEqual(all.results, [{ id: 3 }]);
+  const changes = await recorder.db.batch([
+    recorder.db.prepare("UPDATE foo SET id=?").bind(3),
+    recorder.db.prepare("INSERT INTO foo(id) VALUES(?)").bind(4),
+  ]);
+  assert.equal(changes[0].meta.changes, 1);
+  assert.deepEqual(await recorder.db.exec("SELECT 1"), { count: 1 });
+  const trace = recorder.snapshot();
+  assert.deepEqual(trace.map(x => x.request.op), ["first", "all", "batch", "exec"]);
+  assert.deepEqual(calls.map(x => x[0]), ["first", "all", "run", "run", "exec"]);
+  const replay = createStrictD1TraceReplay(trace);
+  assert.deepEqual(await replay.db.prepare("SELECT * FROM foo WHERE id=?").bind(3).first(), first);
+  assert.deepEqual(await replay.db.prepare("SELECT id FROM foo").all(), all);
+  assert.deepEqual(await replay.db.batch([
+    replay.db.prepare("UPDATE foo SET id=?").bind(3),
+    replay.db.prepare("INSERT INTO foo(id) VALUES(?)").bind(4),
+  ]), changes);
+  assert.deepEqual(await replay.db.exec("SELECT 1"), { count: 1 });
+  replay.assertExhausted();
+  trace[0].result.count = 999;
+  assert.equal(recorder.snapshot()[0].result.count, 2, "snapshots must not expose internal trace");
+});
+
+test("MIG-0610 T00b1: in-flight, rejected, unsupported, and tampered recordings fail closed", async () => {
+  let release;
+  const deferred = new Promise(resolve => { release = resolve; });
+  const db = {
+    prepare: sql => ({
+      bind() { return this; },
+      first() { return deferred; },
+      all() { throw Error("simulated D1 failure"); },
+      run() { return Promise.resolve({ success: true }); },
+      raw() { return Promise.resolve([]); },
+    }),
+    batch: async () => [],
+    exec: async () => ({ count: 1 }),
+  };
+  const recorder = createStrictD1TraceRecorder(db);
+  const pending = recorder.db.prepare("SELECT 1").first();
+  assert.throws(() => recorder.snapshot(), /incomplete/);
+  release({ result: 1 });
+  await pending;
+  assert.deepEqual(recorder.snapshot()[0].result, { result: 1 });
+  const trace = recorder.snapshot();
+  const strict = createStrictD1TraceReplay(trace);
+  await assert.rejects(async () => strict.db.prepare("SELECT 2").first(), /mismatch/);
+  assert.throws(() => strict.assertExhausted(), /invalidated/);
+  assert.equal(recorder.db.withSession, undefined);
+  const badBind = createStrictD1TraceRecorder(db);
+  assert.throws(() => badBind.db.prepare("SELECT 1").bind({ nonD1: 1 }), /unsupported/);
+  assert.throws(() => badBind.snapshot(), /incomplete or failed/);
+  const badBatch = createStrictD1TraceRecorder(db);
+  assert.throws(() => badBatch.db.batch([{}]), /invalid/);
+  assert.throws(() => badBatch.snapshot(), /incomplete or failed/);
+  const failedOperation = createStrictD1TraceRecorder(db);
+  await assert.rejects(async () => failedOperation.db.prepare("SELECT 2").all(), /simulated D1 failure/);
+  assert.throws(() => failedOperation.snapshot(), /incomplete or failed/);
+  assert.throws(() => createStrictD1TraceRecorder({}), /invalid/);
+});
+
+test("MIG-0610 T00b1: trace order follows D1 call dispatch even if responses settle out of order", async () => {
+  const resolves = [];
+  const db = {
+    prepare: sql => ({ all: () => new Promise(resolve => resolves.push([sql, resolve])) }),
+    batch: async () => [],
+    exec: async () => ({}),
+  };
+  const recorder = createStrictD1TraceRecorder(db);
+  const a = recorder.db.prepare("SELECT 1").all();
+  const b = recorder.db.prepare("SELECT 2").all();
+  assert.throws(() => recorder.snapshot(), /incomplete/);
+  resolves[1][1]({ results: [2] });
+  resolves[0][1]({ results: [1] });
+  await Promise.all([a, b]);
+  const trace = recorder.snapshot();
+  assert.deepEqual(trace.map(t => t.request.sql), ["SELECT 1", "SELECT 2"]);
+  const replay = createStrictD1TraceReplay(trace);
+  assert.deepEqual(await replay.db.prepare("SELECT 1").all(), { results: [1] });
+  assert.deepEqual(await replay.db.prepare("SELECT 2").all(), { results: [2] });
+  replay.assertExhausted();
+});
+
+test("MIG-0610 T00: caught mismatch permanently invalidates replay and recorded trace", async () => {
+  const trace = [{ request: { op: "first", sql: "SELECT ?", binds: [["num", 1]], args: [] }, result: { x: 1 } }];
+  const replay = createStrictD1TraceReplay(trace);
+  await assert.rejects(async () => replay.db.prepare("SELECT ?").bind(2).first(), /mismatch/);
+  await assert.rejects(async () => replay.db.prepare("SELECT ?").bind(1).first(), /previously invalidated/);
+  assert.throws(() => replay.assertExhausted(), /invalidated/);
+  const recorder = createStrictD1TraceRecorder({
+    prepare: () => ({ bind() { return this; }, async first() { return { x: 1 }; } }),
+    batch: async () => [], exec: async () => ({}),
+  });
+  await recorder.db.prepare("SELECT ?").first();
+  assert.equal(recorder.snapshot().length, 1);
+  try { recorder.db.batch([{}]); } catch { /* job may swallow the exception */ }
+  assert.throws(() => recorder.snapshot(), /incomplete or failed/);
+});
+
+test("MIG-0610 T00 replay snapshots caller trace before any measured operations", async () => {
+  const trace = [{ request: { op: "first", sql: "SELECT ? AS n",
+    binds: [["num", 2]], args: [] }, result: { n: 2 } }];
+  const replay = createStrictD1TraceReplay(trace);
+  trace[0].request.sql = "SELECT 99";
+  trace[0].result.n = 99;
+  trace.push({ request: { op: "exec", sql: "DROP TABLE fixture" }, result: {} });
+  assert.deepEqual(await replay.db.prepare("SELECT ? AS n").bind(2).first(), { n: 2 });
+  replay.assertExhausted();
+  const hostile = [{ request: { op: "first", sql: "SELECT 1", binds: [], args: [] },
+    result: { value: 1, nonCloneable() {} } }];
+  assert.throws(() => createStrictD1TraceReplay(hostile), /invalid D1 replay trace/);
 });

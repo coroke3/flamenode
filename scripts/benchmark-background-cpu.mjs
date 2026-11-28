@@ -338,6 +338,195 @@ export const JOBS = Object.freeze([
 ]);
 export const jobById = id => JOBS.find(j => j.id === id);
 
+
+/**
+ * MIG-0610 T00a: strict, deterministic D1 trace replay primitive.
+ * A caller must record traces from the SAME seeded synthetic job independently.
+ * It is deliberately not connected to --run yet: no CPU verdict is authorized.
+ * Unsupported D1 operations, altered SQL/binds/method order, missing or surplus
+ * trace steps and batch boundary changes must never produce a valid sample.
+ */
+export function createStrictD1TraceReplay(trace) {
+  if (!Array.isArray(trace) || trace.length > 2000) throw Error("invalid D1 replay trace");
+  // Never read the caller-owned trace during a measured replay. Otherwise a
+  // mutation after construction can silently change expected SQL or results.
+  let immutableInput;
+  try { immutableInput = structuredClone(trace); }
+  catch { throw Error("invalid D1 replay trace"); }
+  trace = immutableInput;
+  let cursor = 0;
+  let invalid = false;
+  const reject = message => { invalid = true; throw Error(message); };
+  const stmtMark = Symbol("D1 replay prepared");
+  const normalized = value => {
+    if (value === null) return ["null"];
+    if (typeof value === "string") return ["str", value];
+    if (typeof value === "boolean") return ["bool", value];
+    if (typeof value === "number" && Number.isFinite(value)) return ["num", value];
+    if (value instanceof Uint8Array) return ["bytes", [...value]];
+    if (value instanceof ArrayBuffer) return ["bytes", [...new Uint8Array(value)]];
+    return reject("unsupported D1 replay bind type");
+  };
+  const binds = values => values.map(normalized);
+  const encoded = value => JSON.stringify(value);
+  const step = signature => {
+    if (invalid) return reject("D1 replay previously invalidated");
+    const item = trace[cursor];
+    if (!item || !Object.hasOwn(item, "result") ||
+        encoded(item.request) !== encoded(signature)) {
+      return reject("D1 replay trace mismatch at step " + cursor);
+    }
+    cursor++;
+    // No trace result may be mutated by a consumer and reused as a future response.
+    try { return structuredClone(item.result); }
+    catch (error) { invalid = true; throw error; }
+  };
+  const prepared = (sql, values = []) => {
+    if (typeof sql !== "string" || !sql) return reject("invalid D1 replay SQL");
+    const desc = { sql, binds: binds(values) };
+    const invoke = (method, args = []) => Promise.resolve(step({ op: method, ...desc, args }));
+    const stmt = {
+      [stmtMark]: desc,
+      bind(...args) { return prepared(sql, args); },
+      first: column => invoke("first", column === undefined ? [] : [column]),
+      all: () => invoke("all"),
+      run: () => invoke("run"),
+      raw: options => invoke("raw", options === undefined ? [] : [options]),
+    };
+    return Object.freeze(stmt);
+  };
+  const db = Object.freeze({
+    prepare: sql => prepared(sql),
+    batch: statements => {
+      if (!Array.isArray(statements) || statements.length === 0 ||
+          statements.some(s => !s || !s[stmtMark])) return reject("invalid D1 replay batch");
+      return Promise.resolve(step({
+        op: "batch", statements: statements.map(s => s[stmtMark]),
+      }));
+    },
+    exec: sql => {
+      if (typeof sql !== "string" || !sql) return reject("invalid D1 replay exec SQL");
+      return Promise.resolve(step({ op: "exec", sql }));
+    },
+  });
+  return Object.freeze({
+    db,
+    consumed: () => cursor,
+    assertExhausted() {
+      if (invalid) throw Error("D1 replay invalidated");
+      if (cursor !== trace.length) return reject("unconsumed D1 replay trace: " + (trace.length - cursor));
+    },
+  });
+}
+
+
+/**
+ * MIG-0610 T00b1: record D1 calls only around a previously seeded job.
+ * This adapter is intentionally NOT wired into the benchmark runner yet.
+ * A trace is usable only after every operation has succeeded and settled.
+ * Dispatch order is reserved before awaiting DB I/O (including parallel calls).
+ */
+export function createStrictD1TraceRecorder(realDb) {
+  if (!realDb || typeof realDb.prepare !== "function" ||
+      typeof realDb.batch !== "function" || typeof realDb.exec !== "function") {
+    throw Error("invalid D1 trace recording database");
+  }
+  const trace = [];
+  const stmtMark = Symbol("D1 trace original statement");
+  let pending = 0;
+  let failed = false;
+  const invalidate = message => { failed = true; throw Error(message); };
+  const normalized = value => {
+    if (value === null) return ["null"];
+    if (typeof value === "string") return ["str", value];
+    if (typeof value === "boolean") return ["bool", value];
+    if (typeof value === "number" && Number.isFinite(value)) return ["num", value];
+    if (value instanceof Uint8Array) return ["bytes", [...value]];
+    if (value instanceof ArrayBuffer) return ["bytes", [...new Uint8Array(value)]];
+    return invalidate("unsupported D1 replay bind type");
+  };
+  const record = (request, call) => {
+    if (failed) throw Error("D1 trace recording already invalid");
+    if (trace.length >= 2000) return invalidate("D1 trace recording exhausted");
+    let entry;
+    try { entry = { request: structuredClone(request) }; }
+    catch (error) { failed = true; throw error; }
+    trace.push(entry);
+    pending++;
+    let operation;
+    try {
+      operation = call();
+    } catch (error) {
+      failed = true;
+      pending--;
+      throw error;
+    }
+    return Promise.resolve(operation).then(result => {
+      try {
+        entry.result = structuredClone(result);
+        return result;
+      } catch (error) {
+        failed = true;
+        throw error;
+      } finally {
+        pending--;
+      }
+    }, error => {
+      failed = true;
+      pending--;
+      throw error;
+    });
+  };
+  const prepared = (sql, args, original) => {
+    if (typeof sql !== "string" || !sql) return invalidate("invalid D1 replay SQL");
+    const descriptor = { sql, binds: args.map(normalized) };
+    const invoke = (method, methodArgs = []) => {
+      if (typeof original[method] !== "function") return invalidate("unsupported D1 trace method " + method);
+      return record({ op: method, ...descriptor, args: methodArgs },
+        () => original[method](...methodArgs));
+    };
+    return Object.freeze({
+      [stmtMark]: { descriptor, original },
+      bind(...values) {
+        values.map(normalized); // reject unsupported values before real DB I/O
+        try { return prepared(sql, values, original.bind(...values)); }
+        catch (error) { failed = true; throw error; }
+      },
+      first(column) { return invoke("first", column === undefined ? [] : [column]); },
+      all() { return invoke("all"); },
+      run() { return invoke("run"); },
+      raw(options) { return invoke("raw", options === undefined ? [] : [options]); },
+    });
+  };
+  const db = Object.freeze({
+    prepare(sql) {
+      if (typeof sql !== "string" || !sql) return invalidate("invalid D1 replay SQL");
+      try { return prepared(sql, [], realDb.prepare(sql)); }
+      catch (error) { failed = true; throw error; }
+    },
+    batch(statements) {
+      if (!Array.isArray(statements) || statements.length === 0 ||
+          statements.some(s => !s?.[stmtMark])) return invalidate("invalid D1 trace batch");
+      const wrapped = statements.map(s => s[stmtMark]);
+      return record({ op: "batch", statements: wrapped.map(s => s.descriptor) },
+        () => realDb.batch(wrapped.map(s => s.original)));
+    },
+    exec(sql) {
+      if (typeof sql !== "string" || !sql) return invalidate("invalid D1 replay exec SQL");
+      return record({ op: "exec", sql }, () => realDb.exec(sql));
+    },
+  });
+  return Object.freeze({
+    db,
+    snapshot() {
+      if (failed || pending !== 0 || trace.some(t => !Object.hasOwn(t, "result"))) {
+        throw Error("incomplete or failed D1 trace recording");
+      }
+      return structuredClone(trace);
+    },
+  });
+}
+
 export function parseArgs(args) {
   const opts = { dryRun: false, run: false, samples: MIN_SAMPLES, coldSamples: MIN_SAMPLES,
     warmup: 10, port: 8789, inspectorPort: 9240, out: null, probe: false, only: null };
