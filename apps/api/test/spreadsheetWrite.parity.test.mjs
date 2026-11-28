@@ -911,24 +911,42 @@ if (runUnderRootTsx(import.meta.url)) {
     const beforeBatches = honoD1.stats.batches;
     const originalPrepare = honoD1.prepare;
     const originalError = console.error;
-    const validRow = { videoId: "av-pending-1", eventId: "a-open", primaryEventId: "a-ended" };
-    const fkRow = (fkIndex, value) => ({ kind: "fk", fkIndex, value, videoId: null, eventId: null, primaryEventId: null });
-    // POST/import use the tagged FK + release CTE. PATCH/DELETE use the
-    // snapshot-inclusive CTE and must be tested against its actual row shape.
-    const releaseRow = (row = validRow) => ({ kind: "release", fkIndex: null, value: null, ...row });
-    const receiptWithRows = (fkRows, rows) => ({ success: true, results: [...fkRows, ...rows] });
-    const invalidTagged = [
+    // POST /import (video_members upsert) now uses the combined requested snapshot + FK + release CTE.
+    // Transform actual receipts just like snapshotFaults while preserving every malformed release-row failure mode.
+    const invalidImport = [
       () => ({ success: true }),
-      fkRows => ({ ...receiptWithRows(fkRows, [releaseRow()]), success: false }),
-      () => ({ success: true, results: null }),
-      () => ({ success: true, results: "not-an-array" }),
-      fkRows => receiptWithRows(fkRows, [releaseRow({ videoId: "av-pending-1", eventId: "a-open" })]),
-      fkRows => receiptWithRows(fkRows, [releaseRow({ ...validRow, videoId: "unrequested" })]),
-      fkRows => receiptWithRows(fkRows, [releaseRow({ ...validRow, eventId: 42 })]),
-      fkRows => receiptWithRows(fkRows, [Object.assign(Object.create(releaseRow()), { kind: "release" })]),
-      fkRows => receiptWithRows(fkRows, [Object.defineProperty(releaseRow(), "eventId", {
-        get() { throw new Error("preview_required"); },
-      })]),
+      receipt => ({ ...receipt, success: false }),
+      receipt => ({ ...receipt, results: null }),
+      receipt => ({ ...receipt, results: "not-an-array" }),
+      receipt => ({
+        ...receipt,
+        results: receipt.results.map(row => {
+          if (row.kind !== "release") return row;
+          const copy = { ...row };
+          delete copy.primaryEventId;
+          return copy;
+        }),
+      }),
+      receipt => ({
+        ...receipt,
+        results: receipt.results.map(row => (row.kind === "release" ? { ...row, videoId: "unrequested" } : row)),
+      }),
+      receipt => ({
+        ...receipt,
+        results: receipt.results.map(row => (row.kind === "release" ? { ...row, eventId: 42 } : row)),
+      }),
+      receipt => ({
+        ...receipt,
+        results: receipt.results.map(row => (row.kind === "release" ? Object.assign(Object.create(row), { kind: "release" }) : row)),
+      }),
+      receipt => ({
+        ...receipt,
+        results: receipt.results.map(row =>
+          row.kind === "release"
+            ? Object.defineProperty({ ...row }, "eventId", { get() { throw new Error("preview_required"); } })
+            : row,
+        ),
+      }),
       () => Object.defineProperty({ success: true }, "results", {
         get() { throw new Error("row_not_found"); },
       }),
@@ -974,8 +992,8 @@ if (runUnderRootTsx(import.meta.url)) {
       stage,
       error: new Error("FOREIGN KEY constraint failed: RELEASE_CANARY"),
     }));
-    const faults = [
-      ...invalidTagged.map(receipt => ({ stage: "all", receipt })),
+    const importFaults = [
+      ...invalidImport.map(receipt => ({ stage: "all", receipt })),
       ...providerFaults,
     ];
     const snapshotFaults = [
@@ -993,9 +1011,7 @@ if (runUnderRootTsx(import.meta.url)) {
         ["POST", "/import", apply],
       ]) {
         const snapshotCte = method !== "POST";
-        const methodFaults = snapshotCte ? snapshotFaults : faults;
-        const fkRows = method === "POST" ? [fkRow(0, "av-pending-1")] : [];
-        const expectedBinds = method === "POST" ? ["av-pending-1", "av-pending-1"] : null;
+        const methodFaults = snapshotCte ? snapshotFaults : importFaults;
         const schemaFkColumns = honoSqlite
           .prepare('PRAGMA foreign_key_list("video_members")')
           .all()
@@ -1008,7 +1024,7 @@ if (runUnderRootTsx(import.meta.url)) {
             const releaseLookup = sql.includes('LEFT JOIN "video_events" ve ON ve."video_id" = v."id"');
             const combinedLookup = snapshotCte
               ? sql.startsWith("WITH snapshot AS (")
-              : sql.startsWith("WITH fk AS (") || sql.startsWith("WITH fk_0 AS (");
+              : sql.startsWith("WITH requested (");
             if (!releaseLookup || !combinedLookup) return originalPrepare(sql);
             if (fault.stage === "prepare") { injected++; throw fault.error; }
             const stmt = originalPrepare(sql);
@@ -1016,7 +1032,10 @@ if (runUnderRootTsx(import.meta.url)) {
               ...stmt,
               bind(...params) {
                 if (method === "POST") {
-                  assert.deepEqual(params, expectedBinds);
+                  assert.equal(params[0], "vm-1");
+                  assert.equal(params.length, 2 + 2 * schemaFkColumns.length);
+                  assert.deepEqual(params.slice(1, -1).filter(v => v !== null), ["av-pending-1", "av-pending-1"]);
+                  assert.ok(typeof params[params.length - 1] === "string" && params[params.length - 1].includes(" "));
                 } else {
                   assert.deepEqual(params.slice(0, 3), [
                     "vm-1",
@@ -1033,7 +1052,6 @@ if (runUnderRootTsx(import.meta.url)) {
                   async all() {
                     injected++;
                     if (fault.error) throw fault.error;
-                    if (!snapshotCte) return fault.receipt(fkRows);
                     try {
                       const actual = await stmt.bind(...params).all();
                       return fault.receipt(actual);
@@ -1048,7 +1066,7 @@ if (runUnderRootTsx(import.meta.url)) {
           };
           const response = await callHono(method, path, body);
           assert.equal(injected, prior + 1, method + " " + path + " " + fault.stage);
-          if (snapshotCte && fault.stage === "all" && !fault.error) {
+          if (fault.stage === "all" && !fault.error) {
             assert.equal(actualReadError, null, method + " " + path + " underlying snapshot CTE read");
           }
           assert.equal(response.status, 500);
@@ -1056,7 +1074,7 @@ if (runUnderRootTsx(import.meta.url)) {
           assert.match(response.headers.get("cache-control"), /private.*no-store/);
         }
       }
-      assert.equal(injected, faults.length * 3);
+      assert.equal(injected, importFaults.length * 3);
       assert.deepEqual(logs, Array.from({ length: injected }, () => ["[spreadsheet] WRITE_FAILED"]));
     } finally {
       honoD1.prepare = originalPrepare;
@@ -2080,7 +2098,7 @@ if (runUnderRootTsx(import.meta.url)) {
         const suffix = cold ? "-import-cold" : "-import-warm";
         const rows = [
           { id: "vm-1", video_id: "av-pending-1", name: "linked" + suffix },
-          { id: "vm-import-new", video_id: "av-overflow", name: "unlinked" + suffix },
+          { id: "vm-import-new" + suffix, video_id: "av-overflow", name: "unlinked" + suffix },
         ];
         // one combined snapshot + FK + release CTE read
         await importPair("member FK upsert " + suffix, { table: "video_members", mode: "upsert", rows }, cold, 4, [1, 1, 0],
