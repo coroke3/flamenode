@@ -70,7 +70,13 @@ function MergeImpactPreview({ row }: { row: AdminXMergeRequestRow }): React.Reac
     <div className="fn-card-body">
       <h2>統合前の確認: @{row.source_x_user_id ?? "?"} → @{row.target_x_user_id ?? "?"}</h2>
       <p className="fn-muted fn-text-sm">統合元（実行後に無効化）: {row.source_name ?? "名称未設定"} / 統合先（継続利用）: {row.target_name ?? "名称未設定"}</p>
-      <p className="fn-muted fn-text-sm">表示は現在のDBを使った確認用です。実行時に再取得して競合を確認します。</p>
+      <p className="fn-muted fn-text-sm">実行時に統合元の参照を統合先へ付け替え、統合元は通常の選択対象から外れる無効状態にします。作品レコードは削除せず、作品投稿者・合作メンバー・チャプター・予約枠・審査案件の参照を更新します。</p>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <span className="fn-badge fn-badge-danger">統合元: 無効化（alias・監査・差し戻し用に内部保持）</span>
+        <span className="fn-badge fn-badge-accent">統合先: 継続利用</span>
+        <span className="fn-badge fn-badge-neutral">作品一覧: {visible.length}{truncated ? "+" : ""}件</span>
+      </div>
+      <p className="fn-muted fn-text-sm">表示は現在のDBから取得した確認用です。実行時に再取得し、競合や不整合があれば全体を中止します。</p>
       <ul aria-label="統合対象の件数">
         {countRows.map(item => <li key={item.key}>{item.label}: {item.count.toLocaleString()}件</li>)}
       </ul>
@@ -86,13 +92,16 @@ function MergeImpactPreview({ row }: { row: AdminXMergeRequestRow }): React.Reac
             item.moderation_rows > 0 ? "審査案件 " + item.moderation_rows : "",
           ].filter(Boolean);
           return <tr key={item.id}>
-            <td><OpsLink href={"/admin/videos/" + encodeURIComponent(item.id)}>{item.title || item.id}</OpsLink></td>
+            <td>
+              <OpsLink href={"/admin/videos/" + encodeURIComponent(item.id)}>{item.title || item.id}</OpsLink>
+              <div className="fn-muted" style={{ fontSize: 11 }}>{item.id}</div>
+            </td>
             <td>{changes.length ? changes.join(" / ") : "関連参照"}</td>
             <td>{item.visibility_status}</td><td>各対象欄のX IDを統合先へ変更</td>
           </tr>;
         })}</tbody>
-      </FnTable> : <p className="fn-muted fn-text-sm">作品への直接参照はありません。</p>}
-      {truncated ? <p role="status">作品一覧は先頭50件まで表示しています。</p> : null}
+      </FnTable> : <p className="fn-muted fn-text-sm">作品への直接参照はありません。認証ユーザー、スタッフ、予約枠、aliasなどの影響は件数で確認できます。</p>}
+      {truncated ? <p role="status">作品一覧は先頭50件まで表示しています。実行時は一覧外の対象も同じ原子処理で更新します。</p> : null}
     </div>
   </section>;
 }
@@ -102,13 +111,19 @@ function MergeRequestList({ data }: { data: AdminXIdMergesResponse }): React.Rea
     <FnTable><thead><tr><th>状態</th><th>統合元 → 統合先</th><th>影響範囲</th><th>更新</th><th>監査</th></tr></thead>
       <tbody>{data.requests.map(row => {
         const canPreview = !!row.source_x_user_id && (row.status === "pending" || row.status === "approved");
+        const changedImpact = row.impact.filter(item => item.count > 0);
         return <tr key={row.id}>
           <td><span className="fn-badge">{row.status}</span></td>
           <td><div>@{row.source_x_user_id ?? "?"} → @{row.target_x_user_id ?? "?"}</div>
             <span className="fn-muted fn-text-sm">{row.source_name ?? "?"} → {row.target_name ?? "?"}</span></td>
           <td>{canPreview && row.id !== data.selectedImpactId ?
             <OpsLink href={mergePath(row.id)} className="fn-btn fn-btn-ghost fn-btn-sm">影響範囲を確認</OpsLink> :
-            row.impact.length ? row.impact.reduce((sum, item) => sum + item.count, 0).toLocaleString() + " 行" :
+            row.impact.length ? <details>
+              <summary>{row.impact.reduce((sum, item) => sum + item.count, 0).toLocaleString()} 行 / {changedImpact.length ? changedImpact.map(item => `${item.label}: ${item.count}`).join(" / ") : "影響行はありません。"}</summary>
+              <ul style={{ margin: "6px 0 0", paddingLeft: 16, fontSize: 12 }}>
+                {row.impact.map(item => <li key={item.key}><code>{item.key}</code>: {item.count}</li>)}
+              </ul>
+            </details> :
             <span className="fn-muted fn-text-sm">完了・却下済み、または未計算</span>}
             {row.status === "done" && row.revert_deadline_at ? <div className="fn-muted fn-text-sm">差し戻し期限: {time(row.revert_deadline_at)}</div> : null}
           </td>

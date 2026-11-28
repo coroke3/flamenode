@@ -77,6 +77,9 @@ test("U02a: SSR tables show bounded impact preview but never expose restore JSON
   assert.match(html, /統合前の確認/);
   assert.match(html, /作品投稿者/);
   assert.match(html, /vid%2F1/);
+  assert.match(html, />vid\/1<\/div>/);
+  assert.match(html, /統合元: 無効化/);
+  assert.match(html, /統合先: 継続利用/);
   assert.match(html, /管理API移行完了後に有効化/);
   assert.doesNotMatch(html, /name="confirm"/);
   assert.doesNotMatch(html, /restore_snapshot_json/);
@@ -87,4 +90,35 @@ test("U02a: SSR tables show bounded impact preview but never expose restore JSON
   assert.match(back, /期限切れ/);
   assert.match(back, /復元情報あり/);
   assert.doesNotMatch(back, /restore_snapshot_json/);
+});
+
+test("U02a: selected impact preserves CURRENT table detail, zero counts, work IDs and 50-row truncation", () => {
+  const selected = {
+    ...merge,
+    impact: [
+      { key: "videos.creator_x_user_id", label: "作品投稿者", count: 2 },
+      { key: "event_staff.x_user_id", label: "イベントスタッフ", count: 0 },
+      { key: "slots.x_user_id", label: "予約枠", count: 3 },
+    ],
+    preview: Array.from({ length: 51 }, (_, i) => ({
+      ...merge.preview[0], id: "work-" + i, title: "Work title " + i,
+    })),
+  };
+  const render = (row) => renderToStaticMarkup(React.createElement(MemoryRouter, null,
+    React.createElement(AdminXIdMergesContent, { data: { ...requests, requests: [row] } })));
+  const html = render(selected);
+  assert.match(html, /<details><summary>5 行 \/ 作品投稿者: 2 \/ 予約枠: 3<\/summary>/);
+  assert.match(html, /<code>videos\.creator_x_user_id<\/code>: 2/);
+  assert.match(html, /<code>event_staff\.x_user_id<\/code>: 0/);
+  assert.match(html, /<code>slots\.x_user_id<\/code>: 3/);
+  assert.match(html, /作品一覧: 50\+件/);
+  assert.match(html, /<a[^>]+href="\/admin\/videos\/work-49"[^>]*>Work title 49<\/a>/);
+  assert.match(html, />work-49<\/div>/);
+  assert.doesNotMatch(html, /work-50|Work title 50/);
+  assert.match(html, /作品一覧は先頭50件まで表示しています/);
+  assert.doesNotMatch(html, /name="confirm"|restore_snapshot_json/);
+  const zero = render({ ...selected, impact: [{ key: "event_staff.x_user_id", label: "イベントスタッフ", count: 0 }], preview: [] });
+  assert.match(zero, /<summary>0 行 \/ 影響行はありません。<\/summary>/);
+  assert.match(zero, /<code>event_staff\.x_user_id<\/code>: 0/);
+  assert.match(zero, /作品への直接参照はありません/);
 });
