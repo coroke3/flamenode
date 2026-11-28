@@ -1138,7 +1138,7 @@ if (runUnderRootTsx(import.meta.url)) {
         anchor: "anchor",
         kind: "fallback",
         rows: [
-          { id: "before", rawStartTimeSql: "CAST(-9007199254740992 AS REAL)", sort_order: 0 },
+          { id: "before", rawStartTimeSql: "CAST(-1e100 AS REAL)", sort_order: 0 },
           { id: "anchor", start_time: 1000, sort_order: 1 },
           { id: "future", start_time: 1500, sort_order: 2 },
         ],
@@ -1149,8 +1149,8 @@ if (runUnderRootTsx(import.meta.url)) {
         kind: "fallback",
         rows: [
           { id: "before", start_time: 1000, sort_order: 0 },
-          { id: "anchor", rawStartTimeSql: "CAST(9007199254740992 AS REAL)", sort_order: 1 },
-          { id: "after", rawStartTimeSql: "CAST(9007199254740994 AS REAL)", sort_order: 2 },
+          { id: "anchor", rawStartTimeSql: "CAST(1e100 AS REAL)", sort_order: 1 },
+          { id: "after", rawStartTimeSql: "CAST(2e100 AS REAL)", sort_order: 2 },
         ],
       },
       {
