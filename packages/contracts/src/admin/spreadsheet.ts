@@ -46,8 +46,38 @@ export const AdminSpreadsheetTablesResponseSchema = z.object({
 
 export const AdminSpreadsheetErrorSchema = z.object({ error: z.string() });
 
+export const AdminSpreadsheetMutationResponseSchema = z.object({
+  ok: z.literal(true),
+  pendingPublicReflection: z.boolean(),
+});
+
+export const AdminSpreadsheetImportDryRunResponseSchema = z.object({
+  ok: z.literal(true),
+  dryRun: z.literal(true),
+  previewToken: z.string(),
+  applyMaxRows: z.number().int().positive(),
+  rowCount: z.number().int().nonnegative(),
+  mappedColumns: z.array(z.string()),
+  warnings: z.array(z.string()),
+  preview: z.array(z.record(z.string().nullable())),
+});
+
+export const AdminSpreadsheetImportApplyResponseSchema = z.object({
+  ok: z.literal(true),
+  inserted: z.number().int().nonnegative(),
+  updated: z.number().int().nonnegative(),
+  skipped: z.number().int().nonnegative(),
+  errors: z.array(z.object({ index: z.number().int().nonnegative(), message: z.string() })),
+  pendingPublicReflection: z.boolean().optional(),
+  mappedColumns: z.array(z.string()),
+  warnings: z.array(z.string()),
+});
+
 export type AdminSpreadsheetColumnMeta = z.infer<typeof AdminSpreadsheetColumnMetaSchema>;
 export type AdminSpreadsheetTableDef = z.infer<typeof AdminSpreadsheetTableDefSchema>;
 export type AdminSpreadsheetPageResponse = z.infer<typeof AdminSpreadsheetPageResponseSchema>;
 export type AdminSpreadsheetTablesResponse = z.infer<typeof AdminSpreadsheetTablesResponseSchema>;
 export type AdminSpreadsheetError = z.infer<typeof AdminSpreadsheetErrorSchema>;
+export type AdminSpreadsheetMutationResponse = z.infer<typeof AdminSpreadsheetMutationResponseSchema>;
+export type AdminSpreadsheetImportDryRunResponse = z.infer<typeof AdminSpreadsheetImportDryRunResponseSchema>;
+export type AdminSpreadsheetImportApplyResponse = z.infer<typeof AdminSpreadsheetImportApplyResponseSchema>;

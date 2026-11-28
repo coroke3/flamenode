@@ -23,6 +23,8 @@ import { operationModeBannerRoutes } from "./routes/operationModeBanner.ts";
 import { xidRoutes } from "./routes/xid/index.ts";
 
 import { createSpreadsheetReadRoutes } from "./routes/admin/spreadsheet/read.ts";
+import { createSpreadsheetWriteRoutes } from "./routes/admin/spreadsheet/write.ts";
+import { createSpreadsheetImportRoutes } from "./routes/admin/spreadsheet/import.ts";
 
 export const app = new Hono<AppEnv>();
 
@@ -39,8 +41,10 @@ app.route("/api/personal", personalRoutes);
 // MIG-0625: authenticated, admin-only, read-only Admin screens API (users / videos / events / moderation).
 app.route("/api/admin-read", adminReadRoutes);
 app.route("/api/manage", manageRoutes);
-// MIG-0605 U02 (RH-003/007/009 reads): BEFORE createAdminRoutes() so the disabled flag answers before any session read.
+// MIG-0605 U02 (RH-003/007/009 reads) & MIG-0638 (RH-004..006/008 writes): BEFORE createAdminRoutes() so the disabled flag answers before any session read.
 app.route("/api/admin/spreadsheet", createSpreadsheetReadRoutes());
+app.route("/api/admin/spreadsheet", createSpreadsheetWriteRoutes());
+app.route("/api/admin/spreadsheet", createSpreadsheetImportRoutes());
 app.route("/api/admin", createAdminRoutes());
 // Must stay after createAdminRoutes(): reuses its session + writeGuard middleware.
 app.route("/api/admin", adminEventRoutes);

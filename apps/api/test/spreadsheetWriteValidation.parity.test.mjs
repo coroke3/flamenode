@@ -1,0 +1,3538 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { resolveSpreadsheetTableDef } from "../src/routes/admin/spreadsheet/registry.ts";
+import { validateSpreadsheetInputValues, spreadsheetImportPrimaryKeyFingerprint } from "../src/routes/admin/spreadsheet/writeValidation.ts";
+
+// MIG-0638 U01b: characterization of CURRENT query.ts#validateSpreadsheetInputValues.
+// The validation helper has no SQL, network, authorization or production side effects.
+function context(table = "events", overrides = {}) {
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true },
+    { name: "review_settings", type: "TEXT", notNull: false },
+    { name: "icon_url", type: "TEXT", notNull: false },
+    { name: "event_type", type: "TEXT", notNull: false, enumValues: ["event", "collabo"] },
+    { name: "visibility_status", type: "TEXT", notNull: false },
+    { name: "count", type: "INTEGER", notNull: false },
+    { name: "rating", type: "DECIMAL", notNull: false },
+    { name: "access_token", type: "TEXT", notNull: false },
+    { name: "title", type: "TEXT", notNull: false },
+  ];
+  return {
+    def: resolveSpreadsheetTableDef(table, true),
+    columns,
+    columnNames: columns.map((c) => c.name),
+    ...overrides,
+  };
+}
+function fails(ctx, row, code) {
+  assert.throws(() => validateSpreadsheetInputValues(ctx, row), (error) => error instanceof Error && error.message === code);
+}
+
+test("accepts valid values and nullable fields without mutating input", () => {
+  const ctx = context();
+  const row = { title: "Hi", review_settings: '{"ok":true}', event_type: "event", icon_url: "https://example.com/", count: "-42", rating: "2.5" };
+  const before = structuredClone(row);
+  assert.equal(validateSpreadsheetInputValues(ctx, row), undefined);
+  assert.deepEqual(row, before);
+  assert.equal(validateSpreadsheetInputValues(ctx, { title: null }), undefined);
+  assert.equal(validateSpreadsheetInputValues(ctx, {}), undefined);
+});
+
+test("rejects unknown, secret, readonly table and visibility columns", () => {
+  const ctx = context();
+  fails(ctx, { bogus: "x" }, "unknown_column");
+  fails(ctx, { access_token: "secret" }, "column_not_editable");
+  fails(ctx, { visibility_status: "public" }, "column_not_editable");
+  fails(context("system_settings"), { title: "x" }, "column_not_editable");
+  const x = context("x_users", { columns: [{ name: "approval_status", type: "TEXT", notNull: false }], columnNames: ["approval_status"] });
+  fails(x, { approval_status: "approved" }, "column_not_editable");
+});
+
+test("retains CURRENT validation precedence for nullable and metadata constraints", () => {
+  const ctx = context();
+  fails(ctx, { id: null }, "not_null_violation");
+  fails(ctx, { event_type: "unknown" }, "invalid_enum");
+  fails(ctx, { review_settings: "not-json" }, "invalid_json_value");
+  assert.equal(validateSpreadsheetInputValues(ctx, { review_settings: "[1,2]" }), undefined);
+  fails(ctx, { icon_url: "ftp://example.com/" }, "invalid_url");
+  fails(ctx, { icon_url: "not a url" }, "invalid_url");
+  assert.equal(validateSpreadsheetInputValues(ctx, { icon_url: "http://example.com/" }), undefined);
+  fails(ctx, { icon_url: "x".repeat(2049) }, "value_too_long");
+  fails(ctx, { title: "x".repeat(100001) }, "value_too_long");
+});
+
+test("matches CURRENT INTEGER/DECIMAL string patterns", () => {
+  const ctx = context();
+  for (const bad of ["", "2.3", "+1", "0x10", " 10 ", "1e3"]) fails(ctx, { count: bad }, "invalid_integer");
+  for (const valid of ["0", "-1", "100"]) assert.equal(validateSpreadsheetInputValues(ctx, { count: valid }), undefined);
+  for (const bad of ["", ".5", "1.", "+1", "2e2", "NaN"]) fails(ctx, { rating: bad }, "invalid_number");
+  for (const valid of ["-0.5", "1", "0.0"]) assert.equal(validateSpreadsheetInputValues(ctx, { rating: valid }), undefined);
+});
+
+test("checks keys in insertion order, preserving CURRENT first-error semantics", () => {
+  const ctx = context();
+  fails(ctx, { bogus: "1", icon_url: "ftp://example.com" }, "unknown_column");
+  fails(ctx, { icon_url: "ftp://example.com", bogus: "1" }, "invalid_url");
+});
+
+
+test("CURRENT SQLite default resolution preserves numeric, escaped string, null and unsupported codes", async () => {
+  const { resolveSpreadsheetDefaultValue } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  assert.equal(resolveSpreadsheetDefaultValue({ defaultValue: null }), null);
+  assert.equal(resolveSpreadsheetDefaultValue({ defaultValue: " NULL " }), null);
+  assert.equal(resolveSpreadsheetDefaultValue({ defaultValue: "(-2.5)" }), -2.5);
+  assert.equal(resolveSpreadsheetDefaultValue({ defaultValue: "'it''s fine'" }), "it's fine");
+  assert.match(resolveSpreadsheetDefaultValue({ defaultValue: "CURRENT_TIMESTAMP" }), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+  assert.ok(Math.abs(resolveSpreadsheetDefaultValue({ defaultValue: "(unixepoch())" }) - Math.floor(Date.now()/1000)) <= 1);
+  assert.throws(() => resolveSpreadsheetDefaultValue({ defaultValue: "randomblob(16)" }), /unsupported_default/);
+});
+
+test("CURRENT INSERT normalization fills defaults, omits generated columns and rejects missing required columns", async () => {
+  const { prepareCompleteInsertRow } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const base = context("events");
+  const ctx = {
+    ...base,
+    columns: [
+      { name: "title", type: "TEXT", notNull: true },
+      { name: "count", type: "INTEGER", notNull: false, defaultValue: "42" },
+      { name: "comment", type: "TEXT", notNull: false },
+      { name: "generated_id", type: "TEXT", notNull: false, generated: true },
+    ],
+    columnNames: ["title", "count", "comment", "generated_id"],
+  };
+  const input = { title: "event" };
+  assert.deepEqual(prepareCompleteInsertRow(ctx, input), { title: "event", count: 42, comment: null });
+  assert.deepEqual(input, { title: "event" });
+  assert.deepEqual(prepareCompleteInsertRow(ctx, { title: "event", count: null }), { title: "event", count: null, comment: null });
+  // CURRENT validateSpreadsheetInputValues rejects empty INTEGER before INSERT can map it to NULL.
+  assert.throws(() => prepareCompleteInsertRow(ctx, { title: "event", count: "" }), /invalid_integer/);
+  fails(ctx, { title: null }, "not_null_violation");
+  assert.throws(() => prepareCompleteInsertRow(ctx, {}), /missing_required_column/);
+});
+
+
+test("CURRENT primary-key normalization enforces missing-key and nonblank contracts", async () => {
+  const { normalizeSpreadsheetPrimaryKey, primaryKeyFromSpreadsheetRow } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  assert.throws(() => normalizeSpreadsheetPrimaryKey([], {}), /missing_primary_key/);
+  assert.throws(() => normalizeSpreadsheetPrimaryKey(["id"], {}), /missing_primary_key/);
+  assert.throws(() => normalizeSpreadsheetPrimaryKey(["id"], { id: "  " }), /missing_primary_key/);
+  assert.throws(() => normalizeSpreadsheetPrimaryKey(["id", "locale"], { id: "a" }), /missing_primary_key/);
+  assert.deepEqual(normalizeSpreadsheetPrimaryKey(["id", "locale"], { locale: "ja", id: "a", extra: "ignored" }), { id: "a", locale: "ja" });
+  assert.deepEqual(normalizeSpreadsheetPrimaryKey(["id"], { id: " a " }), { id: " a " });
+  assert.deepEqual(primaryKeyFromSpreadsheetRow({ id: "1", locale: "ja" }, ["locale", "id"]), { locale: "ja", id: "1" });
+  assert.throws(() => primaryKeyFromSpreadsheetRow({ id: null }, ["id"]), /missing_primary_key/);
+  assert.throws(() => primaryKeyFromSpreadsheetRow({}, ["id"]), /missing_primary_key/);
+});
+
+
+test("CURRENT UPDATE chooses editable non-PK columns in schema order and builds after image", async () => {
+  const { prepareSpreadsheetUpdate } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const base = context("events");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+    { name: "count", type: "INTEGER", notNull: false, pk: 0 },
+    { name: "access_token", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = { ...base, columns, columnNames: columns.map((c) => c.name) };
+  const before = { id: "abc", title: "old", count: 10, access_token: "hidden" };
+  const values = { count: "2", title: "" };
+  const result = prepareSpreadsheetUpdate(ctx, before, values);
+  assert.deepEqual(result.setColumns, ["title", "count"]);
+  assert.deepEqual(result.after, { id: "abc", title: null, count: "2", access_token: "hidden" });
+  assert.equal(before.title, "old");
+  assert.deepEqual(values, { count: "2", title: "" });
+  assert.throws(() => prepareSpreadsheetUpdate(ctx, before, {}), /empty_row/);
+  assert.throws(() => prepareSpreadsheetUpdate(ctx, before, { id: "new" }), /empty_row/);
+  assert.throws(() => prepareSpreadsheetUpdate(ctx, before, { access_token: "x" }), /column_not_editable/);
+  assert.throws(() => prepareSpreadsheetUpdate(ctx, before, { invalid: "x" }), /unknown_column/);
+});
+
+
+test("unmounted SQL planners bind every value and enforce optimistic snapshots", async () => {
+  const { buildSpreadsheetInsertSql, buildSpreadsheetUpdateSql, buildSpreadsheetDeleteSql } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+    { name: "count", type: "INTEGER", notNull: false, pk: 0 },
+  ];
+  const ctx = { def: resolveSpreadsheetTableDef("slots", true), primaryKeys: ["id"], columns, columnNames: columns.map(x => x.name) };
+  const before = { id: "row-1", title: "previous", count: 3 };
+  const hostile = "'); DROP TABLE slots; --";
+  const ins = buildSpreadsheetInsertSql(ctx, { id: "row-2", title: hostile, count: "5" });
+  assert.match(ins.statement, /^INSERT INTO "slots" \("id", "title", "count"\) VALUES \(\?, \?, \?\)$/);
+  assert.deepEqual(ins.binds, ["row-2", hostile, "5"]);
+  assert.ok(!ins.statement.includes(hostile));
+  const update = buildSpreadsheetUpdateSql(ctx, { id: "row-1" }, before, { title: hostile });
+  assert.match(update.statement, /^UPDATE "slots" SET "title" = \? WHERE "id" = \? AND "id" IS \? AND "title" IS \? AND "count" IS \?$/);
+  assert.deepEqual(update.binds, [hostile, "row-1", "row-1", "previous", 3]);
+  assert.deepEqual(update.after, { id: "row-1", title: hostile, count: 3 });
+  const deletion = buildSpreadsheetDeleteSql(ctx, { id: "row-1" }, before);
+  assert.match(deletion.statement, /^DELETE FROM "slots" WHERE "id" = \? AND "id" IS \? AND "title" IS \? AND "count" IS \?$/);
+  assert.deepEqual(deletion.binds, ["row-1", "row-1", "previous", 3]);
+  assert.deepEqual(before, { id: "row-1", title: "previous", count: 3 });
+  assert.throws(() => buildSpreadsheetInsertSql(ctx, { title: "missing-id" }), /missing_required_column/);
+  assert.throws(() => buildSpreadsheetUpdateSql(ctx, {}, before, { title: "changed" }), /missing_primary_key/);
+  assert.throws(() => buildSpreadsheetDeleteSql({ ...ctx, def: resolveSpreadsheetTableDef("videos", true) }, {id:"row-1"}, before), /physical_delete_requires_visibility_status/);
+  assert.throws(() => buildSpreadsheetDeleteSql({ ...ctx, def: resolveSpreadsheetTableDef("system_settings", true) }, {id:"row-1"}, before), /table_readonly/);
+  assert.throws(() => buildSpreadsheetUpdateSql(ctx, { id: "row-1" }, { ...before, count: { unexpected: true } }, {title:"changed"}), /invalid_snapshot/);
+});
+
+
+test("unmounted SQL CAS plan preserves composite key order and nullable snapshot columns", async () => {
+  const { buildSpreadsheetUpdateSql, buildSpreadsheetDeleteSql } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "video_id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "event_id", type: "TEXT", notNull: true, pk: 2 },
+    { name: "notes", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("video_events", true),
+    primaryKeys: ["video_id", "event_id"],
+    columns,
+    columnNames: columns.map(column => column.name),
+  };
+  const before = { video_id: "v1", event_id: "e1", notes: null };
+  const pk = { event_id: "e1", video_id: "v1" };
+  const updated = buildSpreadsheetUpdateSql(ctx, pk, before, { notes: "new" });
+  assert.equal(
+    updated.statement,
+    'UPDATE "video_events" SET "notes" = ? WHERE "video_id" = ? AND "event_id" = ? AND "video_id" IS ? AND "event_id" IS ? AND "notes" IS ?',
+  );
+  assert.deepEqual(updated.binds, ["new", "v1", "e1", "v1", "e1", null]);
+  assert.deepEqual(updated.after, { video_id: "v1", event_id: "e1", notes: "new" });
+  const deleted = buildSpreadsheetDeleteSql(ctx, pk, before);
+  assert.deepEqual(deleted.binds, ["v1", "e1", "v1", "e1", null]);
+  assert.equal(deleted.statement.includes('"notes" IS ?'), true);
+  assert.deepEqual(before, { video_id: "v1", event_id: "e1", notes: null });
+  assert.throws(
+    () => buildSpreadsheetDeleteSql(ctx, { event_id: "e1" }, before),
+    /missing_primary_key/,
+  );
+});
+
+
+test("unmounted FK lookup plans preserve CURRENT dedup, 99-value chunks and bound values", async () => {
+  const { buildSpreadsheetForeignKeyLookups, assertSpreadsheetForeignKeyLookup } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const fk = [{ column: "event_id", referencedTable: "events", referencedColumn: "id" }];
+  const hostile = "x'); DELETE FROM events; --";
+  const rows = [{ event_id: null }, { event_id: "" }, { event_id: hostile }, { event_id: hostile },
+    ...Array.from({ length: 100 }, (_, i) => ({ event_id: "event-" + i }))];
+  const plans = buildSpreadsheetForeignKeyLookups(fk, rows);
+  assert.equal(plans.length, 2);
+  assert.equal(plans[0].binds.length, 99);
+  assert.equal(plans[1].binds.length, 2);
+  assert.equal(plans[0].binds[0], hostile);
+  assert.equal(plans[0].statement.includes(hostile), false);
+  assert.equal(plans[0].statement, 'SELECT "id" AS value FROM "events" WHERE "id" IN (' + Array(99).fill("?").join(", ") + ') LIMIT 100');
+  assert.doesNotThrow(() => assertSpreadsheetForeignKeyLookup(plans[1], plans[1].values.map(value => ({ value }))));
+  assert.throws(() => assertSpreadsheetForeignKeyLookup(plans[0], [{ value: hostile }]), /foreign_key_violation/);
+  assert.deepEqual(buildSpreadsheetForeignKeyLookups(fk, [{ event_id: null }, {event_id:""}]), []);
+  assert.deepEqual(buildSpreadsheetForeignKeyLookups([], [{ event_id:"a" }]), []);
+  assert.throws(
+    () => buildSpreadsheetForeignKeyLookups([{ column:"event_id", referencedTable:"events; DROP TABLE videos", referencedColumn:"id" }], [{event_id:"a"}]),
+    /unknown_column/,
+  );
+});
+
+
+test("D1 FK preflight checks every bound chunk and fails closed on missing references", async () => {
+  const { validateSpreadsheetForeignKeys } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const fk = [{ column: "event_id", referencedTable: "events", referencedColumn: "id" }];
+  const sqls = [];
+  const seen = [];
+  const db = {
+    prepare(sql) {
+      sqls.push(sql);
+      return {
+        bind(...values) {
+          seen.push(values);
+          return { async all() { return { results: values.map(value => ({ value })) }; } };
+        },
+      };
+    },
+  };
+  const rows = Array.from({ length: 101 }, (_, i) => ({ event_id: "event-" + i }));
+  await assert.doesNotReject(() => validateSpreadsheetForeignKeys(db, fk, rows, 3));
+  assert.equal(sqls.length, 2);
+  assert.deepEqual(seen.map(a => a.length), [99, 2]);
+  const missingDb = {
+    prepare() {
+      return { bind() { return { async all() { return { results: [] }; } }; } };
+    },
+  };
+  await assert.rejects(() => validateSpreadsheetForeignKeys(missingDb, fk, [{ event_id: "missing" }], 3), /foreign_key_violation/);
+  const failingDb = {
+    prepare() {
+      return { bind() { return { async all() { throw new Error("db_unavailable"); } }; } };
+    },
+  };
+  await assert.rejects(() => validateSpreadsheetForeignKeys(failingDb, fk, [{ event_id: "x" }], 3), /db_unavailable/);
+  await assert.doesNotReject(() => validateSpreadsheetForeignKeys(failingDb, fk, [{ event_id: null }], 3));
+});
+
+
+test("FK preflight fails closed above S3's three-query ceiling before opening D1", async () => {
+  const { buildSpreadsheetForeignKeyLookups, validateSpreadsheetForeignKeys, SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const fk = [{ column: "event_id", referencedTable: "events", referencedColumn: "id" }];
+  const rows = n => Array.from({ length: n }, (_, i) => ({ event_id: "event-" + i }));
+  assert.equal(SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES, 3);
+  assert.equal(buildSpreadsheetForeignKeyLookups(fk, rows(297)).length, 3);
+  assert.throws(() => buildSpreadsheetForeignKeyLookups(fk, rows(298)), /batch_too_large/);
+  let prepared = 0;
+  const db = { prepare() { prepared++; throw Error("should not reach D1"); } };
+  await assert.rejects(() => validateSpreadsheetForeignKeys(db, fk, rows(298), 3), /batch_too_large/);
+  assert.equal(prepared, 0);
+  assert.throws(() => buildSpreadsheetForeignKeyLookups([...fk, ...fk, ...fk, ...fk],
+    [{ event_id: "event-0" }]), /batch_too_large/);
+});
+
+
+test("optimistic CAS rejects incomplete or undefined before-images rather than substituting NULL", async () => {
+  const { buildSpreadsheetUpdateSql, buildSpreadsheetDeleteSql } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    primaryKeys: ["id"],
+    columns,
+    columnNames: ["id", "title"],
+  };
+  for (const before of [
+    { id: "slot-1" },
+    { id: "slot-1", title: undefined },
+    { id: "slot-1", title: false },
+  ]) {
+    assert.throws(() => buildSpreadsheetUpdateSql(ctx, { id: "slot-1" }, before, { title: "new" }), /invalid_snapshot/);
+    assert.throws(() => buildSpreadsheetDeleteSql(ctx, { id: "slot-1" }, before), /invalid_snapshot/);
+  }
+  assert.deepEqual(
+    buildSpreadsheetDeleteSql(ctx, { id: "slot-1" }, { id: "slot-1", title: null }).binds,
+    ["slot-1", "slot-1", null],
+  );
+});
+
+
+test("FK preflight requires request-wide remaining S3 read budget before touching D1", async () => {
+  const { buildSpreadsheetForeignKeyLookups, validateSpreadsheetForeignKeys } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const fk = [{ column: "event_id", referencedTable: "events", referencedColumn: "id" }];
+  const rows = n => Array.from({ length: n }, (_, i) => ({ event_id: "e-" + i }));
+  assert.equal(buildSpreadsheetForeignKeyLookups(fk, rows(99), 1).length, 1);
+  assert.throws(() => buildSpreadsheetForeignKeyLookups(fk, rows(100), 1), /batch_too_large/);
+  assert.throws(() => buildSpreadsheetForeignKeyLookups(fk, rows(1), 0), /batch_too_large/);
+  for (const budget of [-1, 4, NaN, 1.5, undefined]) {
+    if (budget === undefined) continue; // planner supports explicit no-budget legacy characterization; execution does not.
+    assert.throws(() => buildSpreadsheetForeignKeyLookups(fk, rows(1), budget), /batch_too_large/);
+  }
+  let called = 0;
+  const db = { prepare() { called++; throw Error("unexpected D1"); } };
+  await assert.rejects(() => validateSpreadsheetForeignKeys(db, fk, rows(1), 0), /batch_too_large/);
+  await assert.rejects(() => validateSpreadsheetForeignKeys(db, fk, rows(100), 1), /batch_too_large/);
+  await assert.rejects(() => validateSpreadsheetForeignKeys(db, fk, rows(1), undefined), /batch_too_large/);
+  assert.equal(called, 0);
+  await assert.doesNotReject(() => validateSpreadsheetForeignKeys(db, fk, [{ event_id: null }], 0));
+});
+
+
+test("CURRENT UPDATE/DELETE snapshot pre-read binds PK, requires one S3 read and complete row", async () => {
+  const { fetchSpreadsheetRawSnapshot } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    primaryKeys: ["id"],
+    columns,
+    columnNames: ["id", "title"],
+  };
+  const statements = [], binds = [];
+  let returned = { id: "s-1", title: null };
+  const db = {
+    prepare(sql) {
+      statements.push(sql);
+      return { bind(...values) {
+        binds.push(values);
+        return { async all() { return { results: returned == null ? [] : [returned] }; } };
+      } };
+    },
+  };
+  const got = await fetchSpreadsheetRawSnapshot(db, ctx, { id: "s-1" }, 1);
+  assert.deepEqual(got, { id: "s-1", title: null });
+  assert.deepEqual(statements, ['SELECT * FROM "slots" WHERE "id" = ? LIMIT 2']);
+  assert.deepEqual(binds, [["s-1"]]);
+  for (const budget of [0, -1, 4, 0.5, undefined]) {
+    await assert.rejects(() => fetchSpreadsheetRawSnapshot(db, ctx, { id: "s-1" }, budget), /batch_too_large/);
+  }
+  assert.equal(statements.length, 1);
+  await assert.rejects(() => fetchSpreadsheetRawSnapshot(db, ctx, {}, 1), /missing_primary_key/);
+  returned = null;
+  await assert.rejects(() => fetchSpreadsheetRawSnapshot(db, ctx, { id: "s-1" }, 1), /row_not_found/);
+  returned = { id: "s-1" };
+  await assert.rejects(() => fetchSpreadsheetRawSnapshot(db, ctx, { id: "s-1" }, 1), /invalid_snapshot/);
+  returned = { id: "s-1", title: undefined };
+  await assert.rejects(() => fetchSpreadsheetRawSnapshot(db, ctx, { id: "s-1" }, 1), /invalid_snapshot/);
+});
+
+
+test("unmounted INSERT and UPDATE SQL planners reject readonly tables before planning mutations", async () => {
+  const { buildSpreadsheetInsertSql, buildSpreadsheetUpdateSql } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("system_settings", true),
+    primaryKeys: ["id"],
+    columnNames: ["id", "title"],
+    columns,
+  };
+  assert.equal(ctx.def.mode, "readonly");
+  assert.throws(
+    () => buildSpreadsheetInsertSql(ctx, { id: "x", title: "new" }),
+    error => error?.message === "table_readonly",
+  );
+  assert.throws(
+    () => buildSpreadsheetUpdateSql(ctx, { id: "x" }, { id: "x", title: "old" }, { title: "new" }),
+    error => error?.message === "table_readonly",
+  );
+  // Empty input must not bypass the table-level guard.
+  assert.throws(() => buildSpreadsheetInsertSql(ctx, {}), /table_readonly/);
+  assert.throws(
+    () => buildSpreadsheetUpdateSql(ctx, { id: "x" }, { id: "x", title: "old" }, {}),
+    /table_readonly/,
+  );
+});
+
+
+test("SQLite executes bound INSERT/UPDATE/DELETE with optimistic CAS and does not execute user SQL", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const { buildSpreadsheetInsertSql, buildSpreadsheetUpdateSql, buildSpreadsheetDeleteSql } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const db = new DatabaseSync(":memory:");
+  try {
+    db.exec("CREATE TABLE slots (id TEXT PRIMARY KEY NOT NULL, title TEXT, count INTEGER)");
+    const columns = [
+      { name: "id", type: "TEXT", notNull: true, pk: 1 },
+      { name: "title", type: "TEXT", notNull: false, pk: 0 },
+      { name: "count", type: "INTEGER", notNull: false, pk: 0 },
+    ];
+    const ctx = {
+      def: resolveSpreadsheetTableDef("slots", true),
+      primaryKeys: ["id"],
+      columns,
+      columnNames: columns.map(c => c.name),
+    };
+    const hostile = "'); DROP TABLE slots; --";
+    const inserted = buildSpreadsheetInsertSql(ctx, { id: "slot-1", title: hostile, count: "3" });
+    assert.equal(db.prepare(inserted.statement).run(...inserted.binds).changes, 1);
+    let before = db.prepare('SELECT * FROM slots WHERE id = ?').get("slot-1");
+    assert.equal(before.title, hostile);
+    assert.equal(before.count, 3);
+    const update = buildSpreadsheetUpdateSql(ctx, { id: "slot-1" }, before, { title: "" });
+    assert.equal(db.prepare(update.statement).run(...update.binds).changes, 1);
+    assert.equal(db.prepare('SELECT title FROM slots WHERE id = ?').get("slot-1").title, null);
+    // Simulate a concurrent writer between SELECT and UPDATE: optimistic CAS must reject it.
+    db.prepare('UPDATE slots SET count = ? WHERE id = ?').run(4, "slot-1");
+    const stale = buildSpreadsheetUpdateSql(ctx, { id: "slot-1" }, before, { title: "stale-write" });
+    assert.equal(db.prepare(stale.statement).run(...stale.binds).changes, 0);
+    assert.equal(db.prepare('SELECT count FROM slots WHERE id = ?').get("slot-1").count, 4);
+    before = db.prepare('SELECT * FROM slots WHERE id = ?').get("slot-1");
+    const removed = buildSpreadsheetDeleteSql(ctx, { id: "slot-1" }, before);
+    assert.equal(db.prepare(removed.statement).run(...removed.binds).changes, 1);
+    assert.equal(db.prepare('SELECT COUNT(*) AS total FROM slots').get().total, 0);
+  } finally {
+    db.close();
+  }
+});
+
+
+test("unmounted audited SQL plans preserve CURRENT audit envelopes for CREATE UPDATE DELETE", async () => {
+  const { buildSpreadsheetAuditedInsert, buildSpreadsheetAuditedUpdate, buildSpreadsheetAuditedDelete, spreadsheetRecordIdFromPk } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = { def: resolveSpreadsheetTableDef("slots", true), columns, columnNames: ["id", "title"], primaryKeys: ["id"] };
+  const expected = { table_name: "slots", target_id: "slot-1", actor_user_id: "operator-1", retention_class: "long_audit", strict: true, context: "admin_spreadsheet" };
+  const inserted = buildSpreadsheetAuditedInsert(ctx, { id: "slot-1", title: "hello" }, "operator-1");
+  assert.deepEqual(inserted.audit, { ...expected, operation: "CREATE", before: null, after: { id: "slot-1", title: "hello" } });
+  assert.match(inserted.statement, /^INSERT INTO /);
+  const before = { id: "slot-1", title: "hello" };
+  const updated = buildSpreadsheetAuditedUpdate(ctx, { id: "slot-1" }, before, { title: "" }, "operator-1");
+  assert.deepEqual(updated.audit, { ...expected, operation: "UPDATE", before, after: { id: "slot-1", title: null } });
+  assert.match(updated.statement, /^UPDATE /);
+  assert.deepEqual(before, { id: "slot-1", title: "hello" });
+  const deleted = buildSpreadsheetAuditedDelete(ctx, { id: "slot-1" }, before, "operator-1");
+  assert.deepEqual(deleted.audit, { ...expected, operation: "DELETE", before, after: null });
+  assert.match(deleted.statement, /^DELETE /);
+  assert.equal(spreadsheetRecordIdFromPk({ video_id: "v1", event_id: "e1" }), "e1:v1");
+  assert.throws(() => buildSpreadsheetAuditedInsert(ctx, { id: "slot-1" }, "  "), /missing_operator/);
+});
+
+
+test("UPDATE/DELETE audited CAS planners reject mismatched snapshot primary keys", async () => {
+  const { buildSpreadsheetAuditedUpdate, buildSpreadsheetAuditedDelete } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "video_id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "event_id", type: "TEXT", notNull: true, pk: 2 },
+    { name: "notes", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("video_events", true),
+    columns,
+    columnNames: columns.map(c => c.name),
+    primaryKeys: ["video_id", "event_id"],
+  };
+  const requested = { video_id: "v1", event_id: "e1" };
+  const before = { video_id: "v1", event_id: "e1", notes: null };
+  assert.equal(buildSpreadsheetAuditedUpdate(ctx, requested, before, { notes: "new" }, "actor").audit.target_id, "e1:v1");
+  assert.equal(buildSpreadsheetAuditedDelete(ctx, requested, before, "actor").audit.target_id, "e1:v1");
+  for (const wrong of [
+    { ...before, video_id: "v2" },
+    { ...before, event_id: "e2" },
+    { ...before, event_id: null },
+    { video_id: "v1", notes: null },
+  ]) {
+    assert.throws(() => buildSpreadsheetAuditedUpdate(ctx, requested, wrong, { notes: "new" }, "actor"), /invalid_snapshot/);
+    assert.throws(() => buildSpreadsheetAuditedDelete(ctx, requested, wrong, "actor"), /invalid_snapshot/);
+  }
+});
+
+
+test("FK planner stops scanning on first over-budget distinct input without DB access", async () => {
+  const { buildSpreadsheetForeignKeyLookups, validateSpreadsheetForeignKeys } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const fk = [{ column: "event_id", referencedTable: "events", referencedColumn: "id" }];
+  let reads = 0;
+  const rows = [{ event_id: null }, ...Array.from({ length: 99 }, (_, i) => ({ event_id: "e-" + i }))];
+  const poison = new Proxy({}, { get() { reads++; throw new Error("scanned_past_budget"); } });
+  rows.push({ event_id: "over-budget" }, poison);
+  assert.throws(() => buildSpreadsheetForeignKeyLookups(fk, rows, 1), /batch_too_large/);
+  assert.equal(reads, 0);
+  let prepared = 0;
+  const db = { prepare() { prepared++; throw new Error("unexpected_d1"); } };
+  await assert.rejects(() => validateSpreadsheetForeignKeys(db, fk, rows, 1), /batch_too_large/);
+  assert.equal(prepared, 0);
+  const duplicateRows = Array.from({ length: 1000 }, () => ({ event_id: "same" }));
+  assert.deepEqual(buildSpreadsheetForeignKeyLookups(fk, duplicateRows, 1)[0].binds, ["same"]);
+  assert.deepEqual(buildSpreadsheetForeignKeyLookups(fk, [{ event_id: null }], 0), []);
+});
+
+
+test("FK preflight executes bound SELECT on SQLite, accepting existing and rejecting missing references", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const { validateSpreadsheetForeignKeys } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const sqlite = new DatabaseSync(":memory:");
+  try {
+    sqlite.exec('CREATE TABLE events (id TEXT PRIMARY KEY NOT NULL)');
+    sqlite.prepare('INSERT INTO events (id) VALUES (?)').run("e-1");
+    sqlite.prepare('INSERT INTO events (id) VALUES (?)').run("e-2");
+    const db = {
+      prepare(sql) {
+        return {
+          bind(...values) {
+            return { async all() { return { results: sqlite.prepare(sql).all(...values) }; } };
+          },
+        };
+      },
+    };
+    const foreignKeys = [{ column: "event_id", referencedTable: "events", referencedColumn: "id" }];
+    await assert.doesNotReject(() =>
+      validateSpreadsheetForeignKeys(db, foreignKeys, [{ event_id: "e-1" }, { event_id: "e-2" }, { event_id: "e-1" }], 1));
+    await assert.rejects(() =>
+      validateSpreadsheetForeignKeys(db, foreignKeys, [{ event_id: "e-1" }, { event_id: "missing" }], 1),
+      /foreign_key_violation/);
+    assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM events').get().n, 2);
+  } finally {
+    sqlite.close();
+  }
+});
+
+
+test("CURRENT import preflight preserves row indices, duplicate PK errors and apply batch cap", async () => {
+  const { prepareSpreadsheetImportMutationRows, SPREADSHEET_IMPORT_APPLY_MAX_ROWS, SPREADSHEET_IMPORT_PREVIEW_MAX_ROWS } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "video_id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "event_id", type: "TEXT", notNull: true, pk: 2 },
+    { name: "notes", type: "TEXT", notNull: false, pk: 0 },
+    { name: "access_token", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("video_events", true),
+    columns,
+    columnNames: columns.map(c => c.name),
+    primaryKeys: ["video_id", "event_id"],
+  };
+  assert.equal(SPREADSHEET_IMPORT_APPLY_MAX_ROWS, 7);
+  assert.equal(SPREADSHEET_IMPORT_PREVIEW_MAX_ROWS, 500);
+  const rows = [
+    { video_id: "v1", event_id: "e1", notes: "a" },
+    { video_id: "v1", event_id: "e1", notes: "duplicate" },
+    { video_id: "v1", event_id: "e2", notes: null },
+    { video_id: "v1", notes: "missing pk" },
+    { video_id: "v2", event_id: "e1", access_token: "secret" },
+    { video_id: "v3", event_id: "e1", invalid: "unknown" },
+    { video_id: "v4", event_id: "e1", notes: "valid" },
+  ];
+  const result = prepareSpreadsheetImportMutationRows(ctx, rows);
+  assert.deepEqual(result.errors, [
+    { index: 1, message: "duplicate_primary_key" },
+    { index: 3, message: "missing_primary_key" },
+    { index: 4, message: "column_not_editable" },
+    { index: 5, message: "unknown_column" },
+  ]);
+  assert.deepEqual(result.preparedRows.map(r => r.pk), [
+    { video_id: "v1", event_id: "e1" },
+    { video_id: "v1", event_id: "e2" },
+    { video_id: "v4", event_id: "e1" },
+  ]);
+  assert.equal(result.preparedRows[0].fingerprint, JSON.stringify([["event_id", "e1"], ["video_id", "v1"]]));
+  assert.throws(() => prepareSpreadsheetImportMutationRows(ctx, []), /batch_too_large/);
+  assert.throws(() => prepareSpreadsheetImportMutationRows(ctx, Array.from({length: 8}, (_,i) => ({video_id: "v"+i, event_id:"e"}))), /batch_too_large/);
+  assert.throws(() => prepareSpreadsheetImportMutationRows(ctx, Array.from({length: 501}, (_,i) => ({video_id:"v"+i,event_id:"e"}))), /too_many_rows/);
+  assert.throws(() => prepareSpreadsheetImportMutationRows({ ...ctx, def: resolveSpreadsheetTableDef("system_settings", true) }, rows), /table_readonly/);
+});
+
+
+test("CURRENT import upsert planner counts INSERT UPDATE and skip without D1 effects", async () => {
+  const { prepareSpreadsheetImportMutationRows, planSpreadsheetImportMutations } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "video_id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "event_id", type: "TEXT", notNull: true, pk: 2 },
+    { name: "notes", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("video_events", true),
+    columns,
+    columnNames: columns.map(c => c.name),
+    primaryKeys: ["video_id", "event_id"],
+  };
+  const rows = [
+    { video_id: "v1", event_id: "e1", notes: "new" },
+    { video_id: "v2", event_id: "e1" },
+    { video_id: "v3", event_id: "e1", notes: "inserted" },
+  ];
+  const prepared = prepareSpreadsheetImportMutationRows(ctx, rows);
+  assert.deepEqual(prepared.errors, []);
+  const existing = new Map([
+    [prepared.preparedRows[0].fingerprint, { video_id: "v1", event_id: "e1", notes: "old" }],
+    [prepared.preparedRows[1].fingerprint, { video_id: "v2", event_id: "e1", notes: "unchanged" }],
+  ]);
+  const planned = planSpreadsheetImportMutations(ctx, prepared, "upsert", existing, "actor-1");
+  assert.deepEqual({ inserted: planned.inserted, updated: planned.updated, skipped: planned.skipped }, { inserted: 1, updated: 1, skipped: 1 });
+  assert.deepEqual(planned.mutations.map(x => x.audit.operation), ["UPDATE", "CREATE"]);
+  assert.deepEqual(planned.mutations[0].audit.after, { video_id: "v1", event_id: "e1", notes: "new" });
+  assert.deepEqual(planned.mutations[1].audit.after, { video_id: "v3", event_id: "e1", notes: "inserted" });
+  assert.equal(planSpreadsheetImportMutations(ctx, prepared, "insert", null, "actor-1").inserted, 3);
+  assert.throws(() => planSpreadsheetImportMutations(ctx, prepared, "upsert", null, "actor-1"), /invalid_snapshot/);
+  assert.throws(() => planSpreadsheetImportMutations(ctx, prepared, "upsert", existing, ""), /missing_operator/);
+  assert.throws(() => planSpreadsheetImportMutations(ctx, { ...prepared, errors: [{ index: 1, message: "duplicate_primary_key" }] }, "insert", null, "actor-1"), /invalid_row/);
+  assert.deepEqual(rows[0], { video_id: "v1", event_id: "e1", notes: "new" });
+});
+
+
+test("U02 preview token binds operator, table, schema and payload and rejects expiry or tampering", async () => {
+  const { buildSpreadsheetImportPreviewBinding, issueSpreadsheetImportPreviewToken, verifySpreadsheetImportPreviewToken,
+    requireSpreadsheetImportPreviewSecret, SPREADSHEET_IMPORT_PREVIEW_TTL_SECONDS } =
+    await import("../src/routes/admin/spreadsheet/importPreviewToken.ts");
+  const secret = "this-is-a-valid-test-preview-secret-of-40-chars";
+  const input = {
+    operatorUserId: "operator-1",
+    table: "video_events",
+    mode: "upsert",
+    columns: ["video_id", "event_id", "notes"],
+    primaryKeys: ["video_id", "event_id"],
+    schemaColumns: [
+      { name: "video_id", type: "TEXT", notNull: true, pk: 1 },
+      { name: "event_id", type: "TEXT", notNull: true, pk: 2 },
+      { name: "notes", type: "TEXT", notNull: false, pk: 0 },
+    ],
+    rows: [{ video_id: "v-1", event_id: "e-1", notes: "old" }],
+  };
+  const binding = await buildSpreadsheetImportPreviewBinding(input);
+  const { token, claims } = await issueSpreadsheetImportPreviewToken(binding, secret, {
+    now: 1800000000, nonce: "12345678-1234-4234-8234-123456789abc",
+  });
+  assert.equal(claims.expiresAt - claims.issuedAt, SPREADSHEET_IMPORT_PREVIEW_TTL_SECONDS);
+  assert.equal((await verifySpreadsheetImportPreviewToken(token, secret, binding, { now: 1800000001 }))?.nonce, claims.nonce);
+  assert.equal(await verifySpreadsheetImportPreviewToken(token, secret, { ...binding, operatorUserId: "operator-2" }, { now: 1800000001 }), null);
+  assert.equal(await verifySpreadsheetImportPreviewToken(token, secret, { ...binding, mode: "insert" }, { now: 1800000001 }), null);
+  const alteredPayload = await buildSpreadsheetImportPreviewBinding({ ...input, rows: [{ ...input.rows[0], notes: "altered" }] });
+  assert.equal(await verifySpreadsheetImportPreviewToken(token, secret, alteredPayload, { now: 1800000001 }), null);
+  assert.equal(await verifySpreadsheetImportPreviewToken(token, secret, binding, { now: claims.expiresAt }), null);
+  const parts = token.split(".");
+  parts[3] = (parts[3][0] === "A" ? "B" : "A") + parts[3].slice(1);
+  const corrupted = parts.join(".");
+  assert.equal(await verifySpreadsheetImportPreviewToken(corrupted, secret, binding, { now: 1800000001 }), null);
+  assert.throws(() => requireSpreadsheetImportPreviewSecret("short"), /preview_unavailable/);
+  await assert.rejects(() => issueSpreadsheetImportPreviewToken(binding, secret, { now: 1800000000, nonce: "invalid" }), /preview_unavailable/);
+});
+
+
+test("U02 nonce SQL enforces one-time, exact preview claims and expiry on real SQLite", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const { buildSpreadsheetPreviewNonceConsumeSql } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const claims = {
+    version: 1,
+    nonce: "12345678-1234-4234-8234-123456789abc",
+    operatorUserId: "user-1", table: "video_events", mode: "insert",
+    columns: ["video_id"], primaryKeys: ["video_id"],
+    payloadHash: "a".repeat(64), schemaFingerprint: "b".repeat(64),
+    issuedAt: 1000, expiresAt: 1300,
+  };
+  const db = new DatabaseSync(":memory:");
+  try {
+    db.exec('CREATE TABLE spreadsheet_import_runs (nonce TEXT PRIMARY KEY, operator_user_id TEXT NOT NULL, table_name TEXT NOT NULL, mode TEXT NOT NULL, payload_hash TEXT NOT NULL, schema_fingerprint TEXT NOT NULL, expires_at INTEGER NOT NULL, consumed_at INTEGER, created_at INTEGER NOT NULL)');
+    db.prepare('INSERT INTO spreadsheet_import_runs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+      claims.nonce, claims.operatorUserId, claims.table, claims.mode, claims.payloadHash,
+      claims.schemaFingerprint, claims.expiresAt, null, claims.issuedAt);
+    const wrong = buildSpreadsheetPreviewNonceConsumeSql({ ...claims, payloadHash: "c".repeat(64) }, 1100);
+    assert.equal(db.prepare(wrong.statement).run(...wrong.binds).changes, 0);
+    const expired = buildSpreadsheetPreviewNonceConsumeSql(claims, 1301);
+    assert.equal(db.prepare(expired.statement).run(...expired.binds).changes, 0);
+    const plan = buildSpreadsheetPreviewNonceConsumeSql(claims, 1100);
+    assert.equal(plan.audit.operation, "UPDATE");
+    assert.equal(plan.audit.before.consumed_at, null);
+    assert.equal(plan.audit.after.consumed_at, 1100);
+    assert.equal(db.prepare(plan.statement).run(...plan.binds).changes, 1);
+    assert.equal(db.prepare(plan.statement).run(...plan.binds).changes, 0);
+    assert.equal(db.prepare('SELECT consumed_at FROM spreadsheet_import_runs').get().consumed_at, 1100);
+    assert.throws(() => buildSpreadsheetPreviewNonceConsumeSql(claims, 999), /preview_required/);
+  } finally {
+    db.close();
+  }
+});
+
+
+test("U02 CURRENT CSV/TSV import parses quoted cells, headers, unknown columns and NULL values", async () => {
+  const { prepareSpreadsheetImportRows, assertSpreadsheetImportColumns } =
+    await import("../src/routes/admin/spreadsheet/importPrepCore.ts");
+  const columnNames = ["video_id", "event_id", "notes"];
+  const csv = 'VIDEO_ID,event_id,notes\nv1,e1,"hello, ""world"""\nv2,e2,NULL\n';
+  const parsed = prepareSpreadsheetImportRows({ text: csv, columnNames, hasHeader: true, delimiter: "auto" });
+  assert.deepEqual(parsed.mappedColumns, columnNames);
+  assert.deepEqual(parsed.rows, [
+    { video_id: "v1", event_id: "e1", notes: 'hello, "world"' },
+    { video_id: "v2", event_id: "e2", notes: null },
+  ]);
+  assert.deepEqual(parsed.invalidColumns, []);
+  assert.doesNotThrow(() => assertSpreadsheetImportColumns({
+    mappedColumns: parsed.mappedColumns, invalidColumns: [], columnNames, readonlyColumns: [],
+  }));
+  const tsv = prepareSpreadsheetImportRows({
+    text: "video_id\tevent_id\tnotes\nv3\te3\ttext",
+    columnNames, hasHeader: true, delimiter: "auto",
+  });
+  assert.deepEqual(tsv.rows, [{ video_id: "v3", event_id: "e3", notes: "text" }]);
+  const invalid = prepareSpreadsheetImportRows({
+    text: "video_id,unknown\nv1,oops", columnNames, hasHeader: true, delimiter: "csv",
+  });
+  assert.deepEqual(invalid.invalidColumns, ["unknown"]);
+  assert.throws(() => assertSpreadsheetImportColumns({
+    mappedColumns: invalid.mappedColumns, invalidColumns: invalid.invalidColumns, columnNames, readonlyColumns: [],
+  }), /unknown_column:unknown/);
+  assert.throws(() => assertSpreadsheetImportColumns({
+    mappedColumns: ["notes"], invalidColumns: [], columnNames, readonlyColumns: ["notes"],
+  }), /column_not_editable:notes/);
+});
+
+test("U02 CURRENT import applies 500-row preview ceiling and 2M-char payload limit", async () => {
+  const { prepareSpreadsheetImportRows } = await import("../src/routes/admin/spreadsheet/importPrepCore.ts");
+  const base = { columnNames: ["id"], hasHeader: true, delimiter: "csv" };
+  assert.throws(() => prepareSpreadsheetImportRows({ ...base, text: "" }), /no_rows/);
+  assert.throws(() => prepareSpreadsheetImportRows({ ...base, text: "x".repeat(2_000_001) }), /payload_too_large/);
+  assert.throws(() => prepareSpreadsheetImportRows({ ...base, rows: Array.from({length: 501}, () => ({id:"x"})) }), /too_many_rows/);
+  const rows = Array.from({ length: 500 }, (_, i) => ({ id: "id-" + i }));
+  assert.equal(prepareSpreadsheetImportRows({ ...base, rows }).rows.length, 500);
+  const parsed = prepareSpreadsheetImportRows({ ...base, text: "id\n" + rows.map(row => row.id).join("\n") });
+  assert.equal(parsed.rows.length, 500);
+  assert.throws(() => prepareSpreadsheetImportRows({ ...base, text: "id\n" + rows.concat({id:"overflow"}).map(row => row.id).join("\n") }), /too_many_rows/);
+});
+
+
+test("U02 upsert existing-row lookup binds composite PKs in one D1 SELECT and rejects unexpected rows", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const { prepareSpreadsheetImportMutationRows, fetchSpreadsheetExistingImportRows, planSpreadsheetImportMutations } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "video_id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "event_id", type: "TEXT", notNull: true, pk: 2 },
+    { name: "notes", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = { def: resolveSpreadsheetTableDef("video_events", true), columns,
+    columnNames: columns.map(c => c.name), primaryKeys: ["video_id", "event_id"] };
+  const rows = [{ video_id: "v1", event_id: "e1", notes: "changed" },
+    { video_id: "v2", event_id: "e2", notes: "insert" }];
+  const prepared = prepareSpreadsheetImportMutationRows(ctx, rows);
+  const sqlite = new DatabaseSync(":memory:");
+  try {
+    sqlite.exec('CREATE TABLE video_events (video_id TEXT, event_id TEXT, notes TEXT, PRIMARY KEY (video_id, event_id))');
+    sqlite.prepare('INSERT INTO video_events VALUES (?, ?, ?)').run("v1", "e1", "before");
+    let reads = 0;
+    let statement = "", values = [];
+    const db = { prepare(sql) { reads++; statement = sql; return { bind(...binds) {
+      values = binds;
+      return { async all() { return { results: sqlite.prepare(sql).all(...binds) }; } };
+    } }; } };
+    const existing = await fetchSpreadsheetExistingImportRows(db, ctx, prepared, 1);
+    assert.equal(reads, 1);
+    assert.equal(statement, 'SELECT * FROM "video_events" WHERE ("video_id" = ? AND "event_id" = ?) OR ("video_id" = ? AND "event_id" = ?) LIMIT 8');
+    assert.deepEqual(values, ["v1", "e1", "v2", "e2"]);
+    assert.deepEqual([...existing.keys()], [JSON.stringify([["event_id", "e1"], ["video_id", "v1"]])]);
+    const planned = planSpreadsheetImportMutations(ctx, prepared, "upsert", existing, "operator");
+    assert.deepEqual({ inserted: planned.inserted, updated: planned.updated, skipped: planned.skipped },
+      { inserted: 1, updated: 1, skipped: 0 });
+    await assert.rejects(() => fetchSpreadsheetExistingImportRows(db, ctx, prepared, 0), /batch_too_large/);
+    assert.equal(reads, 1);
+    const extraDb = { prepare() { return { bind() { return { async all() { return { results: [
+      { video_id: "different", event_id: "id", notes: "wrong" },
+    ] }; } }; } }; } };
+    await assert.rejects(() => fetchSpreadsheetExistingImportRows(extraDb, ctx, prepared, 1), /invalid_snapshot/);
+    await assert.rejects(() => fetchSpreadsheetExistingImportRows(db, ctx, { ...prepared, errors: [
+      { index: 0, message: "invalid_row" },
+    ] }, 1), /invalid_row/);
+  } finally {
+    sqlite.close();
+  }
+});
+
+
+
+test("MIG-0638: embedded NUL input fails closed before D1 binds can truncate values", async () => {
+  const {
+    normalizeSpreadsheetPrimaryKey, prepareSpreadsheetImportMutationRows,
+    fetchSpreadsheetExistingImportRows,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "video_id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "event_id", type: "TEXT", notNull: true, pk: 2 },
+    { name: "notes", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("video_events", true),
+    columns,
+    columnNames: columns.map(column => column.name),
+    primaryKeys: ["video_id", "event_id"],
+  };
+  // The old NUL-separated fingerprint could not distinguish these PKs.
+  const pairA = { video_id: "a\0b", event_id: "c", notes: "first" };
+  const pairB = { video_id: "b", event_id: "c\0a", notes: "second" };
+  assert.equal(["c", "a\0b"].join("\0"), ["c\0a", "b"].join("\0"));
+  assert.throws(() => normalizeSpreadsheetPrimaryKey(ctx.primaryKeys, pairA), /invalid_row/);
+  assert.throws(() => validateSpreadsheetInputValues(ctx, { notes: "visible\0lost" }), /invalid_row/);
+  const prepared = prepareSpreadsheetImportMutationRows(ctx, [pairA, pairB]);
+  assert.deepEqual(prepared.errors, [
+    { index: 0, message: "invalid_row" },
+    { index: 1, message: "invalid_row" },
+  ]);
+  assert.equal(prepared.preparedRows.length, 0);
+  let reads = 0;
+  const db = { prepare() { reads++; throw new Error("DB must not be read"); } };
+  await assert.rejects(() => fetchSpreadsheetExistingImportRows(db, ctx, prepared, 1), /invalid_row/);
+  assert.equal(reads, 0, "invalid NUL PK must never reach the D1 binding");
+});
+
+test("MIG-0638: distinct normal composite keys retain 1-D1-read UPSERT before-images", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const {
+    prepareSpreadsheetImportMutationRows, fetchSpreadsheetExistingImportRows,
+    planSpreadsheetImportMutations,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "video_id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "event_id", type: "TEXT", notNull: true, pk: 2 },
+    { name: "notes", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("video_events", true), columns,
+    columnNames: columns.map(column => column.name),
+    primaryKeys: ["video_id", "event_id"],
+  };
+  const rows = [
+    { video_id: "a-b", event_id: "c", notes: "new-a" },
+    { video_id: "b", event_id: "c-a", notes: "new-b" },
+  ];
+  const prepared = prepareSpreadsheetImportMutationRows(ctx, rows);
+  assert.deepEqual(prepared.errors, []);
+  assert.equal(prepared.preparedRows.length, 2);
+  const [keyA, keyB] = prepared.preparedRows.map(x => x.fingerprint);
+  assert.notEqual(keyA, keyB);
+  const sqlite = new DatabaseSync(":memory:");
+  try {
+    sqlite.exec("CREATE TABLE video_events (video_id TEXT, event_id TEXT, notes TEXT, PRIMARY KEY (video_id, event_id))");
+    sqlite.prepare("INSERT INTO video_events VALUES (?, ?, ?)").run("a-b", "c", "old-a");
+    sqlite.prepare("INSERT INTO video_events VALUES (?, ?, ?)").run("b", "c-a", "old-b");
+    let reads = 0;
+    const db = {
+      prepare(sql) {
+        reads++;
+        return { bind(...values) {
+          return { async all() { return { results: sqlite.prepare(sql).all(...values) }; } };
+        } };
+      },
+    };
+    const existing = await fetchSpreadsheetExistingImportRows(db, ctx, prepared, 1);
+    assert.equal(reads, 1);
+    assert.equal(existing.size, 2);
+    assert.equal(existing.get(keyA)?.notes, "old-a");
+    assert.equal(existing.get(keyB)?.notes, "old-b");
+    const planned = planSpreadsheetImportMutations(ctx, prepared, "upsert", existing, "operator-1");
+    assert.deepEqual([planned.inserted, planned.updated, planned.skipped], [0, 2, 0]);
+    assert.equal(planned.mutations.length, 2);
+    assert.equal(planned.mutations[0].audit.before.notes, "old-a");
+    assert.equal(planned.mutations[1].audit.before.notes, "old-b");
+    assert.equal(planned.mutations[0].audit.after.notes, "new-a");
+    assert.equal(planned.mutations[1].audit.after.notes, "new-b");
+  } finally {
+    sqlite.close();
+  }
+});
+
+
+test("Hono import composite PK identity is canonical for distinct Unicode-normalized column names", () => {
+  const composed = "\u00e9";
+  const decomposed = "e\u0301";
+  const first = { [composed]: "one", [decomposed]: "two" };
+  const reversed = { [decomposed]: "two", [composed]: "one" };
+  assert.equal(spreadsheetImportPrimaryKeyFingerprint(first), spreadsheetImportPrimaryKeyFingerprint(reversed));
+  assert.notEqual(
+    spreadsheetImportPrimaryKeyFingerprint(first),
+    spreadsheetImportPrimaryKeyFingerprint({ [composed]: "one", [decomposed]: "changed" }),
+  );
+});
+
+
+test("MIG-0638: direct FK preflight rejects NUL-bearing values before any D1 query", async () => {
+  const { buildSpreadsheetForeignKeyLookups, validateSpreadsheetForeignKeys } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const fks = [{ column: "event_id", referencedTable: "events", referencedColumn: "id" }];
+  for (const bad of ["a\0b", "\0", "normal\0suffix"]) {
+    assert.throws(
+      () => buildSpreadsheetForeignKeyLookups(fks, [{ event_id: bad }], 3),
+      (error) => error instanceof Error && error.message === "invalid_row",
+      "no NUL-containing FK should be sent as a bound SQLite text parameter",
+    );
+    let prepares = 0;
+    const db = { prepare() { prepares++; throw new Error("Unexpected D1 read"); } };
+    await assert.rejects(
+      () => validateSpreadsheetForeignKeys(db, fks, [{ event_id: bad }], 3),
+      (error) => error instanceof Error && error.message === "invalid_row",
+    );
+    assert.equal(prepares, 0, "invalid foreign key must fail before opening D1");
+  }
+  const normal = buildSpreadsheetForeignKeyLookups(fks, [{ event_id: "valid-id" }], 3);
+  assert.equal(normal.length, 1);
+  assert.deepEqual(normal[0].binds, ["valid-id"]);
+});
+
+
+test("MIG-0638: merged CURRENT #671 primary key contracts equal unmounted Hono helpers", async () => {
+  const current = await import("../../../src/lib/admin/spreadsheet/validation.ts");
+  const target = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const outcome = fn => {
+    try { return { ok: true, result: fn() }; }
+    catch (error) { return { ok: false, code: error instanceof Error ? error.message : String(error) }; }
+  };
+  for (const [keys, pk] of [
+    [[], {}],
+    [["id"], {}],
+    [["id"], { id: "  " }],
+    [["id"], { id: "value\0truncated" }],
+    [["id", "event"], { id: "normal", event: "e:1" }],
+    [["id", "event"], { event: "e:1", id: "normal" }],
+  ]) {
+    assert.deepEqual(
+      outcome(() => target.normalizeSpreadsheetPrimaryKey(keys, pk)),
+      outcome(() => current.normalizePrimaryKeyRecord(keys, pk)),
+      "CURRENT and Hono must return identical PK normalization or error code",
+    );
+  }
+  for (const row of [
+    { id: "normal", event: "e:1" },
+    { id: "nul\0key", event: "e:1" },
+    { id: "", event: "e:1" },
+  ]) {
+    assert.deepEqual(
+      outcome(() => target.primaryKeyFromSpreadsheetRow(row, ["id", "event"])),
+      outcome(() => current.primaryKeyFromRowValues(row, ["id", "event"])),
+    );
+  }
+  for (const pk of [
+    { b: "y:z", a: "x" },
+    { a: "x:y", b: "z" },
+    { "\u00e9": "one", "e\u0301": "two" },
+    { "e\u0301": "two", "\u00e9": "one" },
+  ]) {
+    assert.equal(
+      target.spreadsheetImportPrimaryKeyFingerprint(pk),
+      current.primaryKeyFingerprint(pk),
+      "column identities and value boundaries must survive code-unit sorting",
+    );
+  }
+});
+
+
+test("MIG-0638 U02: CURRENT and Hono import preview tokens are cross-verifiable", async () => {
+  const current = await import("../../../src/lib/admin/spreadsheet/importPreviewToken.ts");
+  const hono = await import("../src/routes/admin/spreadsheet/importPreviewToken.ts");
+  const secret = "preview-test-secret-longer-than-thirty-two-chars";
+  const input = {
+    operatorUserId: "operator-cross-runtime",
+    table: "video_events",
+    mode: "upsert",
+    columns: ["event_id", "video_id", "notes"],
+    primaryKeys: ["video_id", "event_id"],
+    schemaColumns: [
+      { name: "video_id", type: "TEXT", notNull: true, pk: 1, enumValues: ["b", "a"] },
+      { name: "event_id", type: "TEXT", notNull: true, pk: 2 },
+      { name: "notes", type: "TEXT", notNull: false, pk: 0, defaultValue: null },
+    ],
+    rows: [
+      { video_id: "video:x", event_id: "event:y", notes: "a:b" },
+      { notes: null, event_id: "other", video_id: "video:2" },
+    ],
+  };
+  const a = await current.buildSpreadsheetImportPreviewBinding(input);
+  const b = await hono.buildSpreadsheetImportPreviewBinding(input);
+  assert.deepEqual(b, a, "schema and payload hashes must match actual CURRENT");
+  const options = { now: 1800000000, nonce: "12345678-1234-4234-8234-123456789abc" };
+  const issuedCurrent = await current.issueSpreadsheetImportPreviewToken(a, secret, options);
+  const issuedHono = await hono.issueSpreadsheetImportPreviewToken(b, secret, options);
+  assert.equal(issuedHono.token, issuedCurrent.token, "signed tokens must be byte-identical");
+  assert.deepEqual(issuedHono.claims, issuedCurrent.claims);
+  assert.deepEqual(
+    await hono.verifySpreadsheetImportPreviewToken(issuedCurrent.token, secret, b, { now: options.now + 1 }),
+    issuedCurrent.claims,
+    "Hono must accept CURRENT-issued preview token",
+  );
+  assert.deepEqual(
+    await current.verifySpreadsheetImportPreviewToken(issuedHono.token, secret, a, { now: options.now + 1 }),
+    issuedHono.claims,
+    "CURRENT must accept Hono-issued preview token",
+  );
+  const changedRows = await hono.buildSpreadsheetImportPreviewBinding({
+    ...input, rows: [{ ...input.rows[0], notes: "modified" }, input.rows[1]],
+  });
+  assert.equal(await current.verifySpreadsheetImportPreviewToken(issuedHono.token, secret, changedRows, { now: options.now + 1 }), null);
+  assert.equal(await hono.verifySpreadsheetImportPreviewToken(issuedCurrent.token, secret, b, { now: options.now + 300 }), null);
+});
+
+
+test("MIG-0638 U01b: D1 100-bind limit on spreadsheet write plans fails closed at 101", async () => {
+  const {
+    SPREADSHEET_SQL_MAX_BINDS, buildSpreadsheetInsertSql, buildSpreadsheetUpdateSql,
+    buildSpreadsheetDeleteSql,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  assert.equal(SPREADSHEET_SQL_MAX_BINDS, 100);
+  const makeContext = (count) => {
+    const columns = [
+      { name: "id", type: "TEXT", notNull: true, pk: 1 },
+      ...Array.from({ length: count - 1 }, (_, i) => ({
+        name: "data_" + i, type: "TEXT", notNull: false, pk: 0,
+      })),
+    ];
+    return {
+      def: resolveSpreadsheetTableDef("slots", true),
+      columns, columnNames: columns.map(c => c.name), primaryKeys: ["id"],
+    };
+  };
+  const fullRow = (ctx) => Object.fromEntries(ctx.columns.map(c => [c.name, "value"]));
+  const pk = { id: "value" };
+
+  const insert100 = makeContext(100);
+  assert.equal(buildSpreadsheetInsertSql(insert100, fullRow(insert100)).binds.length, 100);
+  const insert101 = makeContext(101);
+  assert.throws(() => buildSpreadsheetInsertSql(insert101, fullRow(insert101)), /batch_too_large/);
+
+  // UPDATE: one SET bind + one PK bind + the entire row snapshot.
+  const update98 = makeContext(98);
+  assert.equal(buildSpreadsheetUpdateSql(update98, pk, fullRow(update98),
+    { data_0: "new" }).binds.length, 100);
+  const update99 = makeContext(99);
+  assert.throws(() => buildSpreadsheetUpdateSql(update99, pk, fullRow(update99),
+    { data_0: "new" }), /batch_too_large/);
+
+  // DELETE: one PK bind plus all snapshot columns.
+  const delete99 = makeContext(99);
+  assert.equal(buildSpreadsheetDeleteSql(delete99, pk, fullRow(delete99)).binds.length, 100);
+  const delete100 = makeContext(100);
+  assert.throws(() => buildSpreadsheetDeleteSql(delete100, pk, fullRow(delete100)),
+    /batch_too_large/);
+});
+
+test("MIG-0638 U01b: multi-column PK pre-reads reject >100 binds before D1 access", async () => {
+  const {
+    fetchSpreadsheetRawSnapshot, fetchSpreadsheetExistingImportRows,
+    spreadsheetImportPrimaryKeyFingerprint,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  let prepares = 0;
+  const db = {
+    prepare() {
+      prepares += 1;
+      return {
+        bind() {
+          return {
+            async first() { return null; },
+            async all() { return { results: [] }; },
+          };
+        },
+      };
+    },
+  };
+  const ctx = (width) => {
+    const columns = Array.from({ length: width }, (_, i) => ({
+      name: "key_" + i, type: "TEXT", notNull: true, pk: i + 1,
+    }));
+    return {
+      def: resolveSpreadsheetTableDef("slots", true),
+      columns, columnNames: columns.map(c => c.name),
+      primaryKeys: columns.map(c => c.name),
+    };
+  };
+  const pk = (width, row) => Object.fromEntries(
+    Array.from({ length: width }, (_, i) => ["key_" + i, "v" + row + "-" + i]),
+  );
+  const prepared = (width) => ({
+    errors: [],
+    preparedRows: Array.from({ length: 7 }, (_, i) => {
+      const key = pk(width, i);
+      return { pk: key, row: key, fingerprint: spreadsheetImportPrimaryKeyFingerprint(key) };
+    }),
+  });
+
+  const width14 = ctx(14);
+  const existing = await fetchSpreadsheetExistingImportRows(db, width14, prepared(14), 1);
+  assert.equal(existing.size, 0);
+  assert.equal(prepares, 1, "7 x 14 = 98 binds is allowed");
+
+  const width15 = ctx(15);
+  await assert.rejects(
+    fetchSpreadsheetExistingImportRows(db, width15, prepared(15), 1),
+    /batch_too_large/,
+  );
+  assert.equal(prepares, 1, "7 x 15 = 105 must not call D1");
+  await assert.rejects(fetchSpreadsheetRawSnapshot(db, ctx(101), pk(101, 0), 1),
+    /batch_too_large/);
+  assert.equal(prepares, 1, "single snapshot read at 101 binds must not call D1");
+  await assert.rejects(fetchSpreadsheetRawSnapshot(db, ctx(100), pk(100, 0), 1),
+    /row_not_found/);
+  assert.equal(prepares, 2, "single snapshot read at 100 binds must reach D1");
+});
+
+
+test("MIG-0638 U01b: snapshot lookup does not mistake a secret primary key for a forbidden cell mutation", async () => {
+  const {
+    fetchSpreadsheetRawSnapshot, normalizeSpreadsheetPrimaryKey,
+    validateSpreadsheetInputValues,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "access_token", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    primaryKeys: ["access_token"],
+    columns, columnNames: columns.map(column => column.name),
+  };
+  const pk = { access_token: "secret-PK-1" };
+  // CURRENT normalizes and binds PK values without imposing cell editability.
+  assert.deepEqual(normalizeSpreadsheetPrimaryKey(ctx.primaryKeys, pk), pk);
+  assert.throws(() => validateSpreadsheetInputValues(ctx, pk), /column_not_editable/,
+    "editable-cell policy is intentionally stricter than row identity lookup");
+
+  let calls = 0;
+  const db = {
+    prepare(sql) {
+      calls += 1;
+      assert.equal(sql, 'SELECT * FROM "slots" WHERE "access_token" = ? LIMIT 2');
+      return {
+        bind(...args) {
+          assert.deepEqual(args, ["secret-PK-1"]);
+          return {
+            async all() {
+              return { results: [{ access_token: "secret-PK-1", title: "original" }] };
+            },
+          };
+        },
+      };
+    },
+  };
+  assert.deepEqual(await fetchSpreadsheetRawSnapshot(db, ctx, pk, 1), {
+    access_token: "secret-PK-1", title: "original",
+  });
+  assert.equal(calls, 1);
+  await assert.rejects(
+    fetchSpreadsheetRawSnapshot(db, ctx, { access_token: "bad\u0000pk" }, 1),
+    /invalid_row/,
+  );
+  assert.equal(calls, 1, "invalid PK must be rejected before D1 reads");
+});
+
+
+test("MIG-0638 U01b: prototype-named SQL columns require own properties and preserve row identity", async () => {
+  const {
+    normalizeSpreadsheetPrimaryKey, primaryKeyFromSpreadsheetRow,
+    prepareCompleteInsertRow, prepareSpreadsheetUpdate, buildSpreadsheetUpdateSql,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+
+  for (const name of ["constructor", "toString", "__proto__"]) {
+    // These are legal quoted SQL identifier spellings and inherited JS keys.
+    assert.throws(() => normalizeSpreadsheetPrimaryKey([name], {}),
+      /missing_primary_key/, "a prototype property cannot supply a missing PK");
+    assert.throws(() => primaryKeyFromSpreadsheetRow({}, [name]),
+      /missing_primary_key/, "a prototype property cannot supply an import-row PK");
+    const explicit = Object.fromEntries([[name, "pk-value"]]);
+    const normalized = normalizeSpreadsheetPrimaryKey([name], explicit);
+    assert.deepEqual(normalized, explicit);
+    assert.deepEqual(primaryKeyFromSpreadsheetRow(explicit, [name]), explicit);
+    assert.equal(Object.getPrototypeOf(normalized), Object.prototype);
+    assert.ok(Object.hasOwn(normalized, name));
+
+    const requiredColumns = [
+      { name, type: "TEXT", notNull: true, pk: 1 },
+      { name: "title", type: "TEXT", notNull: false, pk: 0 },
+    ];
+    const requiredCtx = {
+      def: resolveSpreadsheetTableDef("slots", true),
+      columns: requiredColumns, columnNames: requiredColumns.map(x => x.name),
+      primaryKeys: [name],
+    };
+    assert.throws(() => prepareCompleteInsertRow(requiredCtx, { title: "x" }),
+      /missing_required_column/, "missing prototype-named column cannot appear supplied");
+    const inserted = prepareCompleteInsertRow(requiredCtx, explicit);
+    assert.equal(inserted[name], "pk-value");
+    assert.equal(Object.getPrototypeOf(inserted), Object.prototype);
+    assert.ok(Object.hasOwn(inserted, name));
+
+    // A prototype-named non-PK column must be editable only when present
+    // explicitly, and "__proto__" must remain a data field in the after-image.
+    const editableColumns = [
+      { name: "id", type: "TEXT", notNull: true, pk: 1 },
+      { name, type: "TEXT", notNull: false, pk: 0 },
+    ];
+    const editCtx = {
+      def: resolveSpreadsheetTableDef("slots", true),
+      columns: editableColumns, columnNames: editableColumns.map(x => x.name),
+      primaryKeys: ["id"],
+    };
+    const before = Object.fromEntries([["id", "x"], [name, "old"]]);
+    assert.throws(() => prepareSpreadsheetUpdate(editCtx, before, {}),
+      /empty_row/, "empty input cannot implicitly edit inherited properties");
+    const updated = prepareSpreadsheetUpdate(editCtx, before,
+      Object.fromEntries([[name, "new"]]));
+    assert.deepEqual(updated.setColumns, [name]);
+    assert.equal(updated.after[name], "new");
+    assert.equal(before[name], "old", "input snapshot remains unchanged");
+    assert.equal(Object.getPrototypeOf(updated.after), Object.prototype);
+    assert.ok(Object.hasOwn(updated.after, name));
+    const sql = buildSpreadsheetUpdateSql(editCtx, { id: "x" }, before,
+      Object.fromEntries([[name, "new"]]));
+    assert.match(sql.statement, new RegExp('^UPDATE "slots" SET "' + name +
+      '" = \\? WHERE "id" = \\? AND'));
+    assert.equal(sql.binds[0], "new");
+  }
+});
+
+
+test("MIG-0638 U02: import preflight snapshots mutable inputs before upsert planning", async () => {
+  const {
+    prepareSpreadsheetImportMutationRows, planSpreadsheetImportMutations,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    columns, columnNames: columns.map(c => c.name),
+    primaryKeys: ["id"],
+  };
+  let getterReads = 0;
+  const row = {
+    id: "slot-1",
+    get title() {
+      getterReads++;
+      return getterReads === 1 ? "approved" : "tampered";
+    },
+  };
+  const prepared = prepareSpreadsheetImportMutationRows(ctx, [row]);
+  assert.deepEqual(prepared.errors, []);
+  assert.equal(getterReads, 1, "a getter must not supply different validation and SQL values");
+  assert.equal(prepared.preparedRows[0].row.title, "approved");
+  assert.ok(Object.isFrozen(prepared.preparedRows[0].row));
+  assert.ok(Object.isFrozen(prepared.preparedRows[0].pk));
+  assert.ok(Object.isFrozen(prepared.preparedRows[0]));
+  row.id = "slot-evil";
+  Object.defineProperty(row, "title", { value: "evil", configurable: true });
+  const planned = planSpreadsheetImportMutations(ctx, prepared, "insert", null, "operator");
+  assert.equal(planned.inserted, 1);
+  assert.deepEqual(planned.mutations[0].binds, ["slot-1", "approved"]);
+  assert.equal(planned.mutations[0].audit.target_id, "slot-1");
+  assert.equal(planned.mutations[0].audit.after.title, "approved");
+  assert.equal(planned.mutations[0].audit.after.id, "slot-1");
+
+  const malformed = prepareSpreadsheetImportMutationRows(ctx, [
+    { id: "good", title: "ok" }, null,
+  ]);
+  assert.equal(malformed.preparedRows.length, 1);
+  assert.deepEqual(malformed.errors.map(error => error.index), [1],
+    "a malformed row must preserve per-row error indexing");
+});
+
+test("MIG-0638 U02: absent prototype-named UPSERT fields are skipped, not inherited", async () => {
+  const {
+    prepareSpreadsheetImportMutationRows, planSpreadsheetImportMutations,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "constructor", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    columns, columnNames: columns.map(c => c.name),
+    primaryKeys: ["id"],
+  };
+  const prepared = prepareSpreadsheetImportMutationRows(ctx, [{ id: "slot-1" }]);
+  assert.deepEqual(prepared.errors, []);
+  const existing = new Map([[prepared.preparedRows[0].fingerprint,
+    Object.fromEntries([["id", "slot-1"], ["constructor", "existing"]])]]);
+  const skipped = planSpreadsheetImportMutations(ctx, prepared, "upsert", existing, "operator");
+  assert.deepEqual([skipped.inserted, skipped.updated, skipped.skipped], [0, 0, 1]);
+  assert.deepEqual(skipped.mutations, []);
+
+  const modified = prepareSpreadsheetImportMutationRows(ctx,
+    [Object.fromEntries([["id", "slot-1"], ["constructor", "updated"]])]);
+  const changed = planSpreadsheetImportMutations(ctx, modified, "upsert", existing, "operator");
+  assert.deepEqual([changed.inserted, changed.updated, changed.skipped], [0, 1, 0]);
+  assert.equal(changed.mutations[0].audit.after.constructor, "updated");
+});
+
+test("MIG-0638 U02: import existing-row D1 PK must be an own field", async () => {
+  const {
+    prepareSpreadsheetImportMutationRows, fetchSpreadsheetExistingImportRows,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "__proto__", type: "TEXT", notNull: true, pk: 1 },
+    { name: "notes", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    columns, columnNames: columns.map(c => c.name),
+    primaryKeys: ["__proto__"],
+  };
+  const input = Object.fromEntries([["__proto__", "real-pk"], ["notes", "new"]]);
+  const prepared = prepareSpreadsheetImportMutationRows(ctx, [input]);
+  assert.deepEqual(prepared.errors, []);
+  const fakeDB = rows => ({
+    prepare(sql) {
+      assert.match(sql, /^SELECT \* FROM "slots"/);
+      return {
+        bind(...values) {
+          assert.deepEqual(values, ["real-pk"]);
+          return { async all() { return { results: rows }; } };
+        },
+      };
+    },
+  });
+  const validRow = Object.fromEntries([["__proto__", "real-pk"], ["notes", "old"]]);
+  const found = await fetchSpreadsheetExistingImportRows(fakeDB([validRow]),
+    ctx, prepared, 1);
+  assert.equal(found.size, 1);
+  assert.equal(found.get(prepared.preparedRows[0].fingerprint).notes, "old");
+  await assert.rejects(fetchSpreadsheetExistingImportRows(
+    fakeDB([{ notes: "old" }]), ctx, prepared, 1), /invalid_snapshot/,
+    "an inherited Object.prototype value must not stand in for a DB PK");
+});
+
+
+test("MIG-0638 U02: D1 existing import rows are captured once before PK and audit planning", async () => {
+  const {
+    prepareSpreadsheetImportMutationRows, fetchSpreadsheetExistingImportRows,
+    planSpreadsheetImportMutations,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    columns, columnNames: columns.map(column => column.name),
+    primaryKeys: ["id"],
+  };
+  const prepared = prepareSpreadsheetImportMutationRows(ctx,
+    [{ id: "slot-1", title: "new title" }]);
+  assert.deepEqual(prepared.errors, []);
+
+  let pkReads = 0, titleReads = 0;
+  const row = Object.defineProperties({}, {
+    id: { enumerable: true, configurable: true, get() {
+      pkReads++;
+      return pkReads === 1 ? "slot-1" : "different-key";
+    } },
+    title: { enumerable: true, configurable: true, get() {
+      titleReads++;
+      return titleReads === 1 ? "before title" : "changed after read";
+    } },
+  });
+  let selects = 0;
+  const db = {
+    prepare(sql) {
+      selects++;
+      assert.equal(sql, 'SELECT * FROM "slots" WHERE ("id" = ?) LIMIT 8');
+      return { bind(...args) {
+        assert.deepEqual(args, ["slot-1"]);
+        return { async all() { return { results: [row] }; } };
+      } };
+    },
+  };
+  const found = await fetchSpreadsheetExistingImportRows(db, ctx, prepared, 1);
+  const key = prepared.preparedRows[0].fingerprint;
+  const before = found.get(key);
+  assert.equal(selects, 1);
+  assert.equal(pkReads, 1, "PK getter must not change between lookup and audit");
+  assert.equal(titleReads, 1, "before-image must be a single consistent snapshot");
+  assert.deepEqual(before, { id: "slot-1", title: "before title" });
+  assert.ok(Object.isFrozen(before));
+  Object.defineProperty(row, "id", { configurable: true, value: "replaced" });
+  Object.defineProperty(row, "title", { configurable: true, value: "tampered" });
+  assert.equal(before.id, "slot-1");
+  assert.equal(before.title, "before title");
+
+  const planned = planSpreadsheetImportMutations(ctx, prepared, "upsert", found, "operator");
+  assert.deepEqual([planned.inserted, planned.updated, planned.skipped], [0, 1, 0]);
+  assert.deepEqual(planned.mutations[0].audit.before,
+    { id: "slot-1", title: "before title" });
+  assert.deepEqual(planned.mutations[0].audit.after,
+    { id: "slot-1", title: "new title" });
+  assert.deepEqual(planned.mutations[0].binds,
+    ["new title", "slot-1", "slot-1", "before title"]);
+  assert.equal(pkReads, 1);
+  assert.equal(titleReads, 1);
+});
+
+test("MIG-0638 U02: throwing D1 snapshot accessors fail as invalid_snapshot", async () => {
+  const {
+    prepareSpreadsheetImportMutationRows, fetchSpreadsheetExistingImportRows,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    columns, columnNames: columns.map(column => column.name),
+    primaryKeys: ["id"],
+  };
+  const prepared = prepareSpreadsheetImportMutationRows(ctx,
+    [{ id: "slot-1", title: "new" }]);
+  const badRows = [
+    Object.defineProperty({ id: "slot-1" }, "title", {
+      enumerable: true, get() { throw Error("bad getter"); },
+    }),
+    Object.defineProperty({ title: "old" }, "id", {
+      enumerable: true, get() { throw Error("secret leaked"); },
+    }),
+    { id: "slot-1" },
+    null,
+    ["slot-1", "old"],
+  ];
+  for (const bad of badRows) {
+    const db = { prepare() { return { bind() {
+      return { async all() { return { results: [bad] }; } };
+    } }; } };
+    await assert.rejects(
+      fetchSpreadsheetExistingImportRows(db, ctx, prepared, 1),
+      error => error instanceof Error && error.message === "invalid_snapshot",
+    );
+  }
+});
+
+
+test("MIG-0638 U02: existing import PK read stays within 8 D1 rows and fails closed on schema drift", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const {
+    MAX_SPREADSHEET_IMPORT_EXISTING_RESULT_ROWS,
+    SPREADSHEET_IMPORT_APPLY_MAX_ROWS,
+    prepareSpreadsheetImportMutationRows, fetchSpreadsheetExistingImportRows,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  assert.equal(SPREADSHEET_IMPORT_APPLY_MAX_ROWS, 7);
+  assert.equal(MAX_SPREADSHEET_IMPORT_EXISTING_RESULT_ROWS, 8);
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    columns, columnNames: columns.map(x => x.name),
+    primaryKeys: ["id"],
+  };
+  const prepared = prepareSpreadsheetImportMutationRows(ctx, [{ id: "k", title: "new" }]);
+  assert.deepEqual(prepared.errors, []);
+  const sqlite = new DatabaseSync(":memory:");
+  try {
+    // Deliberately model broken schema metadata with no actual UNIQUE/PK index.
+    // The unmounted Hono planner must refuse duplicates before audit/DB mutation.
+    sqlite.exec('CREATE TABLE slots (id TEXT NOT NULL, title TEXT)');
+    const insert = sqlite.prepare('INSERT INTO slots (id, title) VALUES (?, ?)');
+    for (let i = 0; i < 20; i++) insert.run("k", "old-" + i);
+    let observedSql = "", reads = 0, returnedRows = 0;
+    const db = {
+      prepare(sql) {
+        reads++;
+        observedSql = sql;
+        return { bind(...binds) {
+          return { async all() {
+            const results = sqlite.prepare(sql).all(...binds);
+            returnedRows = results.length;
+            return { results };
+          } };
+        } };
+      },
+    };
+    await assert.rejects(fetchSpreadsheetExistingImportRows(db, ctx, prepared, 1),
+      /invalid_snapshot/);
+    assert.equal(reads, 1);
+    assert.equal(observedSql, 'SELECT * FROM "slots" WHERE ("id" = ?) LIMIT 8');
+    assert.equal(returnedRows, 8, "D1 must never materialize the remaining duplicate rows");
+    assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM slots').get().n, 20,
+      "preflight must not mutate persisted rows");
+
+    // A one-to-one PK lookup remains supported without extra bind variables.
+    sqlite.exec('DELETE FROM slots');
+    insert.run("k", "only");
+    const found = await fetchSpreadsheetExistingImportRows(db, ctx, prepared, 1);
+    assert.equal(found.get(prepared.preparedRows[0].fingerprint)?.title, "only");
+    assert.equal(returnedRows, 1);
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("MIG-0638 U02: anomalous D1 result counts fail before building partial PK maps", async () => {
+  const { fetchSpreadsheetExistingImportRows } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true), columns,
+    columnNames: columns.map(x => x.name), primaryKeys: ["id"],
+  };
+  const prepared = {
+    errors: [], preparedRows: [
+      { pk: { id: "k" }, row: { id: "k", title: "new" }, fingerprint: '[["id","k"]]' },
+    ],
+  };
+  const extra = Array.from({ length: 8 }, () => ({ id: "k", title: "old" }));
+  const db = values => ({
+    prepare(sql) {
+      assert.match(sql, / LIMIT 8$/);
+      return { bind() { return { async all() { return { results: values }; } }; } };
+    },
+  });
+  await assert.rejects(fetchSpreadsheetExistingImportRows(db(extra), ctx, prepared, 1),
+    /invalid_snapshot/);
+  await assert.rejects(fetchSpreadsheetExistingImportRows(db({ results: extra }), ctx, prepared, 1),
+    /invalid_snapshot/);
+});
+
+
+test("MIG-0638 U02: forged import PK fingerprints cannot select unrelated audit snapshots", async () => {
+  const {
+    prepareSpreadsheetImportMutationRows, planSpreadsheetImportMutations,
+    fetchSpreadsheetExistingImportRows, spreadsheetImportPrimaryKeyFingerprint,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    columns, columnNames: columns.map(c => c.name),
+    primaryKeys: ["id"],
+  };
+  const prepared = prepareSpreadsheetImportMutationRows(ctx, [
+    { id: "left", title: "left new" },
+    { id: "right", title: "right new" },
+  ]);
+  assert.deepEqual(prepared.errors, []);
+  const [left, right] = prepared.preparedRows;
+  const existing = new Map([
+    [left.fingerprint, Object.freeze({ id: "left", title: "left old" })],
+    [right.fingerprint, Object.freeze({ id: "right", title: "right old" })],
+  ]);
+  let reads = 0;
+  const db = { prepare() {
+    reads++;
+    return { bind() { return { async all() { return { results: [] }; } }; } };
+  } };
+
+  // A mutable preparedRows array remains caller-owned; replacing one entry
+  // must not make the D1 SELECT and the later audit identify different rows.
+  const invalid = [
+    [{ ...left, fingerprint: right.fingerprint }, right],
+    [{ ...left, pk: { id: "right" } }, right],
+    [{ ...left, row: { id: "right", title: "left new" } }, right],
+    [left, { ...right, fingerprint: spreadsheetImportPrimaryKeyFingerprint({ id: "extra" }) }],
+    [left, left],
+  ];
+  for (const entries of invalid) {
+    const unsafe = { errors: [], preparedRows: entries };
+    assert.throws(
+      () => planSpreadsheetImportMutations(ctx, unsafe, "upsert", existing, "operator"),
+      /invalid_row|duplicate_primary_key/,
+    );
+    assert.throws(
+      () => planSpreadsheetImportMutations(ctx, unsafe, "insert", null, "operator"),
+      /invalid_row|duplicate_primary_key/,
+    );
+    await assert.rejects(fetchSpreadsheetExistingImportRows(db, ctx, unsafe, 1),
+      /invalid_row|duplicate_primary_key/);
+    assert.equal(reads, 0, "an inconsistent identity must fail before D1 prepares SQL");
+  }
+
+  const valid = planSpreadsheetImportMutations(ctx, prepared, "upsert", existing, "operator");
+  assert.deepEqual([valid.inserted, valid.updated, valid.skipped], [0, 2, 0]);
+  assert.deepEqual(valid.mutations.map(m => m.audit.target_id), ["left", "right"]);
+  assert.deepEqual(valid.mutations.map(m => m.audit.before.title), ["left old", "right old"]);
+  assert.deepEqual(valid.mutations.map(m => m.audit.after.title), ["left new", "right new"]);
+  const checked = await fetchSpreadsheetExistingImportRows(db, ctx, prepared, 1);
+  assert.equal(reads, 1, "valid identities still permit the existing one-read preflight");
+  assert.equal(checked.size, 0);
+});
+
+
+test("MIG-0638 U01b: CRUD pre-read freezes the verified PK and before-image", async () => {
+  const {
+    fetchSpreadsheetRawSnapshot, buildSpreadsheetAuditedUpdate,
+    buildSpreadsheetAuditedDelete,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    columns, columnNames: columns.map(c => c.name),
+    primaryKeys: ["id"],
+  };
+  let keyReads = 0, titleReads = 0;
+  const mutable = Object.defineProperties({}, {
+    id: { enumerable: true, configurable: true, get() {
+      keyReads++;
+      return keyReads === 1 ? "slot-1" : "wrong-slot";
+    } },
+    title: { enumerable: true, configurable: true, get() {
+      titleReads++;
+      return titleReads === 1 ? "before" : "tampered";
+    } },
+  });
+  let selects = 0;
+  const db = {
+    prepare(sql) {
+      selects++;
+      assert.equal(sql, 'SELECT * FROM "slots" WHERE "id" = ? LIMIT 2');
+      return { bind(...values) {
+        assert.deepEqual(values, ["slot-1"]);
+        return { async all() { return { results: [mutable] }; } };
+      } };
+    },
+  };
+  const snapshot = await fetchSpreadsheetRawSnapshot(db, ctx, { id: "slot-1" }, 1);
+  assert.equal(selects, 1);
+  assert.deepEqual(snapshot, { id: "slot-1", title: "before" });
+  assert.equal(keyReads, 1, "key must be read once for PK match and CAS");
+  assert.equal(titleReads, 1, "before-image must be read once for CAS and audit");
+  assert.equal(Object.isFrozen(snapshot), true);
+  Object.defineProperty(mutable, "id", { value: "wrong-slot", configurable: true });
+  Object.defineProperty(mutable, "title", { value: "tampered", configurable: true });
+  const update = buildSpreadsheetAuditedUpdate(ctx, { id: "slot-1" },
+    snapshot, { title: "after" }, "operator");
+  assert.deepEqual(update.binds, ["after", "slot-1", "slot-1", "before"]);
+  assert.deepEqual(update.audit.before, { id: "slot-1", title: "before" });
+  assert.deepEqual(update.audit.after, { id: "slot-1", title: "after" });
+  const del = buildSpreadsheetAuditedDelete(ctx, { id: "slot-1" },
+    snapshot, "operator");
+  assert.deepEqual(del.binds, ["slot-1", "slot-1", "before"]);
+  assert.deepEqual(del.audit.before, snapshot);
+  assert.equal(keyReads, 1);
+  assert.equal(titleReads, 1);
+});
+
+test("MIG-0638 U01b: malformed/mismatched D1 CRUD pre-read snapshots fail closed", async () => {
+  const { fetchSpreadsheetRawSnapshot } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    columns, columnNames: columns.map(c => c.name),
+    primaryKeys: ["id"],
+  };
+  const invalid = [
+    { id: "other", title: "unrelated" },
+    { id: "slot-1" },
+    { id: "slot-1", title: undefined },
+    { id: "slot-1", title: { nested: "invalid" } },
+    { id: "slot-1", title: true },
+    { id: "slot-1", title: Number.NaN },
+    { id: "slot-1", title: Number.POSITIVE_INFINITY },
+    ["slot-1", "before"],
+    Object.defineProperty({ id: "slot-1" }, "title", {
+      get() { throw new Error("getter trap"); },
+    }),
+  ];
+  for (const bad of invalid) {
+    const db = { prepare() { return { bind() {
+      return { async all() { return { results: [bad] }; } };
+    } }; } };
+    await assert.rejects(
+      fetchSpreadsheetRawSnapshot(db, ctx, { id: "slot-1" }, 1),
+      error => error instanceof Error && error.message === "invalid_snapshot",
+      "bad D1 row must never reach guarded CRUD mutation/audit planning",
+    );
+  }
+  const missingDb = { prepare() { return { bind() {
+    return { async all() { return { results: [] }; } };
+  } }; } };
+  await assert.rejects(
+    fetchSpreadsheetRawSnapshot(missingDb, ctx, { id: "slot-1" }, 1),
+    /row_not_found/,
+  );
+});
+
+
+test("MIG-0638 U01b: foreign-key D1 lookups use a bounded SQL sentinel per unique chunk", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const {
+    buildSpreadsheetForeignKeyLookups, validateSpreadsheetForeignKeys,
+    assertSpreadsheetForeignKeyLookup, MAX_SPREADSHEET_FK_LOOKUP_ROWS,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  assert.equal(MAX_SPREADSHEET_FK_LOOKUP_ROWS, 100);
+  const fk = [{ column: "event_id", referencedTable: "events", referencedColumn: "id" }];
+  const input = [{ event_id: "e1" }];
+  const plans = buildSpreadsheetForeignKeyLookups(fk, input);
+  assert.deepEqual(plans[0].binds, ["e1"]);
+  assert.equal(plans[0].statement,
+    'SELECT "id" AS value FROM "events" WHERE "id" IN (?) LIMIT 2');
+  const plan2 = buildSpreadsheetForeignKeyLookups(fk,
+    [{ event_id: "e1" }, { event_id: "e2" }]);
+  assert.match(plan2[0].statement, / LIMIT 3$/);
+  const plan99 = buildSpreadsheetForeignKeyLookups(fk,
+    Array.from({ length: 99 }, (_, i) => ({ event_id: "k" + i })));
+  assert.match(plan99[0].statement, / LIMIT 100$/);
+  assert.doesNotThrow(() => assertSpreadsheetForeignKeyLookup(plans[0], [{ value: "e1" }]));
+  assert.throws(() => assertSpreadsheetForeignKeyLookup(plans[0],
+    [{ value: "e1" }, { value: "e1" }]), /invalid_snapshot/);
+  assert.throws(() => assertSpreadsheetForeignKeyLookup(plans[0],
+    { value: "e1" }), /invalid_snapshot/);
+
+  const sqlite = new DatabaseSync(":memory:");
+  try {
+    // Simulate schema drift: the referenced identifier is not UNIQUE and
+    // hundreds of rows could otherwise be materialized in a single request.
+    sqlite.exec('CREATE TABLE events (id TEXT NOT NULL)');
+    const insert = sqlite.prepare('INSERT INTO events (id) VALUES (?)');
+    for (let i = 0; i < 200; i++) insert.run("e1");
+    let lastSql = "", returnedCount = 0, prepares = 0;
+    const db = { prepare(sql) {
+      prepares++;
+      lastSql = sql;
+      return { bind(...args) {
+        return { async all() {
+          const results = sqlite.prepare(sql).all(...args);
+          returnedCount = results.length;
+          return { results };
+        } };
+      } };
+    } };
+    await assert.rejects(
+      validateSpreadsheetForeignKeys(db, fk, input, 1),
+      /invalid_snapshot/,
+    );
+    assert.equal(prepares, 1);
+    assert.equal(lastSql, plans[0].statement);
+    assert.equal(returnedCount, 2, "D1 must fetch only one match plus one sentinel");
+    assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM events').get().n, 200,
+      "FK preflight must not change the table");
+
+    sqlite.exec('DELETE FROM events');
+    insert.run("e1");
+    await assert.doesNotReject(validateSpreadsheetForeignKeys(db, fk, input, 1));
+    assert.equal(returnedCount, 1);
+    await assert.rejects(validateSpreadsheetForeignKeys(db, fk,
+      [{ event_id: "e2" }], 1), /foreign_key_violation/);
+  } finally {
+    sqlite.close();
+  }
+});
+
+
+test("MIG-0638 U01b: Hono CRUD body parser retains CURRENT PATCH POST DELETE envelopes", async () => {
+  const {
+    parseSpreadsheetCrudBody, buildSpreadsheetAuditedInsert,
+    buildSpreadsheetAuditedUpdate, buildSpreadsheetAuditedDelete,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    columns, columnNames: columns.map(x => x.name), primaryKeys: ["id"],
+  };
+  const source = { table: "  slots  ", row: { id: "slot-1", title: "original" } };
+  const post = parseSpreadsheetCrudBody("POST", source);
+  assert.deepEqual(post, { method: "POST", table: "slots",
+    row: { id: "slot-1", title: "original" } });
+  assert.equal(Object.isFrozen(post), true);
+  assert.equal(Object.isFrozen(post.row), true);
+  source.row.title = "changed after body parse";
+  const inserted = buildSpreadsheetAuditedInsert(ctx, post.row, "operator-1");
+  assert.deepEqual(inserted.binds, ["slot-1", "original"]);
+  assert.equal(inserted.audit.after.title, "original");
+  assert.equal(inserted.audit.target_id, "slot-1");
+
+  const patchBody = { table: "slots", primaryKey: { id: "slot-1" },
+    column: " title ", value: "next" };
+  const patch = parseSpreadsheetCrudBody("PATCH", patchBody);
+  assert.deepEqual(patch, {
+    method: "PATCH", table: "slots", primaryKey: { id: "slot-1" },
+    column: "title", value: "next",
+  });
+  assert.equal(Object.isFrozen(patch), true);
+  assert.equal(Object.isFrozen(patch.primaryKey), true);
+  patchBody.primaryKey.id = "swapped-key";
+  const old = { id: "slot-1", title: "original" };
+  const modified = buildSpreadsheetAuditedUpdate(ctx, patch.primaryKey, old,
+    Object.fromEntries([[patch.column, patch.value]]), "operator-1");
+  assert.deepEqual(modified.binds, ["next", "slot-1", "slot-1", "original"]);
+  assert.equal(modified.audit.before.title, "original");
+  assert.equal(modified.audit.after.title, "next");
+
+  const emptyPatch = parseSpreadsheetCrudBody("PATCH",
+    { table: "slots", primaryKey: { id: "slot-1" }, column: "title" });
+  assert.equal(emptyPatch.value, null,
+    "CURRENT PATCH maps an omitted value to SQL NULL");
+  const deleteBody = { table: "slots", primaryKey: { id: "slot-1" } };
+  const deleted = parseSpreadsheetCrudBody("DELETE", deleteBody);
+  assert.deepEqual(deleted, {
+    method: "DELETE", table: "slots", primaryKey: { id: "slot-1" },
+  });
+  deleteBody.primaryKey.id = "swapped-key";
+  const deletePlan = buildSpreadsheetAuditedDelete(ctx, deleted.primaryKey,
+    old, "operator-1");
+  assert.deepEqual(deletePlan.binds, ["slot-1", "slot-1", "original"]);
+  assert.equal(deletePlan.audit.before.title, "original");
+});
+
+test("MIG-0638 U01b: write parser rejects malformed JSON cells and absent own fields", async () => {
+  const { parseSpreadsheetCrudBody } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const invalidStructure = [
+    ["POST", null],
+    ["POST", []],
+    ["POST", { table: "slots" }],
+    ["POST", { table: "slots", row: [] }],
+    ["POST", { table: 1, row: { id: "s1" } }],
+    ["PATCH", { table: "slots", column: "title", value: "x" }],
+    ["PATCH", { table: "slots", primaryKey: {}, column: "  " }],
+    ["DELETE", { table: "", primaryKey: { id: "s1" } }],
+    ["DELETE", { table: "slots", primaryKey: "s1" }],
+  ];
+  for (const [method, input] of invalidStructure) {
+    assert.throws(
+      () => parseSpreadsheetCrudBody(method, input),
+      error => error instanceof Error && error.message === "missing_fields",
+    );
+  }
+  const inherited = Object.create({
+    table: "slots", row: { id: "inherited" },
+    primaryKey: { id: "inherited" }, column: "title",
+  });
+  assert.throws(() => parseSpreadsheetCrudBody("POST", inherited), /missing_fields/);
+  assert.throws(() => parseSpreadsheetCrudBody("DELETE", inherited), /missing_fields/);
+
+  const invalidCells = [
+    ["POST", { table: "slots", row: { id: 1 } }],
+    ["POST", { table: "slots", row: { id: "x", title: { nested: "no" } } }],
+    ["POST", { table: "slots", row: { id: "x", title: true } }],
+    ["PATCH", { table: "slots", primaryKey: { id: "x" }, column: "title", value: 5 }],
+    ["PATCH", { table: "slots", primaryKey: { id: null }, column: "title", value: "x" }],
+    ["DELETE", { table: "slots", primaryKey: { id: ["array"] } }],
+  ];
+  for (const [method, input] of invalidCells) {
+    assert.throws(
+      () => parseSpreadsheetCrudBody(method, input),
+      error => error instanceof Error && error.message === "invalid_row",
+    );
+  }
+  assert.throws(
+    () => parseSpreadsheetCrudBody("PUT", { table: "slots" }), /invalid_row/);
+});
+
+test("MIG-0638 U01b: CRUD parser stores prototype-named fields without inherited lookups", async () => {
+  const { parseSpreadsheetCrudBody } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const row = Object.fromEntries([
+    ["id", "slot-1"], ["__proto__", "safe"], ["constructor", "ordinary"],
+  ]);
+  const post = parseSpreadsheetCrudBody("POST", { table: "slots", row });
+  assert.equal(post.row["__proto__"], "safe");
+  assert.equal(post.row.constructor, "ordinary");
+  assert.ok(Object.hasOwn(post.row, "__proto__"));
+  assert.ok(Object.hasOwn(post.row, "constructor"));
+  assert.equal(Object.getPrototypeOf(post.row), Object.prototype);
+  const keys = Object.fromEntries([["__proto__", "special-key"]]);
+  const del = parseSpreadsheetCrudBody("DELETE", {
+    table: "slots", primaryKey: keys,
+  });
+  assert.deepEqual(del.primaryKey, keys);
+  assert.ok(Object.hasOwn(del.primaryKey, "__proto__"));
+  assert.equal(Object.getPrototypeOf(del.primaryKey), Object.prototype);
+});
+
+
+test("MIG-0638 U01b: guarded CRUD planner composes SQL, full CAS snapshots and shared S3 reads", async () => {
+  const { parseSpreadsheetCrudBody, planSpreadsheetGuardedCrud } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+    { name: "event_id", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true), columns,
+    columnNames: columns.map(c => c.name), primaryKeys: ["id"],
+  };
+  const snapshot = { id: "slot-1", title: "Before", event_id: "evt1" };
+  const fk = [{ column: "event_id", referencedTable: "events", referencedColumn: "id" }];
+  const sqls = [], args = [];
+  const db = {
+    prepare(sql) {
+      sqls.push(sql);
+      return {
+        bind(...binds) {
+          args.push(binds);
+          return {
+            async all() {
+              if (sql.startsWith('SELECT * FROM "slots"')) {
+                assert.match(sql, /^SELECT \* FROM "slots" WHERE "id" = \? LIMIT 2$/);
+                return { results: [snapshot] };
+              }
+              assert.match(sql, /^SELECT "id" AS value FROM "events" WHERE "id" IN \(\?\) LIMIT 2$/);
+              return { results: binds.map(value => ({ value })) };
+            },
+          };
+        },
+      };
+    },
+  };
+  const post = parseSpreadsheetCrudBody("POST", {
+    table: " slots ", row: { id: "slot-2", title: "Created", event_id: "evt1" },
+  });
+  const inserted = await planSpreadsheetGuardedCrud(db, ctx, post, fk, "operator", 1);
+  assert.equal(inserted.audit.operation, "CREATE");
+  assert.equal(inserted.audit.target_id, "slot-2");
+  assert.deepEqual(inserted.binds, ["slot-2", "Created", "evt1"]);
+  assert.deepEqual(inserted.audit.after, { id: "slot-2", title: "Created", event_id: "evt1" });
+  assert.equal(sqls.length, 1);
+  assert.deepEqual(args, [["evt1"]]);
+
+  sqls.length = 0; args.length = 0;
+  const patch = parseSpreadsheetCrudBody("PATCH", {
+    table: "slots", primaryKey: { id: "slot-1" },
+    column: "title", value: "Updated",
+  });
+  const modified = await planSpreadsheetGuardedCrud(db, ctx, patch, fk, "operator", 1);
+  assert.equal(modified.audit.operation, "UPDATE");
+  assert.equal(modified.audit.before.title, "Before");
+  assert.equal(modified.audit.after.title, "Updated");
+  assert.deepEqual(modified.binds, ["Updated", "slot-1", "slot-1", "Before", "evt1"]);
+  assert.equal(sqls.length, 1);
+  assert.deepEqual(args, [["slot-1"]]);
+
+  sqls.length = 0; args.length = 0;
+  const patchFk = parseSpreadsheetCrudBody("PATCH", {
+    table: "slots", primaryKey: { id: "slot-1" },
+    column: "event_id", value: "evt2",
+  });
+  const withFk = await planSpreadsheetGuardedCrud(db, ctx, patchFk, fk, "operator", 2);
+  assert.equal(withFk.audit.after.event_id, "evt2");
+  assert.equal(sqls.length, 2, "one fresh snapshot and one FK read");
+  assert.deepEqual(args, [["slot-1"], ["evt2"]]);
+
+  sqls.length = 0; args.length = 0;
+  const deletion = parseSpreadsheetCrudBody("DELETE", {
+    table: "slots", primaryKey: { id: "slot-1" },
+  });
+  const removed = await planSpreadsheetGuardedCrud(db, ctx, deletion, fk, "operator", 1);
+  assert.equal(removed.audit.operation, "DELETE");
+  assert.equal(removed.audit.after, null);
+  assert.deepEqual(removed.binds, ["slot-1", "slot-1", "Before", "evt1"]);
+  assert.equal(sqls.length, 1);
+});
+
+test("MIG-0638 U01b: CRUD planner denies invalid input and exhausted FK budgets without D1", async () => {
+  const { parseSpreadsheetCrudBody, planSpreadsheetGuardedCrud } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+    { name: "event_id", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true), columns,
+    columnNames: columns.map(c => c.name), primaryKeys: ["id"],
+  };
+  const fk = [{ column: "event_id", referencedTable: "events", referencedColumn: "id" }];
+  let readCount = 0;
+  const db = { prepare() { readCount++; throw Error("no D1 read expected"); } };
+  const update = parseSpreadsheetCrudBody("PATCH", {
+    table: "slots", primaryKey: { id: "slot-1" },
+    column: "event_id", value: "evt2",
+  });
+  const deletion = parseSpreadsheetCrudBody("DELETE", {
+    table: "slots", primaryKey: { id: "slot-1" },
+  });
+  const insert = parseSpreadsheetCrudBody("POST", {
+    table: "slots", row: { id: "slot-2", event_id: "evt1" },
+  });
+  for (const [body, budget, expected] of [
+    [update, 0, "batch_too_large"],
+    [update, 1, "batch_too_large"],
+    [deletion, 0, "batch_too_large"],
+    [insert, 0, "batch_too_large"],
+    [insert, 4, "batch_too_large"],
+    [update, 1.5, "batch_too_large"],
+    [insert, -1, "batch_too_large"],
+    [{ ...deletion, table: "other" }, 1, "unknown_table"],
+    [update, 2, "missing_operator"],
+  ]) {
+    await assert.rejects(
+      planSpreadsheetGuardedCrud(db, ctx, body, fk,
+        expected === "missing_operator" ? " " : "operator", budget),
+      error => error instanceof Error && error.message === expected,
+    );
+    assert.equal(readCount, 0);
+  }
+  const invalidPk = parseSpreadsheetCrudBody("DELETE", {
+    table: "slots", primaryKey: { id: "\0bad" },
+  });
+  await assert.rejects(
+    planSpreadsheetGuardedCrud(db, ctx, invalidPk, fk, "operator", 1),
+    /invalid_row/,
+  );
+  const primaryKeyPatch = parseSpreadsheetCrudBody("PATCH", {
+    table: "slots", primaryKey: { id: "slot-1" }, column: "id", value: "other",
+  });
+  await assert.rejects(
+    planSpreadsheetGuardedCrud(db, ctx, primaryKeyPatch, fk, "operator", 1),
+    /empty_row/,
+  );
+  assert.equal(readCount, 0);
+  const noFkInsert = parseSpreadsheetCrudBody("POST", {
+    table: "slots", row: { id: "slot-3" },
+  });
+  const noFk = await planSpreadsheetGuardedCrud(db, ctx, noFkInsert, fk, "operator", 0);
+  assert.equal(noFk.audit.operation, "CREATE");
+  assert.equal(noFk.audit.target_id, "slot-3");
+  assert.equal(readCount, 0);
+});
+
+
+test("MIG-0638 U01b: FK lookup must never match missing or inherited D1 result values", async () => {
+  const {
+    buildSpreadsheetForeignKeyLookups, assertSpreadsheetForeignKeyLookup,
+    validateSpreadsheetForeignKeys,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const fk = [{ column: "event_id", referencedTable: "events", referencedColumn: "id" }];
+  const plan = buildSpreadsheetForeignKeyLookups(fk, [{ event_id: "undefined" }], 1)[0];
+  assert.deepEqual(plan.binds, ["undefined"]);
+  assert.doesNotThrow(() => assertSpreadsheetForeignKeyLookup(
+    plan, [{ value: "undefined" }]));
+  const inherited = Object.create({ value: "undefined" });
+  for (const results of [
+    [{}],
+    [inherited],
+    [{ value: undefined }],
+    [{ value: null }],
+    [{ value: false }],
+    [{ value: {} }],
+    [{ value: Number.NaN }],
+    [{ value: Number.POSITIVE_INFINITY }],
+    [{ value: "other" }],
+    [{ value: "undefined\0" }],
+    [null],
+    [true],
+  ]) {
+    assert.throws(
+      () => assertSpreadsheetForeignKeyLookup(plan, results),
+      error => error instanceof Error && error.message === "invalid_snapshot",
+      "a malformed D1 adapter row must not authorize an existing FK",
+    );
+    let read = 0;
+    const db = { prepare() { read++; return { bind() {
+      return { async all() { return { results }; } };
+    } }; } };
+    await assert.rejects(
+      validateSpreadsheetForeignKeys(db, fk, [{ event_id: "undefined" }], 1),
+      error => error instanceof Error && error.message === "invalid_snapshot",
+    );
+    assert.equal(read, 1);
+  }
+
+  const many = buildSpreadsheetForeignKeyLookups(fk,
+    [{ event_id: "a" }, { event_id: "b" }], 1)[0];
+  assert.doesNotThrow(() => assertSpreadsheetForeignKeyLookup(many,
+    [{ value: "a" }, { value: "b" }]));
+  assert.throws(() => assertSpreadsheetForeignKeyLookup(many,
+    [{ value: "a" }, { value: "a" }]), /invalid_snapshot/);
+  assert.throws(() => assertSpreadsheetForeignKeyLookup(many,
+    [{ value: "a" }]), /foreign_key_violation/);
+  const numeric = buildSpreadsheetForeignKeyLookups(fk, [{ event_id: "42" }], 1)[0];
+  assert.doesNotThrow(() => assertSpreadsheetForeignKeyLookup(numeric,
+    [{ value: 42 }]), "valid SQLite integer FK values still round-trip as strings");
+  // SQLite/D1 can return an INTEGER above 2^53-1 as a rounded JS number.
+  // Without a safe-integer guard, two distinct FK targets can stringify to
+  // the same decimal text and authorize a write against the wrong key.
+  for (const unsafe of [9007199254740992, -9007199254740992]) {
+    const rounded = buildSpreadsheetForeignKeyLookups(
+      fk, [{ event_id: String(unsafe) }], 1,
+    )[0];
+    assert.throws(() => assertSpreadsheetForeignKeyLookup(rounded,
+      [{ value: unsafe }]), error =>
+      error instanceof Error && error.message === "invalid_snapshot");
+    let reads = 0;
+    const db = { prepare(statement) {
+      reads++;
+      assert.match(statement, /^SELECT /);
+      return { bind() { return { async all() {
+        return { results: [{ value: unsafe }] };
+      } }; } };
+    } };
+    await assert.rejects(
+      () => validateSpreadsheetForeignKeys(db, fk,
+        [{ event_id: String(unsafe) }], 1),
+      error => error instanceof Error && error.message === "invalid_snapshot",
+    );
+    assert.equal(reads, 1, "unsafe result rejects after one bounded SELECT");
+  }
+  for (const safe of [Number.MAX_SAFE_INTEGER, Number.MIN_SAFE_INTEGER, 42]) {
+    const valid = buildSpreadsheetForeignKeyLookups(
+      fk, [{ event_id: String(safe) }], 1,
+    )[0];
+    assert.doesNotThrow(() => assertSpreadsheetForeignKeyLookup(valid,
+      [{ value: safe }]), "safe INTEGER FK references remain valid");
+  }
+  const fractional = buildSpreadsheetForeignKeyLookups(
+    fk, [{ event_id: "1.25" }], 1,
+  )[0];
+  assert.doesNotThrow(() => assertSpreadsheetForeignKeyLookup(fractional,
+    [{ value: 1.25 }]), "legitimate fractional REAL values remain valid");
+  const textKey = buildSpreadsheetForeignKeyLookups(
+    fk, [{ event_id: "9007199254740993" }], 1,
+  )[0];
+  assert.doesNotThrow(() => assertSpreadsheetForeignKeyLookup(textKey,
+    [{ value: "9007199254740993" }]), "large precise TEXT keys remain valid");
+});
+
+test("MIG-0638 U01b: FK planner rejects non-string or inherited input before D1", async () => {
+  const { buildSpreadsheetForeignKeyLookups, validateSpreadsheetForeignKeys } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const fk = [{ column: "event_id", referencedTable: "events", referencedColumn: "id" }];
+  const inherited = Object.create({ event_id: "inherited" });
+  assert.deepEqual(buildSpreadsheetForeignKeyLookups(fk, [inherited], 1), []);
+  assert.deepEqual(buildSpreadsheetForeignKeyLookups(
+    [{ column: "constructor", referencedTable: "events", referencedColumn: "id" }],
+    [{}], 1), []);
+  const explicit = Object.fromEntries([["event_id", "own"]]);
+  assert.deepEqual(buildSpreadsheetForeignKeyLookups(fk, [explicit], 1)[0].binds,
+    ["own"]);
+  let reads = 0;
+  const db = { prepare() { reads++; throw Error("no D1 reads on malformed rows"); } };
+  for (const value of [undefined, 1, false, [], {}, Number.NaN]) {
+    const bad = { event_id: value };
+    assert.throws(() => buildSpreadsheetForeignKeyLookups(fk, [bad], 1),
+      error => error instanceof Error && error.message === "invalid_row");
+    await assert.rejects(
+      validateSpreadsheetForeignKeys(db, fk, [bad], 1),
+      error => error instanceof Error && error.message === "invalid_row",
+    );
+    assert.equal(reads, 0);
+  }
+  for (const bad of [null, 42, [], false]) {
+    assert.throws(() => buildSpreadsheetForeignKeyLookups(fk, [bad], 1),
+      error => error instanceof Error && error.message === "invalid_row");
+  }
+});
+
+
+test("MIG-0638 U01b: CRUD PK SELECT detects a duplicate sentinel without mutation", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const {
+    MAX_SPREADSHEET_CRUD_SNAPSHOT_ROWS,
+    fetchSpreadsheetRawSnapshot, buildSpreadsheetAuditedUpdate,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  assert.equal(MAX_SPREADSHEET_CRUD_SNAPSHOT_ROWS, 2);
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    columns, columnNames: columns.map(column => column.name),
+    primaryKeys: ["id"],
+  };
+  const sqlite = new DatabaseSync(":memory:");
+  try {
+    // A malformed legacy schema without the metadata-claimed UNIQUE PK
+    // must not trick the future Hono CAS planner into targeting many rows.
+    sqlite.exec('CREATE TABLE slots (id TEXT NOT NULL, title TEXT)');
+    const insert = sqlite.prepare('INSERT INTO slots (id, title) VALUES (?, ?)');
+    for (let i = 0; i < 20; i++) insert.run("repeated", "old-" + i);
+    let preparedCount = 0, resultCount = -1;
+    const db = {
+      prepare(sql) {
+        preparedCount++;
+        assert.equal(sql, 'SELECT * FROM "slots" WHERE "id" = ? LIMIT 2');
+        return { bind(...binds) {
+          assert.deepEqual(binds, ["repeated"]);
+          return { async all() {
+            const results = sqlite.prepare(sql).all(...binds);
+            resultCount = results.length;
+            return { results };
+          } };
+        } };
+      },
+    };
+    await assert.rejects(
+      fetchSpreadsheetRawSnapshot(db, ctx, { id: "repeated" }, 1),
+      /invalid_snapshot/,
+    );
+    assert.equal(preparedCount, 1, "one S3 pre-read, not an additional query");
+    assert.equal(resultCount, 2, "D1 reads at most the one duplicate sentinel");
+    assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM slots').get().n, 20);
+
+    sqlite.exec('DELETE FROM slots');
+    insert.run("repeated", "single");
+    const before = await fetchSpreadsheetRawSnapshot(db, ctx, { id: "repeated" }, 1);
+    assert.deepEqual(before, { id: "repeated", title: "single" });
+    assert.ok(Object.isFrozen(before));
+    assert.equal(resultCount, 1);
+    const plan = buildSpreadsheetAuditedUpdate(ctx, { id: "repeated" },
+      before, { title: "new" }, "operator");
+    assert.deepEqual(plan.binds, ["new", "repeated", "repeated", "single"]);
+    assert.deepEqual(plan.audit.before, { id: "repeated", title: "single" });
+
+    sqlite.exec('DELETE FROM slots');
+    await assert.rejects(fetchSpreadsheetRawSnapshot(db, ctx,
+      { id: "repeated" }, 1), /row_not_found/);
+    assert.equal(resultCount, 0);
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("MIG-0638 U01b: malformed CRUD PK D1 result envelopes fail closed", async () => {
+  const { fetchSpreadsheetRawSnapshot } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    columns, columnNames: columns.map(c => c.name), primaryKeys: ["id"],
+  };
+  const fake = payload => ({
+    prepare(sql) {
+      assert.match(sql, / LIMIT 2$/);
+      return { bind() { return { async all() { return payload; } }; } };
+    },
+  });
+  for (const result of [
+    null, {}, { results: null }, { results: {} },
+    { results: [{ id: "slot-1", title: "a" }, { id: "slot-1", title: "b" }] },
+    { results: [null] }, { results: [false] },
+  ]) {
+    await assert.rejects(fetchSpreadsheetRawSnapshot(
+      fake(result), ctx, { id: "slot-1" }, 1), /invalid_snapshot/);
+  }
+  await assert.rejects(fetchSpreadsheetRawSnapshot(
+    fake({ results: [] }), ctx, { id: "slot-1" }, 1), /row_not_found/);
+});
+
+
+test("MIG-0638 U01b: CRUD INSERT preflights effective default foreign keys", async () => {
+  const {
+    parseSpreadsheetCrudBody, planSpreadsheetGuardedCrud,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "event_id", type: "TEXT", notNull: true, pk: 0,
+      defaultValue: "'evt-default'" },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    columns, columnNames: columns.map(column => column.name),
+    primaryKeys: ["id"],
+  };
+  const fk = [{ column: "event_id", referencedTable: "events", referencedColumn: "id" }];
+  const body = parseSpreadsheetCrudBody("POST",
+    { table: "slots", row: { id: "slot-1", title: "Created" } });
+  assert.equal(Object.hasOwn(body.row, "event_id"), false);
+  const reads = [], binds = [];
+  const db = {
+    prepare(sql) {
+      reads.push(sql);
+      return { bind(...args) {
+        binds.push(args);
+        return { async all() { return { results: args.map(value => ({ value })) }; } };
+      } };
+    },
+  };
+  const plan = await planSpreadsheetGuardedCrud(db, ctx, body, fk, "operator", 1);
+  assert.equal(plan.audit.operation, "CREATE");
+  assert.deepEqual(plan.audit.after,
+    { id: "slot-1", event_id: "evt-default", title: "Created" });
+  assert.deepEqual(plan.binds, ["slot-1", "evt-default", "Created"]);
+  assert.equal(reads.length, 1,
+    "defaulted FK must receive the same one-query preflight as a supplied FK");
+  assert.equal(reads[0],
+    'SELECT "id" AS value FROM "events" WHERE "id" IN (?) LIMIT 2');
+  assert.deepEqual(binds, [["evt-default"]]);
+
+  reads.length = 0; binds.length = 0;
+  const override = parseSpreadsheetCrudBody("POST", {
+    table: "slots", row: { id: "slot-2", event_id: "evt-override" },
+  });
+  const overridePlan = await planSpreadsheetGuardedCrud(
+    db, ctx, override, fk, "operator", 1);
+  assert.equal(overridePlan.audit.after.event_id, "evt-override");
+  assert.deepEqual(binds, [["evt-override"]],
+    "explicit inserted FK must take precedence over the default");
+
+  const blockedDb = {
+    prepare() { throw Error("no D1 should be read after exhausted budget"); },
+  };
+  await assert.rejects(
+    planSpreadsheetGuardedCrud(blockedDb, ctx, body, fk, "operator", 0),
+    /batch_too_large/,
+    "defaulted FK must not bypass S3 read budget",
+  );
+  const absentDb = {
+    prepare() { return { bind() { return {
+      async all() { return { results: [] }; },
+    }; } }; },
+  };
+  await assert.rejects(
+    planSpreadsheetGuardedCrud(absentDb, ctx, body, fk, "operator", 1),
+    /foreign_key_violation/,
+    "missing defaulted FK must reject before returning a mutation plan",
+  );
+});
+
+test("MIG-0638 U01b: numeric INSERT defaults and null FKs mirror persisted audit row", async () => {
+  const {
+    parseSpreadsheetCrudBody, planSpreadsheetGuardedCrud,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "event_id", type: "INTEGER", notNull: false, pk: 0,
+      defaultValue: "42" },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    columns, columnNames: columns.map(column => column.name),
+    primaryKeys: ["id"],
+  };
+  const fk = [{ column: "event_id", referencedTable: "events", referencedColumn: "id" }];
+  let prepared = 0;
+  const args = [];
+  const db = {
+    prepare(sql) {
+      prepared++;
+      assert.match(sql, /^SELECT "id" AS value FROM "events" WHERE/);
+      return { bind(...values) {
+        args.push(values);
+        return { async all() { return { results: [{ value: 42 }] }; } };
+      } };
+    },
+  };
+  const defaulted = parseSpreadsheetCrudBody("POST", {
+    table: "slots", row: { id: "slot-int" },
+  });
+  const plan = await planSpreadsheetGuardedCrud(
+    db, ctx, defaulted, fk, "operator", 1);
+  assert.equal(plan.audit.after.event_id, 42);
+  assert.deepEqual(plan.binds, ["slot-int", 42]);
+  assert.deepEqual(args, [["42"]],
+    "numeric SQLite default must be looked up by its textual FK identity");
+  assert.equal(prepared, 1);
+
+  const nullable = parseSpreadsheetCrudBody("POST", {
+    table: "slots", row: { id: "slot-null", event_id: null },
+  });
+  const nullPlan = await planSpreadsheetGuardedCrud(
+    db, ctx, nullable, fk, "operator", 0);
+  assert.equal(nullPlan.audit.after.event_id, null);
+  assert.deepEqual(nullPlan.binds, ["slot-null", null]);
+  assert.equal(prepared, 1,
+    "SQL NULL reference must not use a needless FK read");
+
+  const malformedFk = [
+    { column: "not_in_schema", referencedTable: "events", referencedColumn: "id" },
+  ];
+  await assert.rejects(
+    planSpreadsheetGuardedCrud(db, ctx, defaulted, malformedFk, "operator", 1),
+    /invalid_snapshot/,
+    "a mismatched FK catalog must fail before any D1 preflight query",
+  );
+  assert.equal(prepared, 1);
+});
+
+
+test("MIG-0638 U02: import checks defaulted INSERT foreign keys along with supplied values", async () => {
+  const {
+    prepareSpreadsheetImportMutationRows,
+    planSpreadsheetImportMutations,
+    validateSpreadsheetPlannedImportForeignKeys,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "event_id", type: "TEXT", notNull: true, pk: 0,
+      defaultValue: "'evt-default'" },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true), columns,
+    columnNames: columns.map(column => column.name), primaryKeys: ["id"],
+  };
+  const foreignKeys = [
+    { column: "event_id", referencedTable: "events", referencedColumn: "id" },
+  ];
+  const prepared = prepareSpreadsheetImportMutationRows(ctx, [
+    { id: "s1", title: "one" },
+    { id: "s2", title: "two", event_id: "evt-supplied" },
+  ]);
+  assert.deepEqual(prepared.errors, []);
+  const plan = planSpreadsheetImportMutations(ctx, prepared, "insert", null, "operator");
+  assert.deepEqual([plan.inserted, plan.updated, plan.skipped], [2, 0, 0]);
+  assert.deepEqual(plan.mutations.map(row => row.audit.after.event_id),
+    ["evt-default", "evt-supplied"]);
+  const queries = [], args = [];
+  const db = {
+    prepare(statement) {
+      queries.push(statement);
+      return { bind(...values) {
+        args.push(values);
+        return { async all() { return { results: values.map(value => ({ value })) }; } };
+      } };
+    },
+  };
+  await validateSpreadsheetPlannedImportForeignKeys(db, ctx,
+    foreignKeys, prepared, plan, 1);
+  assert.equal(queries.length, 1, "one S3 pre-read checks explicit + defaulted values");
+  assert.match(queries[0],
+    /^SELECT "id" AS value FROM "events" WHERE "id" IN \(\?, \?\) LIMIT 3$/);
+  assert.deepEqual(new Set(args[0]), new Set(["evt-default", "evt-supplied"]));
+  assert.equal(args[0].length, 2, "supplied FK is not read a second time");
+
+  queries.length = 0;
+  const missingDb = {
+    prepare(statement) {
+      queries.push(statement);
+      return { bind(...values) {
+        return { async all() {
+          return { results: values.filter(v => v !== "evt-default")
+            .map(value => ({ value })) };
+        } };
+      } };
+    },
+  };
+  await assert.rejects(
+    validateSpreadsheetPlannedImportForeignKeys(missingDb, ctx,
+      foreignKeys, prepared, plan, 1),
+    /foreign_key_violation/,
+    "missing defaulted FK must abort preflight before nonce/data/audit writes",
+  );
+  assert.equal(queries.length, 1);
+  let blockedReads = 0;
+  const blockedDb = { prepare() { blockedReads++; throw Error("no D1"); } };
+  await assert.rejects(
+    validateSpreadsheetPlannedImportForeignKeys(blockedDb, ctx,
+      foreignKeys, prepared, plan, 0), /batch_too_large/);
+  assert.equal(blockedReads, 0, "exhausted S3 budget cannot be bypassed by defaults");
+});
+
+test("MIG-0638 U02: UPSERT preflights supplied FK changes and newly inserted defaults", async () => {
+  const {
+    prepareSpreadsheetImportMutationRows,
+    planSpreadsheetImportMutations,
+    validateSpreadsheetPlannedImportForeignKeys,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "event_id", type: "INTEGER", notNull: false, pk: 0,
+      defaultValue: "42" },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true), columns,
+    columnNames: columns.map(column => column.name), primaryKeys: ["id"],
+  };
+  const foreignKeys = [
+    { column: "event_id", referencedTable: "events", referencedColumn: "id" },
+  ];
+  const prepared = prepareSpreadsheetImportMutationRows(ctx, [
+    { id: "old", event_id: "99" },
+    { id: "new", title: "Created" },
+  ]);
+  assert.deepEqual(prepared.errors, []);
+  const existingByPk = new Map([
+    [prepared.preparedRows[0].fingerprint,
+      Object.freeze({ id: "old", event_id: 88, title: "Before" })],
+  ]);
+  const plan = planSpreadsheetImportMutations(ctx, prepared, "upsert",
+    existingByPk, "operator");
+  assert.deepEqual([plan.inserted, plan.updated, plan.skipped], [1, 1, 0]);
+  const insert = plan.mutations.find(x => x.audit.operation === "CREATE");
+  const update = plan.mutations.find(x => x.audit.operation === "UPDATE");
+  assert.equal(insert.audit.after.event_id, 42);
+  assert.equal(update.audit.after.event_id, "99");
+  const bindCalls = [];
+  const db = { prepare(sql) {
+    assert.match(sql, / LIMIT 3$/);
+    return { bind(...values) {
+      bindCalls.push(values);
+      return { async all() {
+        return { results: values.map(value => ({ value })) };
+      } };
+    } };
+  } };
+  await validateSpreadsheetPlannedImportForeignKeys(db, ctx,
+    foreignKeys, prepared, plan, 1);
+  assert.equal(bindCalls.length, 1);
+  assert.deepEqual(new Set(bindCalls[0]), new Set(["42", "99"]));
+  assert.equal(insert.audit.after.event_id, 42,
+    "a numeric default stays numeric in SQL bind and audit after-image");
+  assert.ok(insert.binds.includes(42));
+
+  const noChangesPrepared = prepareSpreadsheetImportMutationRows(ctx,
+    [{ id: "old" }]);
+  const noChangeExisting = new Map([
+    [noChangesPrepared.preparedRows[0].fingerprint,
+      { id: "old", event_id: 88, title: "Before" }],
+  ]);
+  const skipped = planSpreadsheetImportMutations(ctx, noChangesPrepared,
+    "upsert", noChangeExisting, "operator");
+  assert.deepEqual([skipped.inserted, skipped.updated, skipped.skipped],
+    [0, 0, 1]);
+  let readCount = 0;
+  const neverRead = { prepare() { readCount++; throw Error("should not query FK"); } };
+  await validateSpreadsheetPlannedImportForeignKeys(neverRead, ctx,
+    foreignKeys, noChangesPrepared, skipped, 0);
+  assert.equal(readCount, 0, "unchanged legacy FK is not revalidated on skipped UPSERT");
+});
+
+test("MIG-0638 U02: invalid import plans and FK catalogs fail before D1 lookup", async () => {
+  const {
+    prepareSpreadsheetImportMutationRows,
+    planSpreadsheetImportMutations,
+    validateSpreadsheetPlannedImportForeignKeys,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "event_id", type: "TEXT", notNull: false, pk: 0,
+      defaultValue: "'evt-default'" },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true), columns,
+    columnNames: columns.map(column => column.name), primaryKeys: ["id"],
+  };
+  const fk = [{ column: "event_id", referencedTable: "events", referencedColumn: "id" }];
+  const prepared = prepareSpreadsheetImportMutationRows(ctx, [{ id: "s1" }]);
+  const plan = planSpreadsheetImportMutations(ctx, prepared,
+    "insert", null, "operator");
+  let reads = 0;
+  const db = { prepare() { reads++; throw Error("D1 must not be accessed"); } };
+  const cases = [
+    { ...plan, inserted: 2 },
+    { ...plan, inserted: -1 },
+    { ...plan, mutations: [] },
+    { ...plan, mutations: [{ ...plan.mutations[0],
+      audit: { ...plan.mutations[0].audit, table_name: "wrong_table" } }] },
+    { ...plan, mutations: [{ ...plan.mutations[0],
+      audit: { ...plan.mutations[0].audit, after: null } }] },
+  ];
+  for (const invalid of cases) {
+    await assert.rejects(
+      validateSpreadsheetPlannedImportForeignKeys(db, ctx,
+        fk, prepared, invalid, 1), /invalid_snapshot/);
+    assert.equal(reads, 0);
+  }
+  await assert.rejects(
+    validateSpreadsheetPlannedImportForeignKeys(db, ctx,
+      [{ column: "not_in_schema", referencedTable: "events",
+        referencedColumn: "id" }], prepared, plan, 1),
+    /invalid_snapshot/);
+  assert.equal(reads, 0);
+});
+
+
+test("MIG-0638 U01b: Drizzle D1 batch SQL bridge binds INSERT UPDATE DELETE and rejects forged SQL", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const { SQLiteSyncDialect } = await import("drizzle-orm/sqlite-core");
+  const {
+    buildSpreadsheetAuditedInsert,
+    buildSpreadsheetAuditedUpdate,
+    buildSpreadsheetAuditedDelete,
+    spreadsheetMutationToBoundSql,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const dialect = new SQLiteSyncDialect();
+  const sqlite = new DatabaseSync(":memory:");
+  try {
+    sqlite.exec("CREATE TABLE slots (id TEXT PRIMARY KEY, title TEXT, count INTEGER)");
+    const columns = [
+      { name: "id", type: "TEXT", notNull: true, pk: 1 },
+      { name: "title", type: "TEXT", notNull: false, pk: 0 },
+      { name: "count", type: "INTEGER", notNull: false, pk: 0 },
+    ];
+    const ctx = {
+      def: resolveSpreadsheetTableDef("slots", true),
+      primaryKeys: ["id"],
+      columns,
+      columnNames: columns.map(column => column.name),
+    };
+    const compile = (plan) => dialect.sqlToQuery(spreadsheetMutationToBoundSql(ctx, plan));
+    const hostile = "'); DROP TABLE slots; --";
+    const insert = buildSpreadsheetAuditedInsert(ctx,
+      { id: "slot-1", title: hostile, count: "2" }, "operator-1");
+    const prepared = compile(insert);
+    assert.equal(prepared.sql, insert.statement, "placeholder bytes stay identical to approved plan");
+    assert.deepEqual(prepared.params, insert.binds, "all input values remain bound");
+    assert.ok(!prepared.sql.includes(hostile));
+    assert.equal(sqlite.prepare(prepared.sql).run(...prepared.params).changes, 1);
+    const before = sqlite.prepare('SELECT * FROM slots WHERE id = ?').get("slot-1");
+    assert.equal(before.title, hostile);
+    assert.equal(before.count, 2);
+    const update = buildSpreadsheetAuditedUpdate(ctx, { id: "slot-1" }, before,
+      { title: "changed" }, "operator-1");
+    const updateSql = compile(update);
+    assert.equal(updateSql.sql, update.statement);
+    assert.deepEqual(updateSql.params, update.binds);
+    assert.equal(sqlite.prepare(updateSql.sql).run(...updateSql.params).changes, 1);
+
+    // A stale, otherwise well-formed CAS cannot overwrite a later writer.
+    // Use a SAVEPOINT to mirror D1 all-or-nothing rollback before audit/Queue
+    // integration: SQLite changes() fails and returns the DB to the prior state.
+    sqlite.exec("SAVEPOINT stale_cas");
+    try {
+      assert.equal(sqlite.prepare(updateSql.sql).run(...updateSql.params).changes, 0);
+      assert.throws(() => sqlite.prepare(
+        "SELECT CASE WHEN changes() = 1 THEN 1 ELSE json_extract('not-valid-json', '$') END"
+      ).get());
+    } finally {
+      sqlite.exec("ROLLBACK TO stale_cas; RELEASE stale_cas");
+    }
+    assert.equal(sqlite.prepare('SELECT title FROM slots WHERE id = ?').get("slot-1").title, "changed");
+    const after = sqlite.prepare('SELECT * FROM slots WHERE id = ?').get("slot-1");
+    const deletion = buildSpreadsheetAuditedDelete(ctx,
+      { id: "slot-1" }, after, "operator-1");
+    const deleteSql = compile(deletion);
+    assert.equal(deleteSql.sql, deletion.statement);
+    assert.deepEqual(deleteSql.params, deletion.binds);
+    assert.equal(sqlite.prepare(deleteSql.sql).run(...deleteSql.params).changes, 1);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM slots").get().n, 0);
+
+    for (const malicious of [
+      { statement: 'UPDATE "slots" SET "title" = ?; DELETE FROM "slots"', binds: ["a"] },
+      { statement: 'UPDATE "slots" SET "title" = ? WHERE 1=1', binds: ["a"] },
+      { statement: 'UPDATE "slots" SET "title" = ?, "title" = ? WHERE "id" = ? AND "id" IS ? AND "title" IS ? AND "count" IS ?', binds: ["a", "b", "id", "id", "x", 1] },
+      { statement: 'DELETE FROM "slots" WHERE "id" = ?', binds: ["id"] },
+      { statement: 'INSERT INTO "slots" ("id") VALUES (?)', binds: ["id"] },
+      { statement: 'UPDATE "slots" SET "title" = ? -- comment', binds: ["a"] },
+      { statement: 'UPDATE "slots" SET "title" = ? /* comment */', binds: ["a"] },
+      { statement: 'UPDATE "videos" SET "title" = ?', binds: ["a"] },
+      { statement: 'UPDATE "slots" SET "title" = ?', binds: [] },
+      { statement: 'UPDATE "slots" SET "title" = ?', binds: ["a", "b"] },
+      { statement: 'UPDATE "slots" SET "title" = ?', binds: [Number.POSITIVE_INFINITY] },
+      { statement: 'UPDATE "slots" SET "title" = ?', binds: ["x\0y"] },
+    ]) {
+      assert.throws(() => compile(malicious), /invalid_row|batch_too_large/);
+    }
+    assert.throws(() => compile({
+      statement: 'UPDATE "slots" SET "title" = ' + Array(102).fill("?").join(", "),
+      binds: Array(102).fill("a"),
+    }), /batch_too_large/);
+    assert.throws(() => spreadsheetMutationToBoundSql({
+      ...ctx, def: { ...ctx.def, mode: "readonly" },
+    }, insert), /table_readonly/);
+    // All malformed plans are rejected before reaching any D1 mutation.
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM slots").get().n, 0);
+  } finally {
+    sqlite.close();
+  }
+});
+
+
+test("MIG-0638 U01b: atomic CRUD composer commits mutation, audit and Queue together", async () => {
+  const { drizzle } = await import("drizzle-orm/d1");
+  const { createAdminD1, seedBase } = await import("./helpers/sqliteD1.mjs");
+  const { mutateWithAudit, planAtomicAuditMutationBudget } =
+    await import("@flamenode/server-core/audit/mutate");
+  const {
+    buildSpreadsheetAuditedInsert,
+    buildSpreadsheetAuditedUpdate,
+    buildSpreadsheetAuditedDelete,
+    planSpreadsheetAtomicAuditedCrud,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const fixture = createAdminD1();
+  const { sqlite, stats } = fixture;
+  try {
+    seedBase(sqlite);
+    sqlite.exec("CREATE TABLE slots (id TEXT PRIMARY KEY NOT NULL, title TEXT, count INTEGER)");
+    const db = drizzle(fixture.db);
+    const columns = [
+      { name: "id", type: "TEXT", pk: 1, notNull: true },
+      { name: "title", type: "TEXT", pk: 0, notNull: false },
+      { name: "count", type: "INTEGER", pk: 0, notNull: false },
+    ];
+    const ctx = {
+      def: resolveSpreadsheetTableDef("slots", true),
+      primaryKeys: ["id"],
+      columns,
+      columnNames: columns.map(c => c.name),
+    };
+    const target = (id) => [{ targetType: "event_base", targetId: id,
+      reason: "admin_spreadsheet_change", priority: "normal", requestedByUserId: "admin-1" }];
+    const options = (id, more = {}) => ({
+      authorizedActorId: "admin-1", callerQueryCount: 3, queueTargets: target(id), ...more,
+    });
+    const wakeHost = async () => ({
+      readEnv: () => null, readWaitUntil: () => null, readKv: () => null,
+    });
+    const insert = buildSpreadsheetAuditedInsert(ctx,
+      { id: "slot-1", title: "initial", count: "3" }, "admin-1");
+    const prepared = await planSpreadsheetAtomicAuditedCrud(db, ctx, insert, options("event-create"));
+    assert.equal(stats.batches, 0, "planner must not execute a D1 batch");
+    assert.equal(prepared.mutationStatements.length, 2, "one CRUD and one queued rebuild");
+    assert.deepEqual(prepared.expectedMutationChanges, [1, 1]);
+    assert.equal(prepared.audits.length, 1);
+    assert.equal(prepared.staticRebuildWakeSource, "admin");
+    assert.ok(planAtomicAuditMutationBudget(prepared).withinLimit);
+    await mutateWithAudit(db, prepared, wakeHost);
+    assert.equal(sqlite.prepare("SELECT title FROM slots WHERE id = ?").get("slot-1").title, "initial");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 1);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 1);
+    assert.equal(sqlite.prepare(
+      "SELECT requested_by_user_id FROM static_rebuild_queue WHERE target_id = ?"
+    ).get("event-create").requested_by_user_id, "admin-1",
+      "durable Queue identity must match the audited authorized actor");
+    assert.equal(stats.batches, 1);
+
+    const before = sqlite.prepare("SELECT * FROM slots WHERE id = ?").get("slot-1");
+    const update = buildSpreadsheetAuditedUpdate(ctx, { id: "slot-1" }, before,
+      { title: "updated" }, "admin-1");
+    const updated = await planSpreadsheetAtomicAuditedCrud(db, ctx, update, options("event-update"));
+    await mutateWithAudit(db, updated, wakeHost);
+    assert.equal(sqlite.prepare('SELECT title FROM slots WHERE id = ?').get("slot-1").title, "updated");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 2);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 2);
+
+    // Concurrent writer after the before-image: exact-one full-row CAS fails,
+    // and audit plus the queued rebuild are rolled back in that same D1 batch.
+    const stale = buildSpreadsheetAuditedUpdate(ctx, { id: "slot-1" }, before,
+      { title: "stale-overwrite" }, "admin-1");
+    const stalePrepared = await planSpreadsheetAtomicAuditedCrud(db, ctx, stale, options("event-stale"));
+    await assert.rejects(() => mutateWithAudit(db, stalePrepared, wakeHost));
+    assert.equal(sqlite.prepare('SELECT title FROM slots WHERE id = ?').get("slot-1").title, "updated");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 2);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 2);
+    assert.equal(sqlite.prepare(
+      "SELECT COUNT(*) AS n FROM static_rebuild_queue WHERE target_id='event-stale'"
+    ).get().n, 0);
+
+    // An authenticated caller cannot bypass persisted queue, actor/audit
+    // identity, or the hard D1 50-query budget with a forged source plan.
+    await assert.rejects(() => planSpreadsheetAtomicAuditedCrud(
+      db, ctx, insert, options("invalid", { queueTargets: [] }),
+    ), /invalid_row/);
+    await assert.rejects(() => planSpreadsheetAtomicAuditedCrud(
+      db, ctx, insert, options("invalid", { queueTargets: [
+        { ...target("event-spoof")[0], requestedByUserId: "different-user" },
+      ] }),
+    ), /invalid_row/, "queue requester must not impersonate a different actor");
+    await assert.rejects(() => planSpreadsheetAtomicAuditedCrud(
+      db, ctx, insert, options("invalid", { queueTargets: [
+        { ...target("event-nul")[0], targetId: "event\0spoof" },
+      ] }),
+    ), /invalid_row/);
+    await assert.rejects(() => planSpreadsheetAtomicAuditedCrud(
+      db, ctx, insert, options("invalid", { queueTargets: [
+        { ...target("event-nul")[0], reason: "bad\0reason" },
+      ] }),
+    ), /invalid_row/);
+    await assert.rejects(() => planSpreadsheetAtomicAuditedCrud(
+      db, ctx, insert, options("invalid", { authorizedActorId: "other" }),
+    ), /invalid_row/);
+    await assert.rejects(() => planSpreadsheetAtomicAuditedCrud(
+      db, ctx, { ...insert, audit: { ...insert.audit, target_id: "other" } }, options("invalid"),
+    ), /invalid_row/);
+    await assert.rejects(() => planSpreadsheetAtomicAuditedCrud(
+      db, ctx, insert, options("invalid", { callerQueryCount: 48 }),
+    ), /batch_too_large/);
+    await assert.rejects(() => planSpreadsheetAtomicAuditedCrud(
+      db, ctx, { ...insert, statement: 'UPDATE "slots" SET "title" = ? WHERE 1=1' },
+      options("invalid"),
+    ), /invalid_row|batch_too_large/);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 2);
+
+    const deleteBefore = sqlite.prepare("SELECT * FROM slots WHERE id = ?").get("slot-1");
+    const deletion = buildSpreadsheetAuditedDelete(ctx, { id: "slot-1" }, deleteBefore, "admin-1");
+    const deleted = await planSpreadsheetAtomicAuditedCrud(db, ctx, deletion, options("event-delete"));
+    await mutateWithAudit(db, deleted, wakeHost);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM slots").get().n, 0);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 3);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 3);
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("MIG-0638 U02: incomplete D1 result and non-scalar before-images reject rather than INSERT", async () => {
+  const {
+    prepareSpreadsheetImportMutationRows, fetchSpreadsheetExistingImportRows,
+    spreadsheetImportPrimaryKeyFingerprint,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    columns, columnNames: columns.map(column => column.name),
+    primaryKeys: ["id"],
+  };
+  const prepared = prepareSpreadsheetImportMutationRows(ctx,
+    [{ id: "slot-1", title: "new" }]);
+  assert.deepEqual(prepared.errors, []);
+  let reads = 0;
+  const db = response => ({
+    prepare(sql) {
+      reads++;
+      assert.equal(sql, 'SELECT * FROM "slots" WHERE ("id" = ?) LIMIT 8');
+      return { bind(...params) {
+        assert.deepEqual(params, ["slot-1"]);
+        return { async all() { return response; } };
+      } };
+    },
+  });
+
+  // A missing result is not proof that an UPSERT target is absent. The
+  // eventual import route must not plan an INSERT from a corrupted D1 read.
+  const malformed = [
+    null, undefined, {}, { results: null }, { results: {} },
+    { results: [null] },
+    { results: [{ id: "slot-1" }] },
+    { results: [{ id: "slot-1", title: undefined }] },
+    { results: [{ id: "slot-1", title: true }] },
+    { results: [{ id: "slot-1", title: NaN }] },
+    { results: [{ id: "slot-1", title: Infinity }] },
+    { results: [{ id: "slot-1", title: { note: "not a SQLite cell" } }] },
+    { results: [{ id: { toString() { return "slot-1"; } }, title: "old" }] },
+    { results: [{ id: "slot-1", title: ["not a scalar"] }] },
+  ];
+  for (const response of malformed) {
+    const before = reads;
+    await assert.rejects(
+      fetchSpreadsheetExistingImportRows(db(response), ctx, prepared, 1),
+      error => error instanceof Error && error.message === "invalid_snapshot",
+    );
+    assert.equal(reads, before + 1, "only one bounded read is permitted");
+  }
+
+  const absent = await fetchSpreadsheetExistingImportRows(db({ results: [] }), ctx, prepared, 1);
+  assert.equal(absent.size, 0, "a well-formed empty D1 result remains valid");
+  const found = await fetchSpreadsheetExistingImportRows(db({
+    results: [{ id: "slot-1", title: "old" }],
+  }), ctx, prepared, 1);
+  assert.equal(found.get(spreadsheetImportPrimaryKeyFingerprint({ id: "slot-1" })).title, "old");
+  assert.ok(Object.isFrozen(found.values().next().value));
+
+  // SQLite numeric PKs are still accepted when the requested canonical
+  // string key matches; the audit before-image retains the numeric type.
+  const numericPrepared = prepareSpreadsheetImportMutationRows(ctx, [{ id: "42", title: "new" }]);
+  const numericDb = { prepare() { return { bind() {
+    return { async all() { return { results: [{ id: 42, title: "old" }] }; } };
+  } }; } };
+  const numeric = await fetchSpreadsheetExistingImportRows(numericDb, ctx, numericPrepared, 1);
+  assert.equal(numeric.get(spreadsheetImportPrimaryKeyFingerprint({ id: "42" })).id, 42);
+});
+
+test("MIG-0638 U01b/U02: rounded SQLite INTEGER primary keys cannot prove a before-image", async () => {
+  const {
+    fetchSpreadsheetRawSnapshot, fetchSpreadsheetExistingImportRows,
+    prepareSpreadsheetImportMutationRows, spreadsheetImportPrimaryKeyFingerprint,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "INTEGER", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    columns, columnNames: columns.map(c => c.name), primaryKeys: ["id"],
+  };
+  const mkDb = row => {
+    let reads = 0;
+    return {
+      get reads() { return reads; },
+      prepare(statement) {
+        assert.match(statement, /^SELECT \* FROM "slots" WHERE /);
+        assert.match(statement, / LIMIT (?:2|8)$/);
+        reads++;
+        return { bind() { return { async all() { return { results: [row] }; } }; } };
+      },
+    };
+  };
+  // Both +2^53 and -2^53 are individually representable as numbers, but
+  // integer values one apart from them may round to the same JS number.
+  for (const unsafe of [Number.MAX_SAFE_INTEGER + 1, Number.MIN_SAFE_INTEGER - 1]) {
+    const key = String(unsafe);
+    const db = mkDb({ id: unsafe, title: "old" });
+    await assert.rejects(
+      fetchSpreadsheetRawSnapshot(db, ctx, { id: key }, 1), /invalid_snapshot/,
+    );
+    assert.equal(db.reads, 1);
+    const prepared = prepareSpreadsheetImportMutationRows(ctx, [{ id: key, title: "new" }]);
+    assert.deepEqual(prepared.errors, []);
+    await assert.rejects(
+      fetchSpreadsheetExistingImportRows(db, ctx, prepared, 1), /invalid_snapshot/,
+    );
+    assert.equal(db.reads, 2, "one bounded read per attempt, no extra D1 query");
+  }
+
+  for (const safe of [Number.MAX_SAFE_INTEGER, Number.MIN_SAFE_INTEGER, 42]) {
+    const key = String(safe);
+    const db = mkDb({ id: safe, title: "old" });
+    const snapshot = await fetchSpreadsheetRawSnapshot(db, ctx, { id: key }, 1);
+    assert.equal(snapshot.id, safe);
+    assert.ok(Object.isFrozen(snapshot));
+    const prepared = prepareSpreadsheetImportMutationRows(ctx, [{ id: key, title: "new" }]);
+    const imported = await fetchSpreadsheetExistingImportRows(db, ctx, prepared, 1);
+    const row = imported.get(spreadsheetImportPrimaryKeyFingerprint({ id: key }));
+    assert.equal(row?.id, safe);
+    assert.ok(Object.isFrozen(row));
+  }
+
+  // A numeric REAL primary-key value is not an INTEGER precision overflow.
+  // Preserve the existing exact textual identity match for fractional keys.
+  const realCtx = {
+    ...ctx, columns: [{ ...columns[0], type: "REAL" }, columns[1]],
+  };
+  const realDb = mkDb({ id: 3.5, title: "real" });
+  assert.equal((await fetchSpreadsheetRawSnapshot(realDb, realCtx, { id: "3.5" }, 1)).id, 3.5);
+  const realPrepared = prepareSpreadsheetImportMutationRows(realCtx, [{ id: "3.5", title: "new" }]);
+  assert.deepEqual(realPrepared.errors, []);
+  assert.equal((await fetchSpreadsheetExistingImportRows(realDb, realCtx, realPrepared, 1))
+    .get(spreadsheetImportPrimaryKeyFingerprint({ id: "3.5" }))?.id, 3.5);
+
+  // TEXT PKs that merely contain long decimal-looking strings do not lose
+  // precision and must remain readable.
+  const textCtx = { ...ctx, columns: [{ ...columns[0], type: "TEXT" }, columns[1]] };
+  const textDb = mkDb({ id: "9007199254740993", title: "text" });
+  assert.equal((await fetchSpreadsheetRawSnapshot(textDb, textCtx,
+    { id: "9007199254740993" }, 1)).title, "text");
+  const textPrepared = prepareSpreadsheetImportMutationRows(textCtx,
+    [{ id: "9007199254740993", title: "new" }]);
+  assert.equal((await fetchSpreadsheetExistingImportRows(textDb, textCtx, textPrepared, 1))
+    .get(spreadsheetImportPrimaryKeyFingerprint({ id: "9007199254740993" }))?.title, "text");
+});
+
+test("MIG-0638 U02: nonce, multi-row import, strict audit and rebuild Queue are one D1 batch", async () => {
+  const { drizzle } = await import("drizzle-orm/d1");
+  const { createAdminD1, seedBase } = await import("./helpers/sqliteD1.mjs");
+  const { mutateWithAudit, planAtomicAuditMutationBudget } =
+    await import("@flamenode/server-core/audit/mutate");
+  const {
+    prepareSpreadsheetImportMutationRows, planSpreadsheetImportMutations,
+    planSpreadsheetAtomicAuditedImport, spreadsheetImportPrimaryKeyFingerprint,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const fixture = createAdminD1();
+  const { sqlite, stats } = fixture;
+  const wakeHost = async () => ({
+    readEnv: () => null, readWaitUntil: () => null, readKv: () => null,
+  });
+  try {
+    seedBase(sqlite);
+    sqlite.exec('CREATE TABLE slots (id TEXT PRIMARY KEY NOT NULL, title TEXT)');
+    sqlite.exec('CREATE TABLE spreadsheet_import_runs (nonce TEXT PRIMARY KEY, operator_user_id TEXT NOT NULL, table_name TEXT NOT NULL, mode TEXT NOT NULL, payload_hash TEXT NOT NULL, schema_fingerprint TEXT NOT NULL, expires_at INTEGER NOT NULL, consumed_at INTEGER, created_at INTEGER NOT NULL)');
+    const columns = [
+      { name: "id", type: "TEXT", pk: 1, notNull: true },
+      { name: "title", type: "TEXT", pk: 0, notNull: false },
+    ];
+    const ctx = {
+      def: resolveSpreadsheetTableDef("slots", true), primaryKeys: ["id"],
+      columns, columnNames: columns.map(c => c.name),
+    };
+    const db = drizzle(fixture.db);
+    const claimsFor = (nonce, mode = "insert") => ({
+      version: 1, nonce, operatorUserId: "admin-1", table: "slots", mode,
+      columns: ctx.columnNames, primaryKeys: ctx.primaryKeys,
+      payloadHash: "a".repeat(64), schemaFingerprint: "b".repeat(64),
+      issuedAt: 1000, expiresAt: 1300,
+    });
+    const insertRun = claims => sqlite.prepare(
+      "INSERT INTO spreadsheet_import_runs VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)"
+    ).run(claims.nonce, claims.operatorUserId, claims.table, claims.mode,
+      claims.payloadHash, claims.schemaFingerprint, claims.expiresAt, claims.issuedAt);
+    const target = id => [{ targetType: "event_base", targetId: id,
+      reason: "admin_spreadsheet_change", requestedByUserId: "admin-1" }];
+    const options = (id, more = {}) => ({
+      authorizedActorId: "admin-1", consumedAt: 1100,
+      callerQueryCount: 3, queueTargets: target(id), ...more,
+    });
+    const claims = claimsFor("12345678-1234-4234-8234-123456789abc");
+    insertRun(claims);
+    const prepared = prepareSpreadsheetImportMutationRows(ctx, [
+      { id: "a", title: "first" }, { id: "b", title: "second" },
+    ]);
+    assert.deepEqual(prepared.errors, []);
+    const planned = planSpreadsheetImportMutations(ctx, prepared, "insert", null, "admin-1");
+    const batch = await planSpreadsheetAtomicAuditedImport(db, ctx, planned,
+      claims, options("batch-success"));
+    assert.equal(stats.batches, 0, "composer is unmounted and cannot execute D1");
+    assert.deepEqual(batch.expectedMutationChanges, [1, 1, 1, 1]);
+    assert.equal(batch.audits.length, 3, "nonce plus two row audits");
+    assert.equal(batch.staticRebuildWakeSource, "admin");
+    assert.ok(planAtomicAuditMutationBudget(batch).withinLimit);
+    await mutateWithAudit(db, batch, wakeHost);
+    // node:sqlite returns null-prototype row records, unlike plain fixtures.
+    // Convert the row containers only; keep the database values unmodified.
+    assert.deepEqual(sqlite.prepare("SELECT id, title FROM slots ORDER BY id")
+      .all().map(row => ({ ...row })),
+      [{ id: "a", title: "first" }, { id: "b", title: "second" }]);
+    assert.equal(sqlite.prepare(
+      "SELECT consumed_at FROM spreadsheet_import_runs WHERE nonce = ?"
+    ).get(claims.nonce).consumed_at, 1100);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 3);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 1);
+    assert.equal(stats.batches, 1);
+
+    // A replay first tries to consume the already-used nonce (changes=0).
+    // It must roll back every later DML and the audit/Queue statements.
+    await assert.rejects(() => mutateWithAudit(db, batch, wakeHost));
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM slots").get().n, 2);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 3);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 1);
+
+    // A later INSERT conflict must also restore the unconsumed nonce and
+    // any preceding successful row mutation in this same transaction.
+    const conflicting = claimsFor("87654321-4321-4321-8234-abcdefabcdef");
+    insertRun(conflicting);
+    const attempt = planSpreadsheetImportMutations(ctx,
+      prepareSpreadsheetImportMutationRows(ctx, [
+        { id: "c", title: "would-roll-back" }, { id: "b", title: "duplicate" },
+      ]), "insert", null, "admin-1");
+    const conflictBatch = await planSpreadsheetAtomicAuditedImport(db, ctx,
+      attempt, conflicting, options("batch-conflict"));
+    await assert.rejects(() => mutateWithAudit(db, conflictBatch, wakeHost));
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM slots WHERE id='c'").get().n, 0);
+    assert.equal(sqlite.prepare(
+      "SELECT consumed_at FROM spreadsheet_import_runs WHERE nonce = ?"
+    ).get(conflicting.nonce).consumed_at, null);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 3);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 1);
+
+    // A no-op UPSERT still consumes the signed nonce exactly once, but never
+    // invents a public rebuild. Both the data and its row audit stay unchanged.
+    const skippedClaims = claimsFor("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", "upsert");
+    insertRun(skippedClaims);
+    const skipped = planSpreadsheetImportMutations(ctx,
+      prepareSpreadsheetImportMutationRows(ctx, [{ id: "a" }]), "upsert",
+      new Map([[spreadsheetImportPrimaryKeyFingerprint({ id: "a" }),
+        { id: "a", title: "first" }]]), "admin-1");
+    assert.equal(skipped.skipped, 1);
+    const skippedBatch = await planSpreadsheetAtomicAuditedImport(db, ctx,
+      skipped, skippedClaims, options("none", { queueTargets: [] }));
+    assert.deepEqual(skippedBatch.expectedMutationChanges, [1]);
+    assert.equal(skippedBatch.staticRebuildWakeSource, undefined);
+    await mutateWithAudit(db, skippedBatch);
+    assert.equal(sqlite.prepare(
+      "SELECT consumed_at FROM spreadsheet_import_runs WHERE nonce = ?"
+    ).get(skippedClaims.nonce).consumed_at, 1100);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM slots").get().n, 2);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 4);
+
+    // CURRENT rejects a signed preview for an old column order or PK
+    // schema even when actor, table, mode and nonce otherwise match.
+    // This applies to both INSERT and all-skipped UPSERT (nonce-only).
+    const obsoleteBindings = [
+      { columns: ["id"] },
+      { columns: ["title", "id"] },
+      { primaryKeys: [] },
+      { primaryKeys: ["title"] },
+    ];
+    for (const badBinding of obsoleteBindings) {
+      const oldInsert = { ...claims, ...badBinding };
+      const oldUpsert = { ...skippedClaims, ...badBinding };
+      await assert.rejects(
+        () => planSpreadsheetAtomicAuditedImport(db, ctx, planned,
+          oldInsert, options("old-schema")),
+        error => error instanceof Error && error.message === "preview_required",
+      );
+      await assert.rejects(
+        () => planSpreadsheetAtomicAuditedImport(db, ctx, skipped,
+          oldUpsert, options("no-op", { queueTargets: [] })),
+        error => error instanceof Error && error.message === "preview_required",
+      );
+    }
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 4,
+      "schema mismatches must never write an extra audit or nonce");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 1);
+
+    // A canonical SQL shape is insufficient if the claimed audit operation
+    // does not describe the same DML. The composite import composer must
+    // reject these forged plans before creating a runnable batch.
+    const updateSql = 'UPDATE "slots" SET "title" = ? WHERE ' +
+      '"id" = ? AND "id" IS ? AND "title" IS ?';
+    const deleteSql = 'DELETE FROM "slots" WHERE ' +
+      '"id" = ? AND "id" IS ? AND "title" IS ?';
+    const forgedCreates = [
+      { ...planned.mutations[0], statement: updateSql,
+        binds: ["forged-update", "a", "a", "first"] },
+      { ...planned.mutations[0], statement: deleteSql,
+        binds: ["a", "a", "first"] },
+    ];
+    const batchesBeforeForged = stats.batches;
+    for (const mutation of forgedCreates) {
+      await assert.rejects(() => planSpreadsheetAtomicAuditedImport(
+        db, ctx, { ...planned, mutations: [mutation, planned.mutations[1]] },
+        claims, options("forged-create"),
+      ), error => error instanceof Error && error.message === "invalid_row");
+    }
+    const changed = planSpreadsheetImportMutations(ctx,
+      prepareSpreadsheetImportMutationRows(ctx, [{ id: "a", title: "updated" }]),
+      "upsert", new Map([[spreadsheetImportPrimaryKeyFingerprint({ id: "a" }),
+        { id: "a", title: "first" }]]), "admin-1");
+    assert.equal(changed.updated, 1);
+    const forgedUpdate = {
+      ...changed.mutations[0],
+      statement: planned.mutations[0].statement,
+      binds: planned.mutations[0].binds,
+    };
+    await assert.rejects(() => planSpreadsheetAtomicAuditedImport(
+      db, ctx, { ...changed, mutations: [forgedUpdate] },
+      skippedClaims, options("forged-update"),
+    ), error => error instanceof Error && error.message === "invalid_row");
+    assert.equal(stats.batches, batchesBeforeForged,
+      "audit/DML operation mismatch must not execute a D1 batch");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 4);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 1);
+
+    // A structurally valid INSERT/UPDATE can still lie about the values
+    // written or about the full-row before-image. Those plans must be
+    // rejected *before* creating an audit/Queue batch.
+    const forgedValuePlans = [
+      { plan: { ...planned, mutations: [{
+        ...planned.mutations[0],
+        binds: ["a", "different-write"],
+      }, planned.mutations[1]] }, token: claims },
+      { plan: { ...planned, mutations: [{
+        ...planned.mutations[0],
+        audit: { ...planned.mutations[0].audit, after: {
+          id: "a", title: "falsified-audit",
+        } },
+      }, planned.mutations[1]] }, token: claims },
+      { plan: { ...changed, mutations: [{
+        ...changed.mutations[0],
+        binds: ["different-write", ...changed.mutations[0].binds.slice(1)],
+      }] }, token: skippedClaims },
+      { plan: { ...changed, mutations: [{
+        ...changed.mutations[0],
+        binds: [...changed.mutations[0].binds.slice(0, -1), "false-before"],
+      }] }, token: skippedClaims },
+      { plan: { ...changed, mutations: [{
+        ...changed.mutations[0],
+        audit: { ...changed.mutations[0].audit, after: {
+          id: "a", title: "falsified-audit",
+        } },
+      }] }, token: skippedClaims },
+    ];
+    for (const { plan, token } of forgedValuePlans) {
+      await assert.rejects(() => planSpreadsheetAtomicAuditedImport(
+        db, ctx, plan, token, options("forged-bind"),
+      ), error => error instanceof Error && error.message === "invalid_row");
+    }
+    assert.equal(stats.batches, batchesBeforeForged);
+    assert.equal(sqlite.prepare("SELECT title FROM slots WHERE id='a'").get().title, "first");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 4);
+
+    // Invalid authorization, actor/queue attribution, budget and preview
+    // time never produce a live batch or data mutation.
+    const errors = [
+      [claims, options("bad", { authorizedActorId: "other" }), /preview_required/],
+      [claims, options("bad", { consumedAt: 1301 }), /preview_required/],
+      [claims, options("bad", { queueTargets: [] }), /invalid_row/],
+      [claims, options("bad", { queueTargets: [
+        { ...target("bad")[0], requestedByUserId: "other" },
+      ] }), /invalid_row/],
+      [claims, options("bad", { callerQueryCount: 50 }), /batch_too_large/],
+    ];
+    for (const [token, invalidOptions, reason] of errors) {
+      await assert.rejects(
+        () => planSpreadsheetAtomicAuditedImport(db, ctx, planned, token, invalidOptions),
+        reason,
+      );
+    }
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 1);
+
+    // Positive control: a legitimate audited UPSERT must continue to work
+    // with the exact original before/after values and CAS snapshot binds.
+    const freshClaims = claimsFor("dddddddd-dddd-4ddd-8ddd-dddddddddddd", "upsert");
+    insertRun(freshClaims);
+    const validUpsert = await planSpreadsheetAtomicAuditedImport(
+      db, ctx, changed, freshClaims, options("actual-update"),
+    );
+    assert.deepEqual(validUpsert.expectedMutationChanges, [1, 1, 1]);
+    await mutateWithAudit(db, validUpsert, wakeHost);
+    assert.equal(sqlite.prepare("SELECT title FROM slots WHERE id='a'").get().title, "updated");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 6);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 2);
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("MIG-0638 U02: signed import preview is verified before D1 reads and atomic commit planning", async () => {
+  const { drizzle } = await import("drizzle-orm/d1");
+  const { createAdminD1, seedBase } = await import("./helpers/sqliteD1.mjs");
+  const { mutateWithAudit } = await import("@flamenode/server-core/audit/mutate");
+  const {
+    planSpreadsheetVerifiedImportCommit,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const {
+    buildSpreadsheetImportPreviewBinding, issueSpreadsheetImportPreviewToken,
+  } = await import("../src/routes/admin/spreadsheet/importPreviewToken.ts");
+  const fixture = createAdminD1();
+  const { sqlite, db: rawDb, stats } = fixture;
+  // A durable Queue wake requires a valid host loader even when no Queue
+  // transport is configured by the SQLite-only fixture.
+  const wakeHost = async () => ({
+    readEnv: () => null, readWaitUntil: () => null, readKv: () => null,
+  });
+  const secret = "s".repeat(64);
+  const cols = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1, defaultValue: null, generated: false },
+    { name: "title", type: "TEXT", notNull: false, pk: 0, defaultValue: null, generated: false },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    primaryKeys: ["id"], columns: cols, columnNames: cols.map(x => x.name),
+  };
+  const db = drizzle(rawDb);
+  const target = (id) => [{
+    targetType: "event_base", targetId: id,
+    reason: "admin_spreadsheet_change", requestedByUserId: "admin-1",
+  }];
+  const bindingFor = (mode, rows) => buildSpreadsheetImportPreviewBinding({
+    operatorUserId: "admin-1", table: "slots", mode,
+    columns: ctx.columnNames, primaryKeys: ctx.primaryKeys,
+    schemaColumns: ctx.columns, rows,
+  });
+  const issue = async (mode, rows, nonce, now) =>
+    issueSpreadsheetImportPreviewToken(await bindingFor(mode, rows), secret, {
+      nonce, now,
+    });
+  const insertPreviewRun = claims => sqlite.prepare(
+    "INSERT INTO spreadsheet_import_runs VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)"
+  ).run(claims.nonce, claims.operatorUserId, claims.table, claims.mode,
+    claims.payloadHash, claims.schemaFingerprint, claims.expiresAt, claims.issuedAt);
+  const opts = (mode, rows, token, nowSeconds, more = {}) => ({
+    db, rawDb, ctx, actorUserId: "admin-1", mode, rows,
+    previewToken: token, previewSecret: secret, nowSeconds,
+    callerQueryCount: 3, remainingReadQueries: 0,
+    foreignKeys: [], queueTargets: target(mode), ...more,
+  });
+  try {
+    seedBase(sqlite);
+    sqlite.exec('CREATE TABLE slots (id TEXT PRIMARY KEY NOT NULL, title TEXT)');
+    sqlite.exec('CREATE TABLE spreadsheet_import_runs (nonce TEXT PRIMARY KEY, operator_user_id TEXT NOT NULL, table_name TEXT NOT NULL, mode TEXT NOT NULL, payload_hash TEXT NOT NULL, schema_fingerprint TEXT NOT NULL, expires_at INTEGER NOT NULL, consumed_at INTEGER, created_at INTEGER NOT NULL)');
+    const insertRows = [{ id: "a", title: "signed-first" }];
+    const insert = await issue("insert", insertRows,
+      "11111111-1111-4111-8111-111111111111", 1000);
+    insertPreviewRun(insert.claims);
+    let forbiddenReads = 0;
+    const neverRead = { prepare() {
+      forbiddenReads++;
+      throw new Error("invalid_D1_read_before_signature_verification");
+    } };
+    const invalids = [
+      { rows: [{ id: "a", title: "tampered" }] },
+      { actorUserId: "other" },
+      { previewToken: insert.token.slice(0, -3) + "aaa" },
+      { previewSecret: "x".repeat(64) },
+      { nowSeconds: 1300 },
+    ];
+    for (const override of invalids) {
+      await assert.rejects(() => planSpreadsheetVerifiedImportCommit(
+        opts("insert", insertRows, insert.token, 1100, {
+          rawDb: neverRead, ...override,
+        }),
+      ), error => error instanceof Error && error.message === "preview_required");
+    }
+    assert.equal(forbiddenReads, 0, "bad preview must fail before any D1 read");
+    assert.equal(stats.batches, 0, "bad preview must not write a D1 batch");
+    assert.equal(sqlite.prepare("SELECT consumed_at FROM spreadsheet_import_runs").get().consumed_at, null);
+
+    const first = await planSpreadsheetVerifiedImportCommit(
+      opts("insert", insertRows, insert.token, 1100, { rawDb: neverRead }),
+    );
+    assert.equal(forbiddenReads, 0, "INSERT with no FK requires no pre-read");
+    assert.deepEqual(first.result, { inserted: 1, updated: 0, skipped: 0 });
+    assert.equal(stats.batches, 0, "signed preflight is read-only");
+    assert.deepEqual(first.atomic.expectedMutationChanges, [1, 1, 1]);
+    await mutateWithAudit(db, first.atomic, wakeHost);
+    assert.equal(sqlite.prepare("SELECT title FROM slots WHERE id='a'").get().title,
+      "signed-first");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 2);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 1);
+
+    const updateRows = [{ id: "a", title: "signed-updated" }];
+    const update = await issue("upsert", updateRows,
+      "22222222-2222-4222-8222-222222222222", 1200);
+    insertPreviewRun(update.claims);
+    const insufficient = opts("upsert", updateRows, update.token, 1201, {
+      rawDb: neverRead, remainingReadQueries: 0,
+    });
+    await assert.rejects(() => planSpreadsheetVerifiedImportCommit(insufficient),
+      error => error instanceof Error && error.message === "batch_too_large");
+    assert.equal(forbiddenReads, 0, "upsert read-budget failure occurs before D1");
+    const second = await planSpreadsheetVerifiedImportCommit(
+      opts("upsert", updateRows, update.token, 1201, {
+        callerQueryCount: 4, remainingReadQueries: 1,
+      }),
+    );
+    assert.deepEqual(second.result, { inserted: 0, updated: 1, skipped: 0 });
+    assert.deepEqual(second.atomic.expectedMutationChanges, [1, 1, 1]);
+    await mutateWithAudit(db, second.atomic, wakeHost);
+    assert.equal(sqlite.prepare("SELECT title FROM slots WHERE id='a'").get().title,
+      "signed-updated");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 4);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 2);
+    await assert.rejects(() => mutateWithAudit(db, second.atomic, wakeHost),
+      "nonce replay must not duplicate the import");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 4);
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("MIG-0638 U02: signed import rejects missing effective/default FKs before nonce consumption", async () => {
+  const { drizzle } = await import("drizzle-orm/d1");
+  const { createAdminD1, seedBase } = await import("./helpers/sqliteD1.mjs");
+  const { mutateWithAudit } = await import("@flamenode/server-core/audit/mutate");
+  const {
+    planSpreadsheetVerifiedImportCommit,
+  } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const {
+    buildSpreadsheetImportPreviewBinding, issueSpreadsheetImportPreviewToken,
+  } = await import("../src/routes/admin/spreadsheet/importPreviewToken.ts");
+  const fixture = createAdminD1();
+  const { sqlite, db: rawDb, stats } = fixture;
+  const db = drizzle(rawDb);
+  const secret = "s".repeat(64);
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1, defaultValue: null, generated: false },
+    { name: "title", type: "TEXT", notNull: false, pk: 0, defaultValue: null, generated: false },
+    { name: "event_ref", type: "TEXT", notNull: false, pk: 0, defaultValue: "'missing'", generated: false },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    columns, primaryKeys: ["id"], columnNames: columns.map(x => x.name),
+  };
+  const foreignKeys = [{
+    column: "event_ref", referencedTable: "ref_events", referencedColumn: "id",
+  }];
+  const wakeHost = async () => ({
+    readEnv: () => null, readWaitUntil: () => null, readKv: () => null,
+  });
+  const preview = async (mode, rows, nonce, now) => {
+    const binding = await buildSpreadsheetImportPreviewBinding({
+      operatorUserId: "admin-1", table: "slots", mode,
+      columns: ctx.columnNames, primaryKeys: ctx.primaryKeys,
+      schemaColumns: columns, rows,
+    });
+    return issueSpreadsheetImportPreviewToken(binding, secret, { nonce, now });
+  };
+  const issueRun = claim => sqlite.prepare(
+    "INSERT INTO spreadsheet_import_runs VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)"
+  ).run(claim.nonce, claim.operatorUserId, claim.table, claim.mode,
+    claim.payloadHash, claim.schemaFingerprint, claim.expiresAt, claim.issuedAt);
+  const opts = (mode, rows, token, nowSeconds, more = {}) => ({
+    db, rawDb, ctx, actorUserId: "admin-1", mode, rows,
+    previewToken: token, previewSecret: secret, nowSeconds,
+    foreignKeys, callerQueryCount: 5, remainingReadQueries: 2,
+    queueTargets: [{
+      targetType: "event_base", targetId: "fk-test",
+      reason: "admin_spreadsheet_change", requestedByUserId: "admin-1",
+    }],
+    ...more,
+  });
+  const assertUnconsumed = nonce => assert.equal(sqlite.prepare(
+    "SELECT consumed_at FROM spreadsheet_import_runs WHERE nonce = ?"
+  ).get(nonce).consumed_at, null);
+  try {
+    seedBase(sqlite);
+    sqlite.exec('CREATE TABLE ref_events (id TEXT PRIMARY KEY NOT NULL)');
+    sqlite.exec("CREATE TABLE slots (id TEXT PRIMARY KEY NOT NULL, title TEXT, event_ref TEXT DEFAULT 'missing' REFERENCES ref_events(id))");
+    sqlite.exec('CREATE TABLE spreadsheet_import_runs (nonce TEXT PRIMARY KEY, operator_user_id TEXT NOT NULL, table_name TEXT NOT NULL, mode TEXT NOT NULL, payload_hash TEXT NOT NULL, schema_fingerprint TEXT NOT NULL, expires_at INTEGER NOT NULL, consumed_at INTEGER, created_at INTEGER NOT NULL)');
+
+    // The preview payload omits the FK cell. The INSERT's SQL/audit after
+    // image nevertheless contains its SQLite default ('missing'), which must
+    // be checked against the referenced table before any nonce/DML batch.
+    const insertRows = [{ id: "new", title: "with-default" }];
+    const insert = await preview("insert", insertRows,
+      "33333333-3333-4333-8333-333333333333", 1000);
+    issueRun(insert.claims);
+    await assert.rejects(() => planSpreadsheetVerifiedImportCommit(
+      opts("insert", insertRows, insert.token, 1100),
+    ), error => error instanceof Error && error.message === "foreign_key_violation");
+    assert.equal(stats.batches, 0);
+    assertUnconsumed(insert.claims.nonce);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM slots").get().n, 0);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
+    await assert.rejects(() => planSpreadsheetVerifiedImportCommit(
+      opts("insert", insertRows, insert.token, 1100, { remainingReadQueries: 0 }),
+    ), error => error instanceof Error && error.message === "batch_too_large");
+    assertUnconsumed(insert.claims.nonce);
+
+    sqlite.prepare("INSERT INTO ref_events (id) VALUES (?)").run("missing");
+    const accepted = await planSpreadsheetVerifiedImportCommit(
+      opts("insert", insertRows, insert.token, 1100),
+    );
+    assert.equal(stats.batches, 0, "preflight is read-only");
+    assert.deepEqual(accepted.result, { inserted: 1, updated: 0, skipped: 0 });
+    assert.deepEqual(accepted.atomic.expectedMutationChanges, [1, 1, 1]);
+    await mutateWithAudit(db, accepted.atomic, wakeHost);
+    assert.equal(sqlite.prepare("SELECT event_ref FROM slots WHERE id = ?")
+      .get("new").event_ref, "missing");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 2);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 1);
+    const firstQueue = sqlite.prepare(
+      "SELECT updated_at, requested_by_user_id FROM static_rebuild_queue " +
+      "WHERE target_type = ? AND target_id = ?"
+    ).get("event_base", "fk-test");
+    assert.equal(firstQueue.requested_by_user_id, "admin-1");
+
+    // Signed UPSERT must validate the supplied new FK, not the unchanged old
+    // FK. It spends one D1 read for the existing row and one for FK checking.
+    const invalidUpsertRows = [{ id: "new", event_ref: "unknown" }];
+    const invalidUpsert = await preview("upsert", invalidUpsertRows,
+      "44444444-4444-4444-8444-444444444444", 1200);
+    issueRun(invalidUpsert.claims);
+    await assert.rejects(() => planSpreadsheetVerifiedImportCommit(
+      opts("upsert", invalidUpsertRows, invalidUpsert.token, 1201),
+    ), error => error instanceof Error && error.message === "foreign_key_violation");
+    assertUnconsumed(invalidUpsert.claims.nonce);
+    assert.equal(sqlite.prepare("SELECT event_ref FROM slots WHERE id = ?")
+      .get("new").event_ref, "missing");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 2);
+
+    sqlite.prepare("INSERT INTO ref_events (id) VALUES (?)").run("other");
+    const validUpsertRows = [{ id: "new", event_ref: "other" }];
+    const validUpsert = await preview("upsert", validUpsertRows,
+      "55555555-5555-4555-8555-555555555555", 1200);
+    issueRun(validUpsert.claims);
+    const updated = await planSpreadsheetVerifiedImportCommit(
+      opts("upsert", validUpsertRows, validUpsert.token, 1201),
+    );
+    assert.deepEqual(updated.result, { inserted: 0, updated: 1, skipped: 0 });
+    await mutateWithAudit(db, updated.atomic, wakeHost);
+    assert.equal(sqlite.prepare("SELECT event_ref FROM slots WHERE id = ?")
+      .get("new").event_ref, "other");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 4);
+    // The Queue is deliberately a coalesced UPSERT: repeated invalidation of
+    // one active target updates its existing row rather than creating two.
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 1);
+    const refreshedQueue = sqlite.prepare(
+      "SELECT updated_at, requested_by_user_id FROM static_rebuild_queue " +
+      "WHERE target_type = ? AND target_id = ?"
+    ).get("event_base", "fk-test");
+    assert.ok(refreshedQueue.updated_at > firstQueue.updated_at,
+      "second mutation advances active Queue dirty-generation timestamp");
+    assert.equal(refreshedQueue.requested_by_user_id, "admin-1");
+    assertUnconsumed(invalidUpsert.claims.nonce);
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("U02 delimited parser preserves CURRENT CR/LF/CRLF logical records and quoted separators", async () => {
+  const { parseDelimited, detectDelimiter, serializeDelimited } =
+    await import("../src/routes/admin/spreadsheet/delimited.ts");
+  const current = await import("../../../src/lib/utils/delimited.ts");
+  for (const delimiter of [",", "\t"]) {
+    const expected = [["id", "notes"], ["a", "x\ry"], ["b", "x\r\ny"], ["c", 'x\n"y"']];
+    const records = [
+      ["id", "notes"].join(delimiter),
+      ["a", '"x\ry"'].join(delimiter),
+      ["b", '"x\r\ny"'].join(delimiter),
+      ["c", '"x\n""y"""'].join(delimiter),
+    ];
+    for (const separator of ["\r", "\n", "\r\n"]) {
+      const text = "\uFEFF" + records.join(separator) + separator;
+      assert.equal(detectDelimiter(text), delimiter);
+      for (const maxRows of [undefined, 0, 1, 2, 4, 5]) {
+        const options = { maxRows };
+        const wanted = maxRows === undefined ? expected : expected.slice(0, maxRows);
+        assert.deepEqual(parseDelimited(text, delimiter, options), wanted);
+        assert.deepEqual(parseDelimited(text, delimiter, options), current.parseDelimited(text, delimiter, options));
+      }
+    }
+    const mixed = records[0] + "\r" + records[1] + "\r\n" + records[2] + "\n" + records[3];
+    assert.deepEqual(parseDelimited(mixed, delimiter), expected);
+    assert.deepEqual(parseDelimited(serializeDelimited(expected, delimiter), delimiter), expected);
+  }
+});
+
+test("U02 RH-008 import preserves CR-delimited rows and enforces the logical 500-row limit", async () => {
+  const { prepareSpreadsheetImportRows } = await import("../src/routes/admin/spreadsheet/importPrepCore.ts");
+  const { parseSpreadsheetPaste } = await import("../src/routes/admin/spreadsheet/paste.ts");
+  const columnNames = ["id", "notes"];
+  for (const delimiter of [",", "\t"]) {
+    const text = ["id" + delimiter + "notes", "a" + delimiter + '"x\ry"', "b" + delimiter + "NULL"].join("\r");
+    const expected = [{ id: "a", notes: "x\ry" }, { id: "b", notes: null }];
+    const parsed = prepareSpreadsheetImportRows({ text, columnNames, hasHeader: true, delimiter: "auto" });
+    assert.deepEqual(parsed.rows, expected);
+    assert.deepEqual(parsed.mappedColumns, columnNames);
+    assert.deepEqual(parsed.invalidColumns, []);
+    assert.deepEqual(parseSpreadsheetPaste(text, columnNames, { hasHeader: true, delimiter: "auto", maxRows: 1 }).rows, expected.slice(0, 1));
+    const makeText = count => ["id" + delimiter + "notes", ...Array.from({ length: count }, (_, i) => "row-" + i + delimiter + "value")].join("\r");
+    assert.equal(prepareSpreadsheetImportRows({ text: makeText(500), columnNames, hasHeader: true, delimiter: "auto" }).rows.length, 500);
+    assert.throws(() => prepareSpreadsheetImportRows({ text: makeText(501), columnNames, hasHeader: true, delimiter: "auto" }), /too_many_rows/);
+  }
+});

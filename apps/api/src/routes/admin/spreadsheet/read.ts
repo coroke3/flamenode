@@ -152,15 +152,21 @@ function cellText(value: unknown): string {
 }
 
 function failure(c: Context<AppEnv>, error: unknown): Response {
-  if (error instanceof SpreadsheetError) {
-    return respondError(
-      c,
-      error.code,
-      error.code === SPREADSHEET_ERROR.DB_UNAVAILABLE ? 503 : 400,
-    );
+  try {
+    if (error instanceof SpreadsheetError) {
+      const code = error.code;
+      if (code === SPREADSHEET_ERROR.DB_UNAVAILABLE) return respondError(c, code, 503);
+      if (code === SPREADSHEET_ERROR.UNKNOWN_TABLE) return respondError(c, code, 400);
+    }
+  } catch {
+    // A provider error may have throwing accessors or proxy traps.
   }
-  // Fixed code only: D1 error text can carry SQL and table names (CURRENT returned the raw message).
-  console.error("[spreadsheet] READ_FAILED");
+  // D1 errors can contain SQL, bound parameters and table names.
+  try {
+    console.error("[spreadsheet] READ_FAILED");
+  } catch {
+    // Diagnostic failures must not replace the stable response.
+  }
   return respondError(c, "internal_error", 500);
 }
 
@@ -218,6 +224,7 @@ export function createSpreadsheetReadRoutes(
   routes.get("/export", async (c) => {
     const table = (c.req.query("table") ?? "").trim();
     if (!table) return respondError(c, "unknown_table", 400);
+    const page = normalizePage(Number(c.req.query("page") ?? "1"));
     const format = (c.req.query("format") ?? "csv").toLowerCase();
     const delimiter = format === "tsv" ? "\t" : ",";
     const includeHeader = c.req.query("header") !== "0";
@@ -226,7 +233,8 @@ export function createSpreadsheetReadRoutes(
     try {
       const db = getSpreadsheetDb(c.env.DB);
       const ctx = await resolveSpreadsheetTableContext(db, table);
-      const { hasMore, rawRows } = await queryTableRows(db, ctx, MAX_SPREADSHEET_EXPORT_ROWS);
+      const offset = page > 1 ? (page - 1) * MAX_SPREADSHEET_EXPORT_ROWS : undefined;
+      const { hasMore, rawRows } = await queryTableRows(db, ctx, MAX_SPREADSHEET_EXPORT_ROWS, offset);
       const columnNames = ctx.columns.map((col) => col.name);
       const lines = rawRows.map((row) => {
         const masked = serializeRow(row, ctx.columns);

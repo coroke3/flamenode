@@ -1,0 +1,511 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { DatabaseSync } from "node:sqlite";
+import {
+  SPREADSHEET_AUDIT_PK_V1_CONTEXT,
+  SPREADSHEET_AUDIT_PK_V1_PREFIX,
+  buildSpreadsheetAuditIdentityV1,
+  buildSpreadsheetAuditHistoryLookup,
+  classifySpreadsheetAuditHistoryCandidate,
+  parseSpreadsheetAuditIdentityV1,
+} from "../src/routes/admin/spreadsheet/auditTargetId.ts";
+import {
+  spreadsheetRecordIdFromPk,
+} from "../src/routes/admin/spreadsheet/writeValidation.ts";
+
+// This is a FUTURE, unmounted identity contract. CURRENT and MIG-0638 writers
+// still store the legacy "admin_spreadsheet" / colon-joined target_id.
+
+test("Issue #674: v1 disambiguates two distinct same-table colon-joined PKs", () => {
+  const first = { left: "x:y", right: "z" };
+  const second = { left: "x", right: "y:z" };
+  assert.equal(spreadsheetRecordIdFromPk(first), "x:y:z");
+  assert.equal(spreadsheetRecordIdFromPk(second), "x:y:z");
+  const a = buildSpreadsheetAuditIdentityV1(first);
+  const b = buildSpreadsheetAuditIdentityV1(second);
+  assert.equal(a.context, SPREADSHEET_AUDIT_PK_V1_CONTEXT);
+  assert.equal(b.context, SPREADSHEET_AUDIT_PK_V1_CONTEXT);
+  assert.notEqual(a.target_id, b.target_id);
+  assert.deepEqual(parseSpreadsheetAuditIdentityV1(a), [["left", "x:y"], ["right", "z"]]);
+  assert.deepEqual(parseSpreadsheetAuditIdentityV1(b), [["left", "x"], ["right", "y:z"]]);
+});
+
+test("Issue #674: key insertion order and Unicode-equivalent distinct spellings are preserved", () => {
+  const pk = { "é": "café", "e\u0301": "cafe\u0301", left: "a:b" };
+  const reversed = Object.fromEntries(Object.entries(pk).reverse());
+  const first = buildSpreadsheetAuditIdentityV1(pk);
+  const second = buildSpreadsheetAuditIdentityV1(reversed);
+  assert.deepEqual(second, first);
+  assert.deepEqual(parseSpreadsheetAuditIdentityV1(first), [
+    ["e\u0301", "cafe\u0301"], ["left", "a:b"], ["é", "café"],
+  ]);
+  assert.notEqual(
+    first.target_id,
+    buildSpreadsheetAuditIdentityV1({ "é": "cafe\u0301", "e\u0301": "café", left: "a:b" }).target_id,
+  );
+  assert.notEqual(
+    first.target_id,
+    buildSpreadsheetAuditIdentityV1({ "é": "café", left: "a:b" }).target_id,
+  );
+  assert.notEqual(
+    first.target_id,
+    buildSpreadsheetAuditIdentityV1({ "é": "café", "e\u0301": "cafe\u0301", RIGHT: "a:b" }).target_id,
+  );
+});
+
+test("Issue #674: the same target_id string is NOT enough to classify historical logs", () => {
+  const v1 = buildSpreadsheetAuditIdentityV1({ id: "record-a" });
+  // A real legacy, single-column PK can equal a syntactically valid new ID.
+  const legacy = spreadsheetRecordIdFromPk({ id: v1.target_id });
+  assert.equal(legacy, v1.target_id);
+  assert.ok(v1.target_id.startsWith(SPREADSHEET_AUDIT_PK_V1_PREFIX));
+  assert.equal(parseSpreadsheetAuditIdentityV1({
+    context: "admin_spreadsheet",
+    target_id: legacy,
+  }), null);
+  assert.deepEqual(parseSpreadsheetAuditIdentityV1(v1), [["id", "record-a"]]);
+});
+
+test("Issue #674: malformed runtime identity values never throw or masquerade as V1", () => {
+  const valid = buildSpreadsheetAuditIdentityV1({ id: "record-a" });
+  assert.deepEqual(parseSpreadsheetAuditIdentityV1(valid), [["id", "record-a"]]);
+  for (const malformed of [
+    null, undefined, 0, false, "", [], Object.create(null),
+    { context: valid.context }, { target_id: valid.target_id },
+    { context: valid.context, target_id: null },
+    { context: valid.context, target_id: 7 },
+    { context: valid.context, target_id: [] },
+    { context: "admin_spreadsheet", target_id: valid.target_id },
+  ]) {
+    assert.doesNotThrow(() => parseSpreadsheetAuditIdentityV1(malformed));
+    assert.equal(parseSpreadsheetAuditIdentityV1(malformed), null);
+  }
+  const lookup = buildSpreadsheetAuditHistoryLookup("video_events", { id: "record-a" });
+  assert.equal(classifySpreadsheetAuditHistoryCandidate(lookup, {
+    table_name: lookup.table_name, context: valid.context, target_id: null,
+    before_json: null, after_json: null,
+  }), "other", "malformed V1 row must not be classified as a confirmed match");
+});
+
+test("Issue #674: throwing V1 accessor or Proxy cannot escape decoder fail-closed", () => {
+  const valid = buildSpreadsheetAuditIdentityV1({ id: "record-a" });
+  for (const row of [
+    { ...valid, get context() { throw Error("context getter"); } },
+    { ...valid, get target_id() { throw Error("target getter"); } },
+    new Proxy(valid, { has() { throw Error("has trap"); } }),
+    new Proxy(valid, { get() { throw Error("get trap"); } }),
+  ]) {
+    assert.doesNotThrow(() => parseSpreadsheetAuditIdentityV1(row));
+    assert.equal(parseSpreadsheetAuditIdentityV1(row), null,
+      "untrusted accessors must never establish a V1 audit match");
+  }
+});
+
+test("Issue #674: malformed history rows and coerced snapshots cannot prove legacy attribution", () => {
+  const pk = { left: "x:y", right: "z" };
+  const lookup = buildSpreadsheetAuditHistoryLookup("video_events", pk);
+  const valid = {
+    table_name: "video_events", context: lookup.legacy.context,
+    target_id: lookup.legacy.target_id,
+    before_json: JSON.stringify(pk), after_json: null,
+  };
+  assert.equal(classifySpreadsheetAuditHistoryCandidate(lookup, valid),
+    "legacy_snapshot_exact", "actual SQLite TEXT snapshot still proves the PK");
+  for (const row of [
+    null, undefined, 0, false, "", [], Object.create(null),
+    { ...valid, get table_name() { throw Error("table getter"); } },
+    { ...valid, get context() { throw Error("context getter"); } },
+    { ...valid, get target_id() { throw Error("target getter"); } },
+  ]) {
+    assert.doesNotThrow(() => classifySpreadsheetAuditHistoryCandidate(lookup, row));
+    assert.equal(classifySpreadsheetAuditHistoryCandidate(lookup, row), "other",
+      "malformed row identity must never become a confirmed history match");
+  }
+  for (const row of [
+    { ...valid, before_json: new String(JSON.stringify(pk)) },
+    { ...valid, before_json: { toString: () => JSON.stringify(pk) } },
+    { ...valid, before_json: 42 },
+    { ...valid, before_json: undefined },
+    { ...valid, get before_json() { throw Error("snapshot getter"); } },
+    { ...valid, get after_json() { throw Error("snapshot getter"); } },
+  ]) {
+    assert.doesNotThrow(() => classifySpreadsheetAuditHistoryCandidate(lookup, row));
+    assert.equal(classifySpreadsheetAuditHistoryCandidate(lookup, row), "legacy_ambiguous",
+      "non-TEXT or throwing snapshot cannot establish a historical composite PK");
+  }
+});
+
+test("Issue #674: legacy snapshot budget counts UTF-8 bytes, not UTF-16 code units", () => {
+  const table_name = "video_events";
+  // 43k CJK code units fit below the old 128k .length guard but exceed
+  // the 128k UTF-8 budget. Never parse/attribute this oversized audit row.
+  // Keep the lookup PK itself within the V1 ID limit. The oversized
+  // audit snapshot contains an unrelated multibyte column, so only the
+  // snapshot-byte guard (not the identity writer) rejects attribution.
+  const oversizedPk = { id: "界".repeat(30_000) };
+  const oversizedSnapshot = JSON.stringify({
+    ...oversizedPk,
+    unrelated: "界".repeat(43_000),
+  });
+  assert.ok(Buffer.byteLength(
+    buildSpreadsheetAuditIdentityV1(oversizedPk).target_id, "utf8",
+  ) < 128_000);
+  assert.ok(oversizedSnapshot.length < 128_000);
+  assert.ok(Buffer.byteLength(oversizedSnapshot, "utf8") > 128_000);
+  const oversizedLookup = buildSpreadsheetAuditHistoryLookup(table_name, oversizedPk);
+  assert.equal(classifySpreadsheetAuditHistoryCandidate(oversizedLookup, {
+    table_name,
+    context: oversizedLookup.legacy.context,
+    target_id: oversizedLookup.legacy.target_id,
+    before_json: oversizedSnapshot,
+    after_json: null,
+  }), "legacy_ambiguous", "oversized multibyte snapshots cannot prove historical PK identity");
+
+  // A real, bounded multibyte TEXT snapshot must still prove attribution.
+  const boundedPk = { id: "界".repeat(30_000) };
+  const boundedSnapshot = JSON.stringify(boundedPk);
+  assert.ok(Buffer.byteLength(boundedSnapshot, "utf8") < 128_000);
+  const lookup = buildSpreadsheetAuditHistoryLookup(table_name, boundedPk);
+  assert.equal(classifySpreadsheetAuditHistoryCandidate(lookup, {
+    table_name,
+    context: lookup.legacy.context,
+    target_id: lookup.legacy.target_id,
+    before_json: boundedSnapshot,
+    after_json: null,
+  }), "legacy_snapshot_exact");
+});
+
+test("Issue #674: V1 writer and decoder agree on the 128,000-byte UTF-8 limit", () => {
+  const multibytePk = { id: "界".repeat(43_000) };
+  const oversizedMultibyteId = SPREADSHEET_AUDIT_PK_V1_PREFIX +
+    JSON.stringify([["id", multibytePk.id]]);
+  assert.ok(oversizedMultibyteId.length < 128_000,
+    "UTF-16 length alone must not establish a safe limit");
+  assert.ok(Buffer.byteLength(oversizedMultibyteId, "utf8") > 128_000);
+  assert.throws(() => buildSpreadsheetAuditIdentityV1(multibytePk), /invalid_row/,
+    "future writer must not emit IDs that its decoder cannot read");
+  assert.equal(parseSpreadsheetAuditIdentityV1({
+    context: SPREADSHEET_AUDIT_PK_V1_CONTEXT, target_id: oversizedMultibyteId,
+  }), null, "untrusted multibyte IDs must fail closed before JSON.parse");
+
+  const oversizedAsciiId = SPREADSHEET_AUDIT_PK_V1_PREFIX +
+    JSON.stringify([["id", "a".repeat(130_000)]]);
+  assert.throws(() => buildSpreadsheetAuditIdentityV1({
+    id: "a".repeat(130_000),
+  }), /invalid_row/);
+  assert.equal(parseSpreadsheetAuditIdentityV1({
+    context: SPREADSHEET_AUDIT_PK_V1_CONTEXT, target_id: oversizedAsciiId,
+  }), null);
+
+  const permitted = buildSpreadsheetAuditIdentityV1({ id: "界".repeat(30_000) });
+  assert.ok(Buffer.byteLength(permitted.target_id, "utf8") < 128_000);
+  assert.deepEqual(parseSpreadsheetAuditIdentityV1(permitted), [
+    ["id", "界".repeat(30_000)],
+  ], "bounded Unicode IDs retain exact identity");
+
+  const overhead = Buffer.byteLength(SPREADSHEET_AUDIT_PK_V1_PREFIX +
+    JSON.stringify([["id", ""]]), "utf8");
+  const atLimit = buildSpreadsheetAuditIdentityV1({ id: "a".repeat(128_000 - overhead) });
+  assert.equal(Buffer.byteLength(atLimit.target_id, "utf8"), 128_000);
+  assert.deepEqual(parseSpreadsheetAuditIdentityV1(atLimit), [
+    ["id", "a".repeat(128_000 - overhead)],
+  ]);
+  assert.throws(() => buildSpreadsheetAuditIdentityV1({
+    id: "a".repeat(128_001 - overhead),
+  }), /invalid_row/, "a one-byte overflow must be rejected by the writer");
+});
+
+test("Issue #674: a changing target_id accessor is read only once", () => {
+  const first = buildSpreadsheetAuditIdentityV1({ id: "first" });
+  const second = buildSpreadsheetAuditIdentityV1({ id: "second" });
+  let reads = 0;
+  const identity = {
+    context: first.context,
+    get target_id() {
+      reads += 1;
+      return reads === 1 ? first.target_id : second.target_id;
+    },
+  };
+  assert.deepEqual(parseSpreadsheetAuditIdentityV1(identity), [["id", "first"]]);
+  assert.equal(reads, 1, "prefix, parser and canonical comparison must share the same bytes");
+});
+
+test("Issue #674: invalid or noncanonical V1 representations fail closed", () => {
+  for (const bad of [
+    {}, { id: "" }, { id: "  " }, { id: "ab\0cd" }, { "bad\0key": "x" },
+  ]) {
+    assert.throws(() => buildSpreadsheetAuditIdentityV1(bad));
+  }
+  const invalid = [
+    "spk:v2:[]",
+    "spk:v1:[]",
+    "spk:v1:null",
+    "spk:v1:{\"id\":\"x\"}",
+    "spk:v1:[[\"left\",\"x\"],[\"left\",\"y\"]]",
+    "spk:v1:[[\"right\",\"z\"],[\"left\",\"x\"]]",
+    "spk:v1:[[\"left\",\"x\",\"extra\"]]",
+    "spk:v1:[[\"left\",\"ab\\u0000cd\"]]",
+    "spk:v1:[[\"left\",\"x\"]] trailing",
+  ];
+  for (const target_id of invalid) {
+    assert.equal(parseSpreadsheetAuditIdentityV1({
+      context: SPREADSHEET_AUDIT_PK_V1_CONTEXT,
+      target_id,
+    }), null, target_id);
+  }
+  assert.equal(parseSpreadsheetAuditIdentityV1({
+    context: "admin_spreadsheet",
+    target_id: "x:y:z",
+  }), null);
+});
+
+test("Issue #674: V1 PK identity rejects lone surrogates rather than aliasing SQLite TEXT", () => {
+  const sqlite = new DatabaseSync(":memory:");
+  try {
+    const read = sqlite.prepare("SELECT ? AS value, hex(CAST(? AS BLOB)) AS bytes");
+    const malformed = ["\ud800", "\udfff", "a\ud800b", "\ud800\ud800", "\udfff\ud800",
+      "\ud800\udc00\udfff", "\ud800\u0001", "\udfff\udbff\udfff"];
+    for (const value of malformed) {
+      assert.notEqual(read.get(value, value).value, value);
+      assert.equal(read.get(value, value).value, value.toWellFormed());
+      for (const pk of [{ id: value }, { [value]: "x" }]) {
+        assert.throws(() => buildSpreadsheetAuditIdentityV1(pk), /invalid_row/);
+        assert.throws(() => buildSpreadsheetAuditHistoryLookup("video_events", pk), /invalid_row/);
+        assert.equal(parseSpreadsheetAuditIdentityV1({
+          context: SPREADSHEET_AUDIT_PK_V1_CONTEXT,
+          target_id: SPREADSHEET_AUDIT_PK_V1_PREFIX + JSON.stringify(Object.entries(pk)),
+        }), null);
+      }
+    }
+    assert.equal(read.get("\ud800", "\ud800").bytes, read.get("\udfff", "\udfff").bytes);
+    assert.equal(read.get("\ud800", "\ud800").bytes, read.get("\ufffd", "\ufffd").bytes);
+    for (const value of ["a", "\uFFFD", "\u{10000}", "\u{10FFFF}", "\u{1F600}",
+      "e\u0301", "\u00e9", "\uFFFF", "\uE000", "a\u{10000}b",
+      "\uD800\uDC00\uDBFF\uDFFF", "\u2028x", "\u0001"]) {
+      assert.equal(read.get(value, value).value, value);
+      for (const pk of [{ id: value }, { [value]: "x" }]) {
+        const v1 = buildSpreadsheetAuditIdentityV1(pk);
+        assert.deepEqual(parseSpreadsheetAuditIdentityV1(v1), Object.entries(pk));
+        assert.deepEqual(buildSpreadsheetAuditHistoryLookup("video_events", pk).v1, v1);
+      }
+    }
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("Issue #674: real SQLite audit lookup isolates new composite IDs and preserves legacy rows", () => {
+  const sqlite = new DatabaseSync(":memory:");
+  try {
+    sqlite.exec(`CREATE TABLE audit_logs (
+      id TEXT PRIMARY KEY NOT NULL,
+      table_name TEXT NOT NULL,
+      target_id TEXT NOT NULL,
+      context TEXT NOT NULL,
+      before_json TEXT,
+      after_json TEXT
+    ); CREATE INDEX audit_target_idx ON audit_logs (table_name, target_id);`);
+    const ins = sqlite.prepare(
+      "INSERT INTO audit_logs (id, table_name, target_id, context, before_json, after_json) VALUES (?, ?, ?, ?, ?, ?)",
+    );
+    const pkA = { left: "x:y", right: "z" };
+    const pkB = { left: "x", right: "y:z" };
+    const a = buildSpreadsheetAuditIdentityV1(pkA);
+    const b = buildSpreadsheetAuditIdentityV1(pkB);
+    const legacy = spreadsheetRecordIdFromPk(pkA);
+    ins.run("old-a", "video_events", legacy, "admin_spreadsheet", null, JSON.stringify(pkA));
+    ins.run("old-b", "video_events", legacy, "admin_spreadsheet", null, JSON.stringify(pkB));
+    ins.run("new-a", "video_events", a.target_id, a.context, null, JSON.stringify(pkA));
+    ins.run("new-b", "video_events", b.target_id, b.context, JSON.stringify(pkB), null);
+    const select = sqlite.prepare(
+      "SELECT id, before_json, after_json FROM audit_logs WHERE table_name = ? AND context = ? AND target_id = ?",
+    );
+    assert.deepEqual(
+      select.all("video_events", a.context, a.target_id).map(row => row.id),
+      ["new-a"],
+    );
+    assert.deepEqual(
+      select.all("video_events", b.context, b.target_id).map(row => row.id),
+      ["new-b"],
+    );
+    assert.deepEqual(
+      select.all("video_events", "admin_spreadsheet", legacy).map(row => row.id),
+      ["old-a", "old-b"],
+      "the legacy collision still exists; do not claim automatic history disambiguation",
+    );
+    assert.equal(
+      select.get("video_events", a.context, a.target_id)?.after_json,
+      JSON.stringify(pkA),
+    );
+    assert.equal(
+      select.get("video_events", b.context, b.target_id)?.before_json,
+      JSON.stringify(pkB),
+    );
+    assert.equal(
+      sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n,
+      4,
+      "historical audit rows are never rewritten",
+    );
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("Issue #674: full legacy before/after snapshots distinguish colliding same-table PKs", () => {
+  const target = { left: "x:y", right: "z" };
+  const other = { left: "x", right: "y:z" };
+  const lookup = buildSpreadsheetAuditHistoryLookup("video_events", target);
+  assert.equal(lookup.legacy.target_id, "x:y:z");
+  const mk = (id, before, after) => ({
+    id, table_name: "video_events", context: "admin_spreadsheet",
+    target_id: "x:y:z",
+    before_json: before == null ? null : JSON.stringify(before),
+    after_json: after == null ? null : JSON.stringify(after),
+  });
+  assert.equal(classifySpreadsheetAuditHistoryCandidate(lookup, mk("create", null, target)), "legacy_snapshot_exact");
+  assert.equal(classifySpreadsheetAuditHistoryCandidate(lookup, mk("delete", target, null)), "legacy_snapshot_exact");
+  assert.equal(classifySpreadsheetAuditHistoryCandidate(lookup, mk("update", target, { ...target, title: "updated" })), "legacy_snapshot_exact");
+  assert.equal(classifySpreadsheetAuditHistoryCandidate(lookup, mk("colliding", null, other)), "other");
+  assert.equal(classifySpreadsheetAuditHistoryCandidate(lookup, mk("opposite", other, other)), "other");
+  assert.equal(classifySpreadsheetAuditHistoryCandidate(lookup, mk("mixed", target, other)), "legacy_ambiguous");
+});
+
+test("Issue #674: real SQLite INTEGER PK snapshots can prove only exact canonical legacy identity", () => {
+  const sqlite = new DatabaseSync(":memory:");
+  try {
+    sqlite.exec("CREATE TABLE records (id INTEGER PRIMARY KEY, title TEXT NOT NULL)");
+    sqlite.prepare("INSERT INTO records(id, title) VALUES (?, ?)").run(7, "safe");
+    // The real D1/SQLite before snapshot returns a number even though
+    // spreadsheet primaryKey JSON and legacy target_id carry string values.
+    const raw = sqlite.prepare("SELECT * FROM records WHERE id = ?").get(7);
+    assert.equal(raw.id, 7);
+    assert.equal(typeof raw.id, "number");
+    const lookup = buildSpreadsheetAuditHistoryLookup("records", { id: "7" });
+    const candidate = (snapshot) => ({
+      table_name: "records", context: "admin_spreadsheet",
+      target_id: lookup.legacy.target_id,
+      before_json: JSON.stringify(snapshot), after_json: null,
+    });
+    assert.equal(classifySpreadsheetAuditHistoryCandidate(lookup, candidate(raw)),
+      "legacy_snapshot_exact", "SQLite INTEGER before-image proves the canonical PK");
+    assert.equal(classifySpreadsheetAuditHistoryCandidate(lookup, candidate({ id: "7" })),
+      "legacy_snapshot_exact", "legacy TEXT snapshots remain supported");
+    assert.equal(classifySpreadsheetAuditHistoryCandidate(lookup, {
+      ...candidate(raw), before_json: null, after_json: JSON.stringify(raw),
+    }), "legacy_snapshot_exact", "CREATE after-image supports INTEGER PK");
+
+    for (const value of [8, 7.25, Number.MAX_SAFE_INTEGER + 1, null, true, {}]) {
+      assert.equal(classifySpreadsheetAuditHistoryCandidate(lookup, candidate({ id: value })),
+        "legacy_ambiguous", `not a safe, canonical match: ${String(value)}`);
+    }
+    assert.equal(classifySpreadsheetAuditHistoryCandidate(lookup, {
+      ...candidate(raw), after_json: JSON.stringify({ id: 8 }),
+    }), "legacy_ambiguous", "conflicting before/after cannot be attributed");
+    const paddedLookup = buildSpreadsheetAuditHistoryLookup("records", { id: "007" });
+    assert.equal(classifySpreadsheetAuditHistoryCandidate(paddedLookup, {
+      ...candidate(raw), target_id: paddedLookup.legacy.target_id,
+    }), "legacy_ambiguous", "do not normalize a noncanonical caller PK by numeric coercion");
+
+    const composite = buildSpreadsheetAuditHistoryLookup("records", {
+      left: "x:y", right: "7",
+    });
+    assert.equal(classifySpreadsheetAuditHistoryCandidate(composite, {
+      table_name: "records", context: "admin_spreadsheet",
+      target_id: composite.legacy.target_id,
+      before_json: JSON.stringify({ left: "x:y", right: 7 }),
+      after_json: null,
+    }), "legacy_snapshot_exact", "composite TEXT+INTEGER values retain full-PK proof");
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("Issue #674: missing, redacted, numeric and malformed legacy snapshots never prove identity", () => {
+  const lookup = buildSpreadsheetAuditHistoryLookup("video_events", { left: "x:y", right: "z" });
+  const candidate = (before_json, after_json) => ({
+    table_name: "video_events", context: "admin_spreadsheet",
+    target_id: lookup.legacy.target_id, before_json, after_json,
+  });
+  for (const pair of [
+    [null, null],
+    [JSON.stringify({ left: "x:y" }), null],
+    [JSON.stringify({ left: "x:y", right: "[REDACTED]" }), null],
+    [JSON.stringify({ left: "x:y", right: "z…[truncated]" }), null],
+    [JSON.stringify({ left: "x:y", right: 7 }), null],
+    ["{bad json", null],
+    ["null", null],
+    [JSON.stringify(["x:y", "z"]), null],
+    [JSON.stringify({ left: "x:y", right: "z" }), "unparseable"],
+    [JSON.stringify({ left: "x:y", right: "z" }), JSON.stringify({ left: "x", right: "y:z" })],
+  ]) {
+    assert.equal(
+      classifySpreadsheetAuditHistoryCandidate(lookup, candidate(...pair)),
+      "legacy_ambiguous", JSON.stringify(pair),
+    );
+  }
+});
+
+test("Issue #674: context and table-name guard prevent V1-prefix and cross-table misattribution", () => {
+  const lookup = buildSpreadsheetAuditHistoryLookup("video_events", { id: "v-a" });
+  const asRow = (context, target_id, table_name = "video_events") => ({
+    context, target_id, table_name, before_json: null, after_json: null,
+  });
+  assert.equal(classifySpreadsheetAuditHistoryCandidate(
+    lookup, asRow(lookup.v1.context, lookup.v1.target_id)), "v1_exact");
+  assert.equal(classifySpreadsheetAuditHistoryCandidate(
+    lookup, asRow("admin_spreadsheet", lookup.v1.target_id)), "other");
+  assert.equal(classifySpreadsheetAuditHistoryCandidate(
+    lookup, asRow(lookup.v1.context, lookup.v1.target_id, "video_members")), "other");
+  assert.equal(classifySpreadsheetAuditHistoryCandidate(
+    lookup, asRow(lookup.v1.context, buildSpreadsheetAuditIdentityV1({ id: "other" }).target_id)), "other");
+  const spoof = buildSpreadsheetAuditHistoryLookup("video_events", { id: lookup.v1.target_id });
+  assert.equal(classifySpreadsheetAuditHistoryCandidate(
+    spoof, asRow("admin_spreadsheet", lookup.v1.target_id)), "legacy_ambiguous");
+});
+
+test("Issue #674: bounded SQLite candidate fetch can classify mixed new/old history without rewriting it", () => {
+  const sqlite = new DatabaseSync(":memory:");
+  try {
+    sqlite.exec(`CREATE TABLE audit_logs (
+      id TEXT PRIMARY KEY NOT NULL,
+      table_name TEXT NOT NULL,
+      context TEXT NOT NULL,
+      target_id TEXT NOT NULL,
+      before_json TEXT,
+      after_json TEXT
+    ); CREATE INDEX audit_table_target ON audit_logs (table_name, target_id);`);
+    const insert = sqlite.prepare(
+      "INSERT INTO audit_logs (id, table_name, context, target_id, before_json, after_json) VALUES (?, ?, ?, ?, ?, ?)",
+    );
+    const pkA = { left: "x:y", right: "z" };
+    const pkB = { left: "x", right: "y:z" };
+    const lookup = buildSpreadsheetAuditHistoryLookup("video_events", pkA);
+    const v1Other = buildSpreadsheetAuditHistoryLookup("video_events", pkB);
+    insert.run("old-match", "video_events", "admin_spreadsheet", "x:y:z", null, JSON.stringify(pkA));
+    insert.run("old-collision", "video_events", "admin_spreadsheet", "x:y:z", null, JSON.stringify(pkB));
+    insert.run("old-unknown", "video_events", "admin_spreadsheet", "x:y:z", null, "{}");
+    insert.run("new-match", "video_events", lookup.v1.context, lookup.v1.target_id, null, JSON.stringify(pkA));
+    insert.run("new-other", "video_events", v1Other.v1.context, v1Other.v1.target_id, null, JSON.stringify(pkB));
+    insert.run("other-table", "video_members", "admin_spreadsheet", "x:y:z", null, JSON.stringify(pkA));
+
+    // A future history endpoint could fetch both identity candidates in ONE
+    // bounded statement. It must then separate ambiguous legacy rows instead
+    // of rendering them as confirmed matches for one composite PK.
+    const getCandidates = sqlite.prepare(`SELECT table_name, context, target_id, before_json, after_json
+      FROM audit_logs WHERE table_name = ? AND (
+        (context = ? AND target_id = ?) OR (context = ? AND target_id = ?))
+      ORDER BY id LIMIT ?`);
+    const rows = getCandidates.all(
+      lookup.table_name, lookup.v1.context, lookup.v1.target_id,
+      lookup.legacy.context, lookup.legacy.target_id, 10,
+    );
+    assert.equal(rows.length, 4);
+    const tags = rows.map((row) => classifySpreadsheetAuditHistoryCandidate(lookup, row));
+    assert.deepEqual(tags.sort(), [
+      "legacy_ambiguous", "legacy_snapshot_exact", "other", "v1_exact",
+    ].sort());
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 6);
+  } finally {
+    sqlite.close();
+  }
+});
