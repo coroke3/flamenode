@@ -526,6 +526,45 @@ function registerTests(test, equal, runtime) {
     equal(f.values.has(f.openKey), false);
     equal(f.rateViolations.length, 0);
   });
+  test("SEC-798: three hits on newer OPEN during stale cold hit read finish close", async () => {
+    const f = make({initial:0});
+    f.seed({bucket:1,observed:19,pending:0,lastFlushAt:-Infinity});
+    const pause = f.pause("get", f.openKey);
+    const hitting = f.hit();
+    await pause.started;
+    await f.miss(f.now());
+    equal(f.snapshot().stage, "marker");
+    await f.hit(); await f.hit(); await f.hit();
+    equal(await f.isOpen(), true);
+    pause.resume(); await hitting;
+    equal(f.snapshot().stage, null);
+    equal(f.snapshot().open, false);
+    equal(f.values.has(f.openKey), false);
+    equal(f.writes.filter(x=>x[1]===f.openKey).length, 0);
+    equal(f.snapshot().pending, 1);
+    equal(f.rateViolations.length, 0);
+  });
+  test("SEC-798: three hits on newer OPEN during old close cleanup finish close", async () => {
+    const f = make();
+    await f.miss(f.now());
+    await f.hit(); await f.hit();
+    f.tick(1000);
+    const pause = f.pause("delete", f.hitKey);
+    const closing = f.hit();
+    await pause.started;
+    f.seed({bucket:1,observed:19,pending:0,lastFlushAt:-Infinity});
+    await f.miss(f.now());
+    equal(f.snapshot().stage, "marker");
+    await f.hit(); await f.hit(); await f.hit();
+    pause.resume(); await closing;
+    equal(f.snapshot().stage, null);
+    equal(f.snapshot().open, false);
+    equal(f.values.has(f.openKey), false);
+    equal(f.writes.filter(x=>x[0]==="put"&&x[1]===f.openKey).length, 1);
+    equal(f.writes.filter(x=>x[0]==="delete"&&x[1]===f.openKey).length, 1);
+    equal(f.snapshot().pending, 1);
+    equal(f.rateViolations.length, 0);
+  });
 }
 
 registerTests(test, assert.equal, runtime);

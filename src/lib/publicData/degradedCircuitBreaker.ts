@@ -519,10 +519,15 @@ export async function recordDegradedCircuitR2Hit(): Promise<void> {
   await closeCircuitIfReady(kv, now);
 }
 
-async function closeCircuitIfReady(kv: KVNamespace, now: number): Promise<void> {
+async function closeCircuitIfReady(
+  kv: KVNamespace,
+  now: number,
+  allowNewerRepairFollowup = true,
+): Promise<void> {
   // A repair and close must not mutate the marker concurrently in this isolate.
   if (openRepairInFlight || hitCloseInFlight || missFlushInFlight) return;
   hitCloseInFlight = true;
+  const repairAtStart = openRepair;
   try {
     localCircuitState.lastKvProbeAt = now;
     const revision = circuitRevision;
@@ -565,8 +570,16 @@ async function closeCircuitIfReady(kv: KVNamespace, now: number): Promise<void> 
     // Best effort only.
   } finally {
     hitCloseInFlight = false;
-    if (openRepair && localCircuitState.open && !shouldCloseDegradedCircuit(localCircuitState.hitStreak)) {
-      await attemptOpenRepair(kv, Date.now());
+    if (openRepair && localCircuitState.open) {
+      if (!shouldCloseDegradedCircuit(localCircuitState.hitStreak)) {
+        await attemptOpenRepair(kv, Date.now());
+      } else if (allowNewerRepairFollowup && openRepair !== repairAtStart &&
+        Date.now() < localCircuitState.openUntil) {
+        // A newer OPEN accrued its own three hits while this close was busy.
+        // Use one fresh probe after releasing the old lock, not its stale read.
+        // Bound the follow-up to avoid looping on further overlapping repairs.
+        await closeCircuitIfReady(kv, Date.now(), false);
+      }
     }
   }
 }
