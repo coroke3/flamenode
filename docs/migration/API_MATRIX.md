@@ -649,6 +649,9 @@ Differential parity: `apps/api/test/adminEventGroups.current.parity.test.mjs` (T
 
 ## MIG-0639 per-method LOCAL CPU (Linux, 2026-11-01)
 
+2026-11-28 profiler lifecycle hardening candidate (PR #456 source/test `56b3c5a3018164f53a46a7771a3a996fc35d5d3a`): per-WebSocket CDP command correlation, bounded command/open/discovery deadlines, malformed/unmatched response fail-closed handling, abortable benchmark fetch plus full-body deadlines, and bounded child-exit cleanup. This is harness-integrity work only; exact-head tests/CI and native Workerd compatibility are pending. No new CPU measurements or S2/S3/S4 verdict.
+
+
 2026-11-28 harness-integrity update (PR #456 source/test `2e72e446a3872775023947f4fabdb022321f0b3d`): CDP profiler command responses now require successful result envelopes, and V8 CPUProfile samples/node references/deltas are structurally validated before busy time or resolution is recorded. Empty profiles are invalid evidence; a valid idle-only profile remains zero. This is a measurement-integrity correction only, **not a new CPU measurement or S2/S3/S4 verdict**. Exact-head repository tests and CI are pending.
 
 
