@@ -17,7 +17,12 @@ import {
 } from "@flamenode/domain/video";
 import type { ServerCoreDb } from "../db.ts";
 import { unslottedEventEligibilityWhere } from "./unslottedEventEligibility.ts";
-import { MAX_VIDEO_CUSTOM_QUESTIONS_READ } from "./freeVideoCustomQuestionRead.ts";
+import {
+  decodeGeneralCustomQuestionPolicyForEvents,
+  MAX_VIDEO_CUSTOM_QUESTIONS_READ,
+  stagePermissionQuestionKeyCondition,
+  type LoadedGeneralCustomQuestion,
+} from "./freeVideoCustomQuestionRead.ts";
 import { buildSlotParts } from "./slotGrouping.ts";
 
 /** MIG-0651 unmounted SA-086 general-question read candidate. */
@@ -357,6 +362,178 @@ export function buildSlotSubmissionReceiptAssertions(receipt: SlotSubmissionRece
   return assertions;
 }
 
+export type SlotSubmissionStagePermissionQuestionRow = {
+  id: string;
+  event_id: string;
+  question_key: string;
+  label: string;
+  description: string | null;
+  placeholder: string | null;
+  required: number;
+  is_active: number;
+  sort_order: number;
+  updated_at: number;
+};
+
+export type SlotSubmissionStagePermissionField = {
+  id: string;
+  enabled: boolean;
+  required: boolean;
+  label: string;
+  description: string;
+  placeholder: string;
+};
+
+const STAGE_PERMISSION_DEFAULT_ID = "stage_permission";
+const STAGE_PERMISSION_DEFAULT_LABEL = "ステージ・素材・権利まわりの使用許可";
+const STAGE_PERMISSION_DEFAULT_DESCRIPTION =
+  "ステージ、モデル、素材、その他権利確認が必要なものについて記入してください。";
+const STAGE_PERMISSION_DEFAULT_PLACEHOLDER =
+  "例：自作ステージ / 利用規約確認済み / 権利者許可済み など";
+
+function cleanStagePermissionId(value: unknown, fallback: string): string {
+  if (typeof value !== "string") return fallback;
+  const cleaned = value.trim().replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 64);
+  return cleaned || fallback;
+}
+
+function cleanStagePermissionText(value: unknown, fallback: string): string {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+/** CURRENT getStagePermissionFieldsForEvents, over the fused row receipt. */
+export function resolveSlotSubmissionStagePermissionFields(
+  eventIds: readonly string[],
+  rows: readonly SlotSubmissionStagePermissionQuestionRow[],
+): SlotSubmissionStagePermissionField[] {
+  const byId = new Map<string, SlotSubmissionStagePermissionField>();
+  for (const eventId of Array.from(new Set(eventIds.filter(Boolean)))) {
+    const eventRows = rows.filter((row) => row.event_id === eventId);
+    for (let index = 0; index < eventRows.length; index += 1) {
+      const row = eventRows[index];
+      const fallbackId = index === 0
+        ? STAGE_PERMISSION_DEFAULT_ID
+        : STAGE_PERMISSION_DEFAULT_ID + "_" + (index + 1);
+      const field: SlotSubmissionStagePermissionField = {
+        id: cleanStagePermissionId(row.question_key, fallbackId),
+        enabled: row.is_active === 1,
+        required: row.required === 1,
+        label: cleanStagePermissionText(row.label, STAGE_PERMISSION_DEFAULT_LABEL),
+        description: cleanStagePermissionText(row.description, STAGE_PERMISSION_DEFAULT_DESCRIPTION),
+        placeholder: cleanStagePermissionText(row.placeholder, STAGE_PERMISSION_DEFAULT_PLACEHOLDER),
+      };
+      if (!field.enabled) continue;
+      const existing = byId.get(field.id);
+      if (existing) {
+        byId.set(field.id, { ...existing, required: existing.required || field.required });
+      } else {
+        byId.set(field.id, field);
+      }
+    }
+  }
+  return Array.from(byId.values());
+}
+
+function parseExistingStagePermissionAnswers(raw: string | null | undefined): Map<string, string> {
+  if (!raw || !raw.trim()) return new Map();
+  try {
+    const parsed: unknown = JSON.parse(raw.trim());
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return new Map();
+    const answers = (parsed as { answers?: unknown }).answers;
+    if (!Array.isArray(answers)) return new Map();
+    const out = new Map<string, string>();
+    for (const item of answers) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+      const data = item as Record<string, unknown>;
+      const id = cleanStagePermissionId(data.id, "");
+      const value = typeof data.value === "string" ? data.value.trim() : "";
+      if (id && value) out.set(id, value);
+    }
+    return out;
+  } catch {
+    return new Map();
+  }
+}
+
+function serializeSlotStagePermissionAnswers(
+  answers: readonly { id: string; label: string; value: string }[],
+): string | null {
+  const cleaned = answers.map((answer) => ({
+    id: cleanStagePermissionId(answer.id, ""),
+    label: cleanStagePermissionText(answer.label, STAGE_PERMISSION_DEFAULT_LABEL),
+    value: answer.value.trim(),
+  })).filter((answer) => answer.id && answer.value);
+  return cleaned.length === 0 ? null : JSON.stringify({ version: 1, answers: cleaned });
+}
+
+/** CURRENT buildStagePermissionSubmission, with no implicit existing-answer fallback by default. */
+export function buildSlotSubmissionStagePermissionSubmission(
+  formData: FormData,
+  fields: readonly SlotSubmissionStagePermissionField[],
+  existingAnswersJson?: string | null,
+): { ok: true; value: string | null } | { ok: false; message: string } {
+  if (fields.length === 0) return { ok: true, value: null };
+  const ids = formData.getAll("custom_question_answer_id");
+  const values = formData.getAll("custom_question_answer_value");
+  const submitted = new Map<string, string>();
+  for (let index = 0; index < ids.length; index += 1) {
+    const id = String(ids[index] ?? "").trim();
+    if (!id) continue;
+    submitted.set(id, String(values[index] ?? "").trim());
+  }
+  const fallback = parseExistingStagePermissionAnswers(existingAnswersJson);
+  const answers: { id: string; label: string; value: string }[] = [];
+  for (const field of fields) {
+    const raw = submitted.has(field.id) ? submitted.get(field.id) : fallback.get(field.id);
+    const value = (raw ?? "").trim();
+    if (value.length > 1000) {
+      return { ok: false, message: field.label + "は1000文字以内で入力してください。" };
+    }
+    if (field.required && !value) {
+      return { ok: false, message: field.label + "を入力してください。" };
+    }
+    if (value) answers.push({ id: field.id, label: field.label, value });
+  }
+  return { ok: true, value: serializeSlotStagePermissionAnswers(answers) };
+}
+
+export function decodeSlotSubmissionStageQuestionProjection(
+  json: string,
+  expectedEventIds: readonly string[],
+): SlotSubmissionStagePermissionQuestionRow[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    throw new Error("slot_submission_stage_question_projection_invalid");
+  }
+  const expected = new Set(expectedEventIds);
+  if (!Array.isArray(parsed)) throw new Error("slot_submission_stage_question_projection_invalid");
+  const seen = new Set<string>();
+  return parsed.map((tuple: unknown) => {
+    if (!Array.isArray(tuple) || tuple.length !== 10) {
+      throw new Error("slot_submission_stage_question_projection_invalid");
+    }
+    const [id, eventId, questionKey, label, description, placeholder,
+      required, isActive, sortOrder, updatedAt] = tuple;
+    if (typeof id !== "string" || !id || seen.has(id) ||
+        typeof eventId !== "string" || !expected.has(eventId) ||
+        typeof questionKey !== "string" || typeof label !== "string" ||
+        (description !== null && typeof description !== "string") ||
+        (placeholder !== null && typeof placeholder !== "string") ||
+        (required !== 0 && required !== 1) || (isActive !== 0 && isActive !== 1) ||
+        !Number.isSafeInteger(sortOrder) || !Number.isSafeInteger(updatedAt)) {
+      throw new Error("slot_submission_stage_question_projection_invalid");
+    }
+    seen.add(id);
+    return {
+      id, event_id: eventId, question_key: questionKey, label,
+      description, placeholder, required, is_active: isActive,
+      sort_order: sortOrder, updated_at: updatedAt,
+    };
+  });
+}
+
 export type SlotSubmissionExistingVideo = typeof videos.$inferSelect;
 export type SlotSubmissionEventConfig = Pick<typeof events.$inferSelect,
   "id" | "title" | "parts_json" | "slot_part_gap_minutes" | "required_video_fields_json">;
@@ -364,7 +541,13 @@ export type SlotSubmissionEventConfig = Pick<typeof events.$inferSelect,
 export type SlotSubmissionVideoEventReceipt = {
   existing: { kind: "none" } | { kind: "missing" } |
     { kind: "found"; row: SlotSubmissionExistingVideo };
+  targetEventIds: string[];
+  events: SlotSubmissionEventConfig[];
   event: SlotSubmissionEventConfig | null;
+  eventPolicyJson: string;
+  generalQuestionPolicyJson: string;
+  stageQuestionPolicyJson: string;
+  stageQuestions: SlotSubmissionStagePermissionQuestionRow[];
   youtubeDuplicate: boolean;
 };
 
@@ -389,30 +572,46 @@ export function buildSlotSubmissionPartAndEventAssertions(
     typeof receipt.partSnapshotJson !== "string" ||
     !receipt.partSnapshotJson.startsWith("[") ||
     !event ||
-    event.id !== receipt.anchor.event_id
+    event.id !== receipt.anchor.event_id ||
+    !videoEventReceipt.targetEventIds.includes(receipt.anchor.event_id) ||
+    !Array.isArray(videoEventReceipt.events) ||
+    !videoEventReceipt.events.some((row) => row.id === receipt.anchor.event_id) ||
+    typeof videoEventReceipt.eventPolicyJson !== "string" ||
+    !videoEventReceipt.eventPolicyJson.startsWith("[")
   ) {
     throw new Error("slot_submission_freshness_receipt_invalid");
   }
 
   const partScope = receipt.partResolution.kind === "bounded"
-    ? sql`AND typeof(start_time) IN ('integer', 'real')
-        AND start_time <= (SELECT start_time FROM slots WHERE id = ${receipt.anchor.id})`
-    : sql``;
-  const actualPartSnapshot = sql`(
+    ? sql\`AND typeof(start_time) IN ('integer', 'real')
+        AND start_time <= (SELECT start_time FROM slots WHERE id = \${receipt.anchor.id})\`
+    : sql\`\`;
+  const actualPartSnapshot = sql\`(
     SELECT json_group_array(json_array(id, start_time, sort_order))
     FROM (
       SELECT id, start_time, sort_order
       FROM slots
-      WHERE event_id = (SELECT event_id FROM slots WHERE id = ${receipt.anchor.id})
-      ${partScope}
+      WHERE event_id = (SELECT event_id FROM slots WHERE id = \${receipt.anchor.id})
+      \${partScope}
       ORDER BY id COLLATE BINARY ASC
     )
-  )`;
-  const eventSnapshot = expectedRowCondition({ expectedCurrent: { ...event } });
+  )\`;
+  const eventIdsJson = JSON.stringify(videoEventReceipt.targetEventIds);
+  const actualEventSnapshot = sql\`(
+    SELECT json_group_array(json_array(id, title, parts_json, slot_part_gap_minutes, required_video_fields_json))
+    FROM (
+      SELECT events.id, events.title, events.parts_json,
+             events.slot_part_gap_minutes, events.required_video_fields_json
+      FROM events
+      INNER JOIN json_each(\${eventIdsJson}) requested
+        ON events.id = CAST(requested.value AS TEXT)
+      ORDER BY CAST(requested.key AS INTEGER)
+    )
+  )\`;
 
   return [
-    assertCondition(sql`${actualPartSnapshot} = ${receipt.partSnapshotJson}`),
-    assertCondition(sql`(SELECT COUNT(*) FROM events WHERE ${eventSnapshot}) = 1`),
+    assertCondition(sql\`\${actualPartSnapshot} = \${receipt.partSnapshotJson}\`),
+    assertCondition(sql\`\${actualEventSnapshot} = \${videoEventReceipt.eventPolicyJson}\`),
   ];
 }
 
