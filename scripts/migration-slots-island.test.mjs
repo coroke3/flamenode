@@ -1141,11 +1141,14 @@ test("U03k host serializes mutations and reconciles only a committed current vie
   let runMutation;
   let publicReads = 0;
   let publicReadResult = true;
+  let holdPublicRead = false;
+  const pendingPublicReads = [];
   let mutationCalls = 0;
   const outcomes = [];
   const navigations = [];
   const refreshPublic = async () => {
     publicReads += 1;
+    if (holdPublicRead) return new Promise(resolve => pendingPublicReads.push(resolve));
     return publicReadResult;
   };
   const onNavigate = path => navigations.push(path);
@@ -1286,6 +1289,79 @@ test("U03k host serializes mutations and reconciles only a committed current vie
     assert.equal(requests.length, 6, "typed 409 is followed by one RH-014 read even when RH-020 fails");
     assert.equal(mutationCalls, 5, "no mutation path retries its POST");
     await settleOverlay(5, "x3");
+
+    // A stale mutation settles under x4, whose public reconciliation is held.
+    // x5 commits before that read settles. The reconciliation must wake again
+    // even though the x5 commit's effect already observed pending=false.
+    let resolveLate;
+    let latePromise;
+    let lateResult;
+    await React.act(async () => {
+      latePromise = runMutation(presentation, () => {
+        mutationCalls += 1;
+        return new Promise(resolve => { resolveLate = resolve; });
+      }, onOutcome);
+    });
+    await React.act(async () => {
+      dom.window.dispatchEvent(new dom.window.Event(ACTIVE_X_CHANGED_EVENT));
+    });
+    assert.equal(requests.length, 7);
+    await settleOverlay(6, "x4");
+    holdPublicRead = true;
+    await React.act(async () => {
+      resolveLate({ status: 200, result: { ok: true, slotId: "s" } });
+    });
+    assert.equal(publicReads, 4);
+    assert.equal(pendingPublicReads.length, 1);
+    await React.act(async () => {
+      dom.window.dispatchEvent(new dom.window.Event(ACTIVE_X_CHANGED_EVENT));
+    });
+    assert.equal(requests.length, 8);
+    await settleOverlay(7, "x5");
+    assert.equal(publicReads, 4, "no overlapping stale reconciliation");
+    await React.act(async () => {
+      pendingPublicReads[0](true);
+      lateResult = await latePromise;
+      await new Promise(resolve => setTimeout(resolve, 10));
+    });
+    assert.equal(lateResult.kind, "stale");
+    assert.equal(publicReads, 5, "already-committed successor must not lose the read wakeup");
+    assert.equal(pendingPublicReads.length, 2);
+    assert.equal(requests.length, 8, "obsolete public completion cannot refresh x5 private state");
+    await React.act(async () => {
+      pendingPublicReads[1](true);
+      await new Promise(resolve => setTimeout(resolve, 10));
+    });
+    assert.equal(requests.length, 9);
+    await settleOverlay(8, "x5");
+    assert.equal(outcomes.length, 2, "stale outcome is not delivered to successor");
+    assert.equal(navigations.length, 1);
+    assert.equal(mutationCalls, 6, "reconciliation never retries the POST");
+
+    // A current result callback can retire the receipt synchronously.
+    // Its requested read-only refresh is still owed by the new host receipt.
+    holdPublicRead = false;
+    publicReadResult = true;
+    let callbackResult;
+    await React.act(async () => {
+      callbackResult = await runMutation(presentation, async () => {
+        mutationCalls += 1;
+        return { status: 200, result: { ok: true, slotId: "s" } };
+      }, (outcome, isCurrent) => {
+        assert.equal(outcome.kind, "success");
+        assert.equal(isCurrent(), true);
+        dom.window.dispatchEvent(new dom.window.Event(ACTIVE_X_CHANGED_EVENT));
+        assert.equal(isCurrent(), false);
+      });
+    });
+    assert.equal(callbackResult.kind, "settled");
+    assert.equal(publicReads, 5, "do not read under the retired receipt");
+    assert.equal(requests.length, 10);
+    await settleOverlay(9, "x6");
+    assert.equal(publicReads, 6);
+    assert.equal(requests.length, 11, "current successor gets a fresh private read");
+    await settleOverlay(10, "x6");
+    assert.equal(mutationCalls, 7);
   } finally {
     await React.act(async () => root.unmount());
     globalThis.fetch = previousFetch;

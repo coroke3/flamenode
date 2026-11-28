@@ -352,6 +352,16 @@ export function EventSlotsViewerIsland<T extends ViewerSlotBase>({
   const navigate = onNavigate ?? defaultNavigate;
   const inFlight = React.useRef(false);
   const staleReconcilePending = React.useRef(false);
+  const reconcileInFlight = React.useRef(false);
+  const hostMounted = React.useRef(false);
+  const [reconcileNonce, scheduleReconcile] = React.useReducer((n: number) => n + 1, 0);
+  React.useLayoutEffect(() => {
+    hostMounted.current = true;
+    return () => {
+      hostMounted.current = false;
+      staleReconcilePending.current = false;
+    };
+  }, []);
   const currentHostRef = React.useRef({
     capture: state.captureMutationReceipt,
     refreshViewer: state.refresh,
@@ -363,21 +373,31 @@ export function EventSlotsViewerIsland<T extends ViewerSlotBase>({
     refreshPublic: refreshPublicRead,
   };
   const reconcileCurrent = React.useCallback(async () => {
+    if (!hostMounted.current || reconcileInFlight.current || !staleReconcilePending.current) return;
     const current = currentHostRef.current;
     const receipt = current.capture();
     if (!receipt) return;
     staleReconcilePending.current = false;
+    reconcileInFlight.current = true;
     try {
       await current.refreshPublic();
     } catch {
       // A failed public read still requires a fresh private read below.
+    } finally {
+      reconcileInFlight.current = false;
     }
+    if (!hostMounted.current) return;
     if (receipt()) current.refreshViewer();
-    else staleReconcilePending.current = true;
+    else {
+      // The successor may have committed while this read was pending and
+      // the effect may already have observed pending=false. Wake it again.
+      staleReconcilePending.current = true;
+      scheduleReconcile();
+    }
   }, []);
   React.useEffect(() => {
     if (staleReconcilePending.current) void reconcileCurrent();
-  }, [state.captureMutationReceipt, state.loading, reconcileCurrent]);
+  }, [state.captureMutationReceipt, state.loading, reconcileNonce, reconcileCurrent]);
   const runMutation = React.useCallback(async (
     presentation: SlotMutationPresentation,
     mutate: SlotMutationAction,
@@ -401,14 +421,20 @@ export function EventSlotsViewerIsland<T extends ViewerSlotBase>({
         return { kind: "settled", outcome, isCurrent: receipt };
       }
       onOutcome?.(outcome, receipt);
-      if (outcome.refresh && receipt()) {
-        try {
-          await refreshPublicRead();
-        } catch {
-          // The private RH-014 read below still runs after an RH-020 failure.
+      if (outcome.refresh && hostMounted.current) {
+        // The callback itself may synchronously retire this receipt.
+        if (receipt()) {
+          try {
+            await refreshPublicRead();
+          } catch {
+            // The private RH-014 read below still runs after an RH-020 failure.
+          }
+          if (receipt()) {
+            state.refresh();
+            return { kind: "settled", outcome, isCurrent: receipt };
+          }
         }
-        if (receipt()) state.refresh();
-        else {
+        if (hostMounted.current) {
           staleReconcilePending.current = true;
           await reconcileCurrent();
         }
