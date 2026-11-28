@@ -1178,7 +1178,7 @@ if (runUnderRootTsx(import.meta.url)) {
     let afterConcurrent = null;
     const fired = afterFirstRead(
       w,
-      (sql) => /FROM "slots" WHERE "id" = \\? AND "event_id" = \\? LIMIT 1/i.test(sql),
+      (sql) => /FROM "slots" WHERE "id" = \? AND "event_id" = \? LIMIT 1/i.test(sql),
       (sqlite) => {
         sqlite
           .prepare(
