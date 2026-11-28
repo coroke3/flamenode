@@ -28,6 +28,24 @@ test("parseEventStaffPermissionKeys rejects the whole input on an unknown key", 
   );
 });
 
+test("parseEventStaffPermissionKeys rejects inherited Object.prototype properties", () => {
+  const inheritedNames = Object.getOwnPropertyNames(Object.prototype);
+  assert.equal(inheritedNames.length, 12);
+  for (const key of inheritedNames) {
+    assert.throws(
+      () => parseEventStaffPermissionKeys(key),
+      (error) => error instanceof Error && error.message === `不正な権限キーです: ${key}`,
+      key,
+    );
+    assert.throws(
+      () => parseEventStaffPermissionKeys(`event.basic,${key}`),
+      (error) => error instanceof Error && error.message === `不正な権限キーです: ${key}`,
+      "mixed valid and inherited key: " + key,
+    );
+  }
+  assert.deepEqual(parseEventStaffPermissionKeys("videos.title,video.basics"), ["videos.title", "video.basics"]);
+});
+
 test("event id reuse waits the full delay and needs every cleanup target done", () => {
   assert.equal(isEventIdReuseDelayElapsed(100, 100 + EVENT_ID_REUSE_DELAY_SECONDS - 1), false);
   assert.equal(isEventIdReuseDelayElapsed(100, 100 + EVENT_ID_REUSE_DELAY_SECONDS), true);
