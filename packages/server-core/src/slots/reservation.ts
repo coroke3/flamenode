@@ -1109,13 +1109,20 @@ export async function extendSlotGroupCore(
         WHEN ${invalidSqlText('"id"', MAX_LEGACY_RECORD_ID_BYTES)}
           THEN '{"__invalid_projection":1}'
         ELSE "id" END FROM cte_edge) AS cte_edge_id,
-      (SELECT ${slotJsonObjectSql("n")} FROM (
-        SELECT ${SLOT_COLUMNS.map((c) => `s."${c}"`).join(", ")}
-        FROM "slots" s, cte_edge ce
-        WHERE s."event_id" = ce."event_id" AND ${neighborConditionSql("s", "ce", input.direction)}
-        ORDER BY ${neighborOrderSql("s", input.direction)}
-        LIMIT 1
-      ) n) AS neighbor_json,
+      -- The primary SQL edge can differ from the actual JS-selected edge.
+      -- Keep its invalid marker local, just as for alternate neighbors.
+      (SELECT CASE WHEN projected_neighbor = '{"__invalid_projection":1}'
+          THEN json_object('invalid_neighbor', 1)
+          ELSE projected_neighbor END
+       FROM (
+        SELECT ${slotJsonObjectSql("n")} AS projected_neighbor FROM (
+          SELECT ${SLOT_COLUMNS.map((c) => `s."${c}"`).join(", ")}
+          FROM "slots" s, cte_edge ce
+          WHERE s."event_id" = ce."event_id" AND ${neighborConditionSql("s", "ce", input.direction)}
+          ORDER BY ${neighborOrderSql("s", input.direction)}
+          LIMIT 1
+        ) n
+       )) AS neighbor_json,
       -- CURRENT uses JS localeCompare for the group's edge, while the
       -- neighbor lookup uses SQLite binary order. Only equal-time/order
       -- group members can disagree with cte_edge. Project their corresponding
@@ -1239,7 +1246,13 @@ export async function extendSlotGroupCore(
   let candidate: SlotRow | undefined;
   let callerQueryCount = CALLER_PRE_READS_WITH_SESSION;
   if (edge.id === snapshot.cte_edge_id) {
-    candidate = parseJsonOrThrow<SlotRow | null>(snapshot.neighbor_json, null) ?? undefined;
+    const primary = parseJsonOrThrow<SlotRow | { invalid_neighbor: 1 } | null>(
+      snapshot.neighbor_json, null,
+    );
+    if (primary && "invalid_neighbor" in primary) {
+      return failOutcome(503, GENERIC_MUTATION_ERROR_MESSAGE);
+    }
+    candidate = primary ?? undefined;
   } else {
     const alternatives = parseJsonOrThrow<{
       edge_id: string;

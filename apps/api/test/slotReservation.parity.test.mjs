@@ -1861,6 +1861,128 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+  test("SEC #716: primary tied-edge marker is local and respects CURRENT denial order", async () => {
+    for (const direction of ["forward", "backward"]) {
+      for (const mode of ["available", "occupied", "selected_invalid", "foreign", "closed", "cap"]) {
+        const a = world();
+        const b = world();
+        const tied = mode === "available" || mode === "occupied";
+        const sqlEdge = direction === "forward" ? "tie_a" : "tie_A";
+        const ids = tied ? ["tie_A", "tie_a"] : [sqlEdge];
+        const anchor = ids[0];
+        const user = mode === "foreign" ? "u_other" : "u_owner";
+        const malformed = direction === "forward" ? "x".repeat(180_000) : "legacy\u0000label";
+        for (const w of [a, b]) {
+          const group = {
+            event_id: "ev1", start_time: NOW_SEC + 1100, sort_order: 0,
+            status: "reserved", reserved_by_user_id: "u_owner", x_user_id: "x_owner",
+            reserved_x_id_snapshot: "x_owner", reservation_group_id: "legacy_primary_marker",
+            display_name: "Legacy", updated_at: 100, version: 1,
+          };
+          for (const id of ids) insert(w.sqlite, "slots", { ...group, id, slot_label: id });
+          if (tied) {
+            insert(w.sqlite, "slots", {
+              id: "tie_Z", event_id: "ev1", start_time: NOW_SEC + 1100, sort_order: 0,
+              status: mode === "available" ? "available" : "reserved",
+              ...(mode === "occupied" ? {
+                reserved_by_user_id: "u_other", x_user_id: "x_other",
+                reserved_x_id_snapshot: "x_other", display_name: "Other",
+              } : {}),
+              slot_label: "Between", updated_at: 100, version: 1,
+            });
+          }
+          insert(w.sqlite, "slots", {
+            id: direction === "forward" ? "tie_z" : "tie_0", event_id: "ev1",
+            start_time: NOW_SEC + 1100, sort_order: 0, status: "available",
+            slot_label: malformed, updated_at: 100, version: 1,
+          });
+          if (mode === "closed") {
+            w.sqlite.prepare("UPDATE events SET entry_end_time = ? WHERE id = 'ev1'").run(NOW_SEC - 1);
+          }
+          if (mode === "cap") {
+            w.sqlite.prepare("UPDATE events SET max_slots_per_video = 1 WHERE id = 'ev1'").run();
+          }
+        }
+        const token = "s3-primary-edge-marker";
+        insert(b.sqlite, "session", {
+          sessionToken: token, userId: user, expires: NOW_SEC * 1000 + 60000,
+        });
+        let expected;
+        if (mode !== "selected_invalid") {
+          const thawA = freeze();
+          try {
+            expected = await runCurrent(a, user, "extend", { eventId: "ev1", slot_id: anchor, direction });
+          } finally {
+            thawA();
+          }
+        }
+        let snapshots = 0;
+        const prepare = b.d1.prepare.bind(b.d1);
+        b.d1.prepare = sql => {
+          const stmt = prepare(sql);
+          if (!sql.includes("alternate_neighbors AS MATERIALIZED")) return stmt;
+          const bind = stmt.bind.bind(stmt);
+          stmt.bind = (...values) => {
+            assert.equal(values.length, 6);
+            const bound = bind(...values);
+            const first = bound.first.bind(bound);
+            bound.first = async () => {
+              const row = await first();
+              snapshots++;
+              assert.equal(row.invalid_snapshot, 0);
+              assert.deepEqual(JSON.parse(row.neighbor_json), { invalid_neighbor: 1 });
+              assert.equal(row.neighbor_json.includes(malformed), false);
+              assert.ok(Buffer.byteLength(JSON.stringify(row), "utf8") < 64 * 1024);
+              if (tied) {
+                const jsEdge = direction === "forward" ? "tie_A" : "tie_a";
+                const alternate = JSON.parse(row.alternate_neighbors_json).find(x => x.edge_id === jsEdge);
+                assert.equal(alternate.neighbor.id, "tie_Z");
+              }
+              return row;
+            };
+            return bound;
+          };
+          return stmt;
+        };
+        const before = state(b);
+        const reads = b.d1.stats.reads;
+        const batches = b.d1.stats.batches;
+        const thawB = freeze();
+        try {
+          const response = await app.request(SITE + "/api/events/ev1/slots/" + anchor + "/extend", {
+            method: "POST",
+            headers: {
+              Origin: SITE, cookie: "__Secure-authjs.session-token=" + token,
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({ direction }),
+          }, { DB: b.d1, NEXT_PUBLIC_SITE_URL: SITE });
+          const label = direction + " " + mode;
+          const status = mode === "available" ? 200 : mode === "selected_invalid" ? 503 : mode === "foreign" ? 403 : 409;
+          assert.equal(response.status, status, label);
+          assert.equal(response.headers.get("cache-control"), "private, no-store");
+          const result = await response.json();
+          if (expected) {
+            assert.deepEqual(result, expected.result, label + " CURRENT parity");
+            assert.deepEqual(state(b), state(a), label + " atomic state parity");
+            if (mode === "available") assert.equal(result.slotId, "tie_Z");
+          } else {
+            assert.deepEqual(result, {
+              ok: false,
+              message: "枠の状態が変更されたか、安全な保存を完了できませんでした。画面を更新してもう一度お試しください。",
+            });
+          }
+          if (mode !== "available") assert.deepEqual(state(b), before);
+          assert.equal(snapshots, 1, label);
+          assert.equal(b.d1.stats.reads - reads, 3, label);
+          assert.equal(b.d1.stats.batches - batches, mode === "available" ? 1 : 0, label);
+        } finally {
+          thawB();
+        }
+      }
+    }
+  });
+
   test("S3 #725: real HTTPS cookie checks latest major ToS and recovery without stale acceptance", async () => {
     const w = world();
     insert(w.sqlite, "session", {
