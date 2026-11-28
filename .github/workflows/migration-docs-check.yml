@@ -18,7 +18,7 @@ on:
       benchmark_samples:
         type: string
         default: "50"
-        description: Samples per scenario (--samples)
+        description: Samples per scenario (50-100; --samples)
       benchmark_skip_cold:
         type: boolean
         default: false
@@ -194,12 +194,15 @@ jobs:
         run: |
           {
             echo "uname: $(uname -a)"
-            echo "=== lscpu (head -n 20) ==="
-            lscpu | head -n 20
+            echo "=== lscpu (first 20 lines) ==="
+            lscpu | sed -n '1,20p'
             echo "=== versions ==="
             echo "node: $(node -v)"
             echo "wrangler: $(npx wrangler --version)"
             echo "commit: $(git rev-parse HEAD)"
+            echo "evidence_classification: DIAGNOSTIC_ONLY"
+            echo "acceptance: NOT_VALID_FOR_S2_S3_S4"
+            echo "reason: ubuntu-latest hosted runner does not establish MIG-0639 eligible-host/noise-floor criteria"
           } | tee "$RUNNER_TEMP/api-cpu-benchmark-env.txt"
       - name: Local-only Linux workerd API CPU benchmark を実行
         env:
@@ -209,8 +212,8 @@ jobs:
         run: |
           set -euo pipefail
           samples="${BENCHMARK_SAMPLES:-50}"
-          if [[ ! "$samples" =~ ^[1-9][0-9]*$ ]]; then
-            echo "Invalid benchmark_samples: must be a positive integer" >&2
+          if [[ ! "$samples" =~ ^(5[0-9]|[6-9][0-9]|100)$ ]]; then
+            echo "Invalid benchmark_samples: must be an integer from 50 through 100 (MIN_SAMPLES=50; max 100)" >&2
             exit 1
           fi
           args=(
@@ -224,6 +227,29 @@ jobs:
               echo "Invalid benchmark_only: must be comma-separated scenario IDs ([A-Za-z0-9_-]+)" >&2
               exit 1
             fi
+            # Ask the existing scenario registry itself which IDs resolve.
+            # --dry-run only builds the plan; it does not start workerd or measure CPU.
+            dry_run_output="$(node scripts/benchmark-api-cpu.mjs --dry-run --samples "$samples" --only "$only_trimmed")"
+            printf '%s\n' "$dry_run_output"
+            IFS=',' read -r -a requested_scenarios <<< "$only_trimmed"
+            declare -A seen_scenarios=()
+            has_non_baseline=false
+            for scenario_id in "${requested_scenarios[@]}"; do
+              if [[ -n "${seen_scenarios[$scenario_id]+x}" ]]; then
+                echo "Invalid benchmark_only: duplicate scenario ID: $scenario_id" >&2
+                exit 1
+              fi
+              seen_scenarios["$scenario_id"]=1
+              if ! grep -Fq "  ${scenario_id} " <<< "$dry_run_output"; then
+                echo "Invalid benchmark_only: unknown scenario ID: $scenario_id" >&2
+                exit 1
+              fi
+              if [[ "$scenario_id" != "BASELINE" ]]; then has_non_baseline=true; fi
+            done
+            if [[ "$has_non_baseline" != "true" ]]; then
+              echo "Invalid benchmark_only: include at least one known non-BASELINE scenario" >&2
+              exit 1
+            fi
             args+=(--only "$only_trimmed")
           fi
           if [[ "${BENCHMARK_SKIP_COLD:-false}" == "true" ]]; then
@@ -234,11 +260,11 @@ jobs:
           fi
           args+=(--out "$RUNNER_TEMP/api-cpu-benchmark.json")
           node "${args[@]}"
-      - name: API CPU benchmark 成果物をアップロード
+      - name: API CPU benchmark 診断成果物をアップロード
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: api-cpu-benchmark-${{ github.run_id }}-${{ github.run_attempt }}
+          name: api-cpu-benchmark-diagnostic-only-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/api-cpu-benchmark.json
             ${{ runner.temp }}/api-cpu-benchmark-env.txt
