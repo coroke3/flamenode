@@ -36,6 +36,7 @@ import type {
   LegacyImportApplyStage,
 } from "./previewStore";
 import { legacyImportRebuildQueueId } from "./rebuildQueueCore";
+import { legacyImportReceiptMatchesProgress, legacyImportSkipSnapshotFingerprint as skipSnapshotFingerprint } from "@flamenode/server-core/legacyImport/progress";
 import { sendYoutubeSyncPendingWakeBestEffort } from "@/lib/queues/youtubeSyncWake";
 import type { QueueWakeKind } from "@/lib/queues/wakeBudget";
 import { deletePublicJsonCaches } from "@/lib/publicData/publicCache";
@@ -151,14 +152,8 @@ function legacyRebuildQueueMutation(
   };
 }
 
-export type LegacyApplyResult = {
-  created: { events: number; videos: number; xUsers: number; authUsers: number; softwares: number };
-  replaced: { events: number; videos: number };
-  skipped: { events: number; videos: number };
-  customQuestions: { created: number; reused: number };
-  warnings: string[];
-};
-
+/** MIG-0645: shared result DTO for Next and Hono. */
+export type { LegacyApplyResult } from "@flamenode/server-core/legacyImport/applyResult";
 type LegacyImportStepOutcome =
   | { kind: "none" }
   | { kind: "system_user"; skipExistingEventIds: string[]; skipExistingVideoIds: string[] }
@@ -215,15 +210,6 @@ function cloneProgress(progress: LegacyImportApplyProgress): LegacyImportApplyPr
   };
 }
 
-function skipSnapshotFingerprint(ids: readonly string[]): string {
-  let hash = 0xcbf29ce484222325n;
-  const canonical = [...ids].sort().join("\u0000");
-  for (let index = 0; index < canonical.length; index += 1) {
-    hash ^= BigInt(canonical.charCodeAt(index));
-    hash = BigInt.asUintN(64, hash * 0x100000001b3n);
-  }
-  return `${ids.length}:${hash.toString(16).padStart(16, "0")}`;
-}
 
 async function snapshotDigest(value: unknown): Promise<string> {
   return sha256Hex(JSON.stringify(value));
@@ -491,17 +477,7 @@ async function recoveredStepMarker(
       }
     : recovered.outcome;
   const expectedProgress = nextStageProgress(plan, progress, recoveredOutcome);
-  if (
-    recovered.runDigest !== identity.runDigest ||
-    recovered.planHash !== identity.planHash ||
-    recovered.stage !== identity.stage ||
-    recovered.index !== identity.index ||
-    recovered.nextStage !== expectedProgress.stage ||
-    recovered.nextIndex !== expectedProgress.index ||
-    JSON.stringify(recovered.nextCounts) !== JSON.stringify(expectedProgress.counts) ||
-    recovered.skipEventSnapshotFingerprint !== skipSnapshotFingerprint(expectedProgress.skipExistingEventIds) ||
-    recovered.skipVideoSnapshotFingerprint !== skipSnapshotFingerprint(expectedProgress.skipExistingVideoIds)
-  ) {
+  if (!legacyImportReceiptMatchesProgress(recovered, identity, expectedProgress)) {
     throw new Error("旧形式インポートのステップ監査と進捗が一致しません。");
   }
   return expectedProgress;
@@ -683,8 +659,21 @@ async function ensureXUserGroup(
           retention_class: "long_audit",
           restore_strategy: "none",
         },
+        // Data mutation, rebuild queue and replay marker must commit together.
+        ...(options.marker
+          ? [stepMarkerAudit(
+              options.marker({ kind: "x_users", created: missing.length, createdAuthUsers: 0 }),
+              options.actorAuthUserId,
+            )]
+          : []),
       ],
     });
+  } else if (options.marker) {
+    await writeStepMarkerOnly(
+      db,
+      options.marker({ kind: "x_users", created: 0, createdAuthUsers: 0 }),
+      options.actorAuthUserId,
+    );
   }
   return missing.length;
 }
@@ -2543,34 +2532,8 @@ function questionsNeededForSkipStrategy(
   };
 }
 
-export function legacyApplyResultFromProgress(
-  plan: CanonicalLegacyPlan,
-  progress: LegacyImportApplyProgress,
-): LegacyApplyResult {
-  return {
-    created: {
-      events: progress.counts.createdEvents,
-      videos: progress.counts.createdVideos,
-      xUsers: progress.counts.createdXUsers,
-      authUsers: progress.counts.createdAuthUsers,
-      softwares: progress.counts.createdSoftwares,
-    },
-    replaced: {
-      events: progress.counts.replacedEvents,
-      videos: progress.counts.replacedVideos,
-    },
-    skipped: {
-      events: progress.counts.skippedEvents,
-      videos: progress.counts.skippedVideos,
-    },
-    customQuestions: {
-      created: progress.counts.createdCustomQuestions,
-      reused: progress.counts.reusedCustomQuestions,
-    },
-    warnings: [...plan.warnings],
-  };
-}
-
+/** MIG-0645: canonical result mapper remains publicly available in CURRENT. */
+export { legacyApplyResultFromProgress } from "@flamenode/server-core/legacyImport/applyResult";
 export async function applyLegacyImportPlanStep(
   db: DB,
   plan: CanonicalLegacyPlan,
@@ -2623,8 +2586,8 @@ export async function applyLegacyImportPlanStep(
       );
       const created = await ensureXUserGroup(db, rows, options);
       // Discord未ログインの空認証ユーザーは作らない。X名義(x_users)とevent_staff ownerのみ正本。
+      // ensureXUserGroup already committed the replay marker atomically.
       outcome = { kind: "x_users", created, createdAuthUsers: 0 };
-      await writeStepMarkerOnly(db, marker(outcome), options.actorAuthUserId);
       break;
     }
     case "softwares": {

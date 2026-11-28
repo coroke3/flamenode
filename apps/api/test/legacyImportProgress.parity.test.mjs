@@ -1,0 +1,148 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { readFile } from "node:fs/promises";
+import {
+  legacyImportApplyProgressSummary,
+  LEGACY_IMPORT_X_USER_STEP_SIZE, LEGACY_IMPORT_SOFTWARE_STEP_SIZE,
+  LEGACY_IMPORT_QUESTION_STEP_SIZE,
+} from "../src/routes/admin/legacyImportProgress.ts";
+
+
+const empty = () => ({
+  xUsers: [], videoSoftwares: [], events: [], eventCustomQuestions: [], videos: [],
+});
+
+test("RH-002 U02 progress: chunks match CURRENT and empty stages count one", async () => {
+  // apply.ts imports server-only/Next DB modules, so check its exported literals without executing it.
+  const source = await readFile(new URL("../../../src/lib/import/legacy/apply.ts", import.meta.url), "utf8");
+  const original = (name) => Number(source.match(new RegExp(`export const ${name} = (\\d+);`))?.[1]);
+  const CURRENT_X_STEP = original("LEGACY_IMPORT_X_USER_STEP_SIZE");
+  const CURRENT_SOFTWARE_STEP = original("LEGACY_IMPORT_SOFTWARE_STEP_SIZE");
+  const CURRENT_QUESTION_STEP = original("LEGACY_IMPORT_QUESTION_STEP_SIZE");
+  assert.equal(LEGACY_IMPORT_X_USER_STEP_SIZE, CURRENT_X_STEP);
+  assert.equal(LEGACY_IMPORT_SOFTWARE_STEP_SIZE, CURRENT_SOFTWARE_STEP);
+  assert.equal(LEGACY_IMPORT_QUESTION_STEP_SIZE, CURRENT_QUESTION_STEP);
+  const plan = empty();
+  assert.deepEqual(legacyImportApplyProgressSummary(plan, { stage: "system_user", index: 0 }),
+    { stage: "system_user", index: 0, completed: 0, total: 6 });
+  assert.deepEqual(legacyImportApplyProgressSummary(plan, { stage: "complete", index: 0 }),
+    { stage: "complete", index: 0, completed: 6, total: 6 });
+  assert.equal(legacyImportApplyProgressSummary(plan, { stage: "videos", index: 0 }).completed, 5);
+});
+
+test("RH-002 U02 progress: duplicate/casefold software names are one logical row", () => {
+  const plan = { ...empty(),
+    xUsers: Array.from({ length: 41 }, () => ({})),
+    videoSoftwares: Array.from({ length: 41 }, (_, i) => ({
+      label: i === 0 ? "  Premiere   Pro " : i === 1 ? "premiere pro" : `software-${i}`,
+    })),
+    eventCustomQuestions: Array.from({ length: 7 }, () => ({})),
+    events: [{}, {}],
+    videos: [{}, {}, {}],
+  };
+  // 1 system + 2 X + 1 software + 2 events + 2 questions + 3 videos
+  const stages = [
+    ["system_user", 0, 0],
+    ["x_users", 1, 2],
+    ["softwares", 0, 3],
+    ["events", 1, 5],
+    ["custom_questions", 1, 7],
+    ["videos", 2, 10],
+    ["complete", 0, 11],
+  ];
+  for (const [stage, index, completed] of stages) {
+    const result = legacyImportApplyProgressSummary(plan, { stage, index });
+    assert.equal(result.total, 11);
+    assert.equal(result.completed, completed, stage);
+    assert.equal(result.stage, stage);
+    assert.equal(result.index, index);
+  }
+});
+
+test("RH-002 U02 progress: CURRENT single-step and R2 CAS ordering remain an integration gate", async () => {
+  const current = await readFile(new URL("../../../app/api/admin/import/legacy/route.ts", import.meta.url), "utf8");
+  const commit = current.indexOf("const step = await applyLegacyImportPlanStep(");
+  const advance = current.indexOf("await claimed.advance(step.progress)");
+  assert.ok(commit >= 0 && advance > commit, "D1 commit precedes R2 progress advance");
+  assert.match(current.slice(advance), /committed_progress_pending/);
+});
+
+
+test("RH-002 stage progress: CURRENT and Hono share identical canonical function", async () => {
+  const { legacyImportApplyProgressSummary: shared } =
+    await import("@flamenode/server-core/legacyImport/progress");
+  assert.equal(shared, legacyImportApplyProgressSummary);
+  const source = await readFile(new URL("../../../app/api/admin/import/legacy/route.ts", import.meta.url), "utf8");
+  assert.match(source, /import \{ legacyImportApplyProgressSummary as applyProgressSummary \} from "@flamenode\/server-core\/legacyImport\/progress"/);
+  assert.doesNotMatch(source, /function applyProgressSummary\(/);
+  const claimProgress = { stage: "videos", index: 2 };
+  const plan = {
+    ...empty(), events: [1, 2, 3],
+    videos: [1, 2, 3, 4],
+    videoSoftwares: [{ label: "x" }, { label: "X" }, { label: "y" }],
+  };
+  assert.deepEqual(legacyImportApplyProgressSummary(plan, claimProgress),
+    shared(plan, claimProgress));
+});
+
+
+test("MIG-0645 U02r: shared receipt fingerprint matches CURRENT frozen UTF-16 vectors", async () => {
+  const { legacyImportSkipSnapshotFingerprint: fingerprint } = await import(
+    "@flamenode/server-core/legacyImport/progress"
+  );
+  const cases = [
+    [[], "0:cbf29ce484222325"],
+    [["x1"], "1:08f10707b58d70c2"],
+    [["x2", "x1"], "2:0ac1b4ac630a2998"],
+    [["x1", "x2"], "2:0ac1b4ac630a2998"],
+    [["x1", "x1"], "2:0ac1b7ac630a2eb1"],
+    [["é", "𠮷", "あ"], "3:19317cbf0b65d3b9"],
+  ];
+  for (const [ids, expected] of cases) assert.equal(fingerprint(ids), expected);
+  const source = await readFile(new URL("../../../src/lib/import/legacy/apply.ts", import.meta.url), "utf8");
+  assert.match(source, /legacyImportSkipSnapshotFingerprint as skipSnapshotFingerprint/);
+  assert.doesNotMatch(source, /function skipSnapshotFingerprint\(/,
+    "CURRENT must use the shared fingerprint to avoid audit replay drift");
+  assert.equal(fingerprint(["x1", "x2"]), fingerprint(["x2", "x1"]));
+  assert.notEqual(fingerprint(["x1"]), fingerprint(["x1", "x1"]));
+});
+
+
+test("MIG-0645 U02s: CURRENT persisted replay equality contract rejects every mismatch", async () => {
+  const { legacyImportReceiptMatchesProgress: matches, legacyImportSkipSnapshotFingerprint: fp } =
+    await import("@flamenode/server-core/legacyImport/progress");
+  const identity = { runDigest: "digest", planHash: "hash", stage: "x_users", index: 0 };
+  const expected = {
+    stage: "softwares", index: 0, counts: { createdXUsers: 1, createdAuthUsers: 0 },
+    skipExistingEventIds: ["event2", "event1"], skipExistingVideoIds: ["video1"],
+  };
+  const receipt = {
+    ...identity, nextStage: "softwares", nextIndex: 0,
+    nextCounts: { createdXUsers: 1, createdAuthUsers: 0 },
+    skipEventSnapshotFingerprint: fp(["event1", "event2"]),
+    skipVideoSnapshotFingerprint: fp(["video1"]),
+  };
+  assert.equal(matches(receipt, identity, expected), true);
+  // A rotated run/plan, unexpected source/target position, count drift or
+  // stale skip-set snapshot must never be used to advance R2 after a D1 commit.
+  const mutations = [
+    { runDigest: "other" }, { planHash: "other" }, { stage: "videos" },
+    { index: 1 }, { nextStage: "complete" }, { nextIndex: 1 },
+    { nextCounts: { createdXUsers: 2, createdAuthUsers: 0 } },
+    { nextCounts: { createdAuthUsers: 0, createdXUsers: 1 } },
+    { skipEventSnapshotFingerprint: fp(["event1"]) },
+    { skipVideoSnapshotFingerprint: fp(["video2"]) },
+  ];
+  for (const mutation of mutations) {
+    assert.equal(matches({ ...receipt, ...mutation }, identity, expected), false,
+      JSON.stringify(mutation));
+  }
+  assert.equal(matches(receipt, { ...identity, runDigest: "new" }, expected), false);
+  assert.equal(matches(receipt, { ...identity, planHash: "new" }, expected), false);
+  assert.equal(matches(receipt, identity, {
+    ...expected, skipExistingEventIds: ["event1", "event3"],
+  }), false);
+  const source = await readFile(new URL("../../../src/lib/import/legacy/apply.ts", import.meta.url), "utf8");
+  assert.match(source, /legacyImportReceiptMatchesProgress\(recovered, identity, expectedProgress\)/,
+    "CURRENT must also use the shared audit replay equality predicate");
+});

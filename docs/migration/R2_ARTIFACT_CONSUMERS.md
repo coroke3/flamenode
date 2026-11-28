@@ -168,5 +168,7 @@ Conservative *bounded exception inventory* for R2 API calls whose first argument
 | `workers/json-generator/usersIndexV2Artifacts.ts` | `readBoundedR2Json(USERS_INDEX_OBJECT_KEY)` | 1 | R2 key helper on generator/producer path; MIG-0907 review required |
 | `workers/json-generator/videoMaterializedSource.ts` | `readBoundedR2Json(key)` | 1 | R2 key helper on generator/producer path; MIG-0907 review required |
 | `workers/json-generator/videoMaterializedSource.ts` | `readJsonObject(manifest.source_key)` | 1 | R2 key helper on generator/producer path; MIG-0907 review required |
+| `packages/server-core/src/legacyImport/previewStore.ts` | `bucket.put(key)` | 5 | MIG-0645 Draft port of CURRENT owner-bound preview R2 v4 create/claim/advance/complete/release; same five conditional put sites, do not remove production key or enable without security review |
+| `packages/server-core/src/legacyImport/previewStore.ts` | `bucket.get(key)` | 2 | MIG-0645 Draft port of CURRENT preview lookup/currentClaim (owner-hashed key, size bound and ETag); retain while both implementations coexist |
 
 These dynamic references are retained for inspection. The static scanner cannot prove a computed value's full key domain or resolve imported symbols across files; owners must compare producer and consumer paths before removal.

@@ -1238,13 +1238,15 @@ test("legacy importは1 HTTPのplan・step・連続送信をhard capする", () 
   const route = fs.readFileSync(path.join(root, "app/api/admin/import/legacy/route.ts"), "utf8");
   const client = fs.readFileSync(path.join(root, "src/components/admin/LegacyCanonicalImportClient.tsx"), "utf8");
   const previewStore = fs.readFileSync(path.join(root, "src/lib/import/legacy/previewStore.ts"), "utf8");
-  const budget = fs.readFileSync(path.join(root, "src/lib/import/legacy/cpuBudget.ts"), "utf8");
+  const budget = fs.readFileSync(path.join(root, "packages/server-core/src/legacyImport/cpuBudget.ts"), "utf8");
+  const budgetBridge = fs.readFileSync(path.join(root, "src/lib/import/legacy/cpuBudget.ts"), "utf8");
   assert.match(route, /MAX_FILE_BYTES = 2 \* 1024 \* 1024/);
   assert.match(route, /MAX_TOTAL_BYTES = 4 \* 1024 \* 1024/);
   assert.match(route, /MAX_ROWS = MAX_LEGACY_IMPORT_SELECTED_ROWS/);
   assert.match(previewStore, /MAX_STORED_PLAN_BYTES = 512 \* 1024/);
   assert.match(previewStore, /PREVIEW_VERSION = 4 as const/);
   assert.match(budget, /MAX_LEGACY_IMPORT_STEP_BYTES = 128 \* 1024/);
+  assert.match(budgetBridge, /export \* from "@flamenode\/server-core\/legacyImport\/cpuBudget"/);
   assert.ok(route.indexOf("storedPlanBytes > MAX_STORED_PLAN_BYTES") < route.indexOf("preflightLegacyImportPlan(db"));
 
   const submit = client.slice(client.indexOf("async function submit"), client.indexOf("const expiresLabel"));
@@ -1262,6 +1264,7 @@ test("legacy import中はYouTube APIを呼ばずpendingを後続cronへ渡す", 
   const importSources = [
     "app/api/admin/import/legacy/route.ts",
     "src/lib/import/legacy/normalize.ts",
+    "packages/server-core/src/legacyImport/normalize.ts",
     "src/lib/import/legacy/preflight.ts",
     "src/lib/import/legacy/apply.ts",
   ].map((file) => fs.readFileSync(path.join(root, file), "utf8")).join("\n");
@@ -1449,4 +1452,27 @@ test("CURRENT preview preflight exposes only deliberate domain validation messag
     await loader.unregister();
     hooks.deregister();
   }
+});
+
+test("MIG-0645 CURRENT X-user marker atomicity contract", () => {
+  const source = fs.readFileSync(new URL("./apply.ts", import.meta.url), "utf8");
+  const start = source.indexOf("async function ensureXUserGroup(");
+  const end = source.indexOf("\nfunction plannedSoftwareCatalogRows(", start);
+  assert.ok(start >= 0 && end > start);
+  const group = source.slice(start, end);
+  const mutation = group.indexOf("await mutateWithAudit(db, {");
+  const receipt = group.indexOf("stepMarkerAudit(", mutation);
+  const endBatch = group.indexOf("\n    });", mutation);
+  assert.ok(mutation >= 0 && receipt > mutation && endBatch > receipt,
+    "X-user inserts, queue and replay receipt must share a D1 audit batch");
+  assert.match(group, /options\.marker\(\{ kind: "x_users", created: missing\.length, createdAuthUsers: 0 \}\)/);
+  assert.match(group, /else if \(options\.marker\) \{[\s\S]*?writeStepMarkerOnly\(/,
+    "a zero-insert X-user step still requires its marker-only receipt");
+  const handler = source.indexOf("export async function applyLegacyImportPlanStep(");
+  const stepStart = source.indexOf('    case "x_users": {', handler);
+  const stepEnd = source.indexOf('    case "softwares": {', stepStart);
+  assert.ok(stepStart > handler && stepEnd > stepStart);
+  const step = source.slice(stepStart, stepEnd);
+  assert.equal(step.split("await writeStepMarkerOnly(db, marker(outcome)").length - 1, 1,
+    "only empty-plan branch may write a separate marker; nonempty group owns its marker");
 });
