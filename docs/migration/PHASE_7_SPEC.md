@@ -991,47 +991,98 @@ npm run check:project-docs
 Phase 7 共通契約のとおり。
 
 ### MIG-0716: `/entry/slotted` と `/entry/unslotted` の画面（SA-086, SA-088、MIG-0703 U01 の後半）
+
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — MIG-0714 の component 依存は解消（D-16-11）。Lead は着手時に最新 CURRENT・既存 read client・共有 path の live owner を確認し、最小の契約先行 unit を具体化して着手可（読み MIG-0623 DONE）。共有 `videoCollaborators` は #464 / MIG-0715 の現 owner と直列調整し、重複作成・無断編集しない。#703 の trusted TARGET route / loader / authority / refresh 受入と、MIG-0651・0648・0650 DONE の merge gate は維持。
+- **Readiness:** NEEDS_REFINEMENT — #912 の U01a 初回読取/未登録 presenter を実装し、実 source `459b178801a409f0e2c621c7cd869d28da11297f` の独立 source review と34 focused testsを確認済み。browser/final checkpointの正確な受入範囲はown work-itemに記録。MIG-0714 の component 依存解消（D-16-11）、main `232381e264a2f2ba6f3cd8982f46f2cc2550cc9d` と実early Draft/postclaim ownershipを確認（読み MIG-0623 DONE）。共有 `videoCollaborators` は #464 / MIG-0715 の現 owner と直列調整し、重複作成・無断編集しない。#703 の trusted TARGET route / loader / authority / refresh、U01b の authority/paging/outer404 layout と U02/U03、MIG-0651・0648・0650 DONE の merge gate は維持。後続unitは正式refinement後に着手し、partial merge 例外は付与しない。
 - **Recipe:** R-SCREEN
 - **Runtime:** N
 - **Depends on:** MIG-0714 / **Decisions:** D-05 DECIDED, D-16-1, D-16-11
-- **Merge gate:** MIG-0651, MIG-0648, MIG-0650 が DONE（D-16-1。submit、X user 検索、権限一括）
-- **Verified against:** `c2a6ecb` (2026-10-26)
+- **Merge gate:** MIG-0651, MIG-0648, MIG-0650 が DONE、全 U01–U03/T01–T03・独立 review・最終 HEAD CI が完了。U01a だけで DONE/merge にしない。
+- **Verified against:** `232381e264a2f2ba6f3cd8982f46f2cc2550cc9d` (2026-11-27; #910 squash, exact reviewed tree `6cf9486aabd027ca6a3cca3d51184498c2c036a4`)。#909 squash `353f6dd401b8f64bde3873cda01a7b5b88610530` で MIG-0714 DONE。先行 read-only inspection `a618127d9575bde05c17290cf869e10e1390e6a1` と関係する forms/read DTO/routes/CURRENT source は同一。
+
 #### Source snapshot
-- CURRENT: `app/(auth)/entry/slotted/page.tsx`（312 行、`VideoForm` mode slot）、`app/(auth)/entry/unslotted/page.tsx`（237 行、`UnslottedPostForm`）。
-- 読み: `GET /api/personal/entry/slotted`（`SlottedEntryResponseSchema`、`packages/contracts/src/personal/entry.ts:109`）、`GET /api/personal/entry/unslotted`（`UnslottedEntryResponseSchema` :135）。
-- API（D-16-1）: SA-086 `POST /api/videos/free`、SA-088 `POST /api/slots/:slotId/video`（MIG-0651。body は `VideoForm` の FormData をそのまま multipart）、RH-019 `GET /api/internal/x-users/search`（MIG-0648）、SA-084 `POST /api/videos/:videoId/collaborators/batch`（MIG-0650）。
+
+- CURRENT: `app/(auth)/entry/slotted/page.tsx`, `app/(auth)/entry/unslotted/page.tsx`, `src/components/ui/StatusPanel.tsx`, `src/components/ui/StatusPanel.module.css`, `app/(auth)/entry/unslotted/page.module.css`。CURRENT は編集しない。
+- 既存 read DTO: `packages/contracts/src/personal/entry.ts` の `SlottedEntryResponseSchema` / `UnslottedEntryResponseSchema`。既存 GET は MIG-0623、`apps/api/src/routes/personal/entry/{slotted,unslotted,formData,rows}.ts`。DTO は形を検証するが、現在の authority/初回 page の出所を証明しない。
+- TARGET: `apps/app/src/api/personal.ts`, `routes/{guard,next,router}.tsx/ts`, `routes/ui/{AppLink,format}.tsx/ts`, MIG-0714 の実 `VideoForm` / `UnslottedPostForm` と必須 `VideoFormPorts` を再利用。
+- 関連 IDs: UX-SLOT-008/009, UX-SUB-001/012/016–026, FN-ENT-003/004/006。U01a は page/composition のみで、これらの write/permission/公開結果を全件受入したとは扱わない。後続 adapter は SA-086 `POST /api/videos/free`, SA-088 `POST /api/slots/:slotId/video`, RH-019 `GET /api/internal/x-users/search`, SA-084 `POST /api/videos/:videoId/collaborators/batch`。
+
 #### Owned paths
-- 新規: `+apps/app/src/routes/entry/{Slotted,Unslotted}.tsx`, `+apps/app/src/api/videoSubmit.ts`（1 行目は D-16-1 の provisional comment）, `+apps/app/src/api/xUserSearch.ts`（同）, `+apps/app/test/entryForms.test.mjs`
-- 変更: `apps/app/src/routes/router.tsx`（Route 2 行と `PERSONAL_READ_PATHS`）, `apps/app/src/api/personal.ts`, `apps/app/src/api/videoCollaborators.ts`（MIG-0715 の client を import。無ければ MIG-0715 U02 の内容で作る）
-- 触らない: `app/(auth)/**`, `src/components/**`, `apps/api/**`, MIG-0714 の form（props で渡すだけ）
+
+現在の U01a のみ。
+
+- 新規: `+apps/app/src/routes/entry/Slotted.tsx`, `+apps/app/src/routes/entry/Unslotted.tsx`, `+apps/app/src/components/ui/StatusPanel.tsx`, `+apps/app/src/styles/status-panel.css`, `+apps/app/src/styles/entry-unslotted.css`。
+- 限定共有変更: `apps/app/src/api/personal.ts`（2 初回 GET の signature/import/body のみ）, `apps/app/scripts/portCssModule.mjs`（末尾の 2 MODULES 行のみ）, `apps/app/src/main.tsx`（末尾の 2 CSS import のみ）。`vform` の後に追加し、#464/#683 の中間位置の作業、既存 scanner/body/order を保持する。claim 前に現 owner と競合を再確認する。
+- 既存 suite のみ: `apps/app/test/entryIndex.test.mjs`, `apps/app/test/entryRoute.test.mjs`, `apps/app/test/styles.test.mjs`。旧計画の `entryForms.test.mjs` は作らない。共通 test helper は変更しない。
+- 文書: `docs/migration/work-items/MIG-0716.md`, この Work Order の MIG-0716 節、`FILE_MIGRATION_MATRIX.md` の MIG-0716 新規行と上記共有ファイルへの限定追記のみ。MIG-0701/MIG-0711/MIG-0703 の既存 owner/state/provenance を置き換えない。
+- 今回触らない: `App.tsx`, `routes/router.tsx`, shared guard/navigation/sanitizer, EntryIndex component, MIG-0714 forms/helpers/store, CURRENT, contracts, `apps/api/**`, package/dependency/config。write adapter と API_MATRIX 更新、route mount/`PERSONAL_READ_PATHS` は後続 unit で再 refinement するまで所有しない。
+
 #### Micro-units
-- **U01 読み**: 2 ページの読みと `kind` ごとの表示。
-- **U02 adapter**: `VideoForm` の `submit` に `videoSubmit.ts`（multipart）、`VideoMembersField` の 2 adapter に `xUserSearch.ts` と `videoCollaborators.applyBatch`。
-- **U03 merge 直前**（D-16-1 の 5）: MIG-0651 の `packages/contracts/src/videoSubmit.ts`、MIG-0650 の `packages/contracts/src/videoCollaborators.ts` の schema に置き換える。
+
+- **U01a 初回 read と未登録 presenter（今回）**:
+  - `getSlottedEntry(slot: string, signal?: AbortSignal)` と `getUnslottedEntry(eventQuery: string, signal?: AbortSignal)` だけを PersonalApi へ追加。offset/任意 query object/任意 path を受け取らない。1 呼出しにつき固定 endpoint への GET 1 回のみで、session/preload/paging read を追加しない。URLSearchParams で named query を一度だけ encode し、空値の既存 omission と raw query を維持する。signal identity、same-origin credentials、no-store、accept JSON、body なしを保持。
+  - canonical schema で 200 を検証し、truncated/nextOffset をそのまま返す。slotted のみ inline の狭い HTTP 処理で canonical parsed 404 `{error:"not_found"}` を `{status:"not_found"}` とする。別404/bad JSON/malformed200/他 status/network は unavailable、401/403 は既存 anonymous/banned。generic `read` と他 caller の `ApiResult` は変更しない。
+  - `Slotted` / `Unslotted` は canonical `data`, 必須 `publicOrigin: string`, `ports: VideoFormPorts`, `onRefresh: () => void` を受け取る未登録 component。caller はアクセス判定済みの現在 user/slot/query に対応する、この初回専用 endpoint の応答だけを渡す。自己申告 brand/フラグを authority の代用にせず、偽造 props/continuation body を検出できるとも主張しない。render 内 read/session取得/authority推測/no-op write は追加しない。
+  - slotted は `kind:"redirect"` を最初に処理する。ready-only origin/truncation/profile へ触れない。既存 `isSafeRelativePath` に加え URL 正規化後の pathname が `/entry` 又は非空 ID を持つ `/dashboard/edit/` family かを検査し、検査と navigation に同じ正規化済み相対先を使う。外部/`//`/backslash/control/prefix lookalike/dot traversal による family 外への遷移は `/entry` に倒す。`/entry` は `<Navigate replace>`、未登録の edit は既存 `ExternalRedirect` / `navigation.replace` による full navigation。shared sanitizer/router は変更しない。
+  - ready では `truncated || nextOffset !== null` を拒否し、既存 `AuthUnavailable` を返して実 form/shell を mount しない。この判定は caller が供給した初回応答の不完全性を拒否するだけで、false/null 自体は出所・現在の権限の証明ではない。complete empty **unslotted** は正常な affiliation shell を表示し、「所属なし」の選択後に実 free form を mount。slotted の空 event list を同様に許可したとは主張しない。
+  - `publicOrigin` は trusted host の必須設定。ready のみで `new URL(publicOrigin)` を解釈し HTTP(S) を要求、`.origin` + `/event/${encodeURIComponent(event.id)}` を各 description URL に用いる。設定の path/query/hash は含めない。不正/非HTTP(S) は既存 `AuthUnavailable` に倒し、form/draft を mount しない。CURRENT の localhost fallback と同一という主張はせず、TARGET の明示 host 契約として扱う。
+  - canonical server の `submitBlock` を CURRENT 文言へ写し、truthy な slot X snapshot を投稿権限へ昇格させない。slotted の実 ladder は no_active_x/pending/rejected/not_approved/null、unslotted は no_active_x/not_linked/not_approved/null。共有 enum の他 non-null 値も fail-closed に扱い、未処理値が undefined になって submit を許可する実装にしない。
+  - `user.id` を draftAuthUserId、DTO activeXId を表示/提出 identity とし、initialProfile の null→undefined 変換は空文字を保持する。initial と defaultProfile は同じ mapped profile を使う。event の順序/questions/settings/part、group size/span、nullish fallback、epoch0 の CURRENT truthy fallback、説明文/検索/件数/リンク順を保持。submit/search/apply/refresh の実関数参照はそのまま渡す。
+  - exact CURRENT `StatusPanel`（4 tone、section/h2/body/action）を2 presenter の実 callerへ移植。StatusNotice で代用しない。CURRENT CSS 67行と unslotted CSS 31行をそれぞれ `status-panel` / `entry-unslotted` prefix で導出。MODULES/main/期待順へ各2行を末尾追加し、旧18入力/11出力を byte保持（固定hash testなし）。CURRENT AppShell の default container を既存 personal main 内の page container へ適応することを明記し、nested main/新shell抽象を作らない。
+- **U01b trusted host/authority/paging（後続、要 refinement）**: loading/access/not-found orchestration、現在 user/active X/slot/query と応答世代の整合、abort/refresh/revocation、検索 URL/reload/back-forward、完全 event snapshot の bounded paging/clamp/dedup/restore 意味、route registration を設計/実装/受入。`useApiResult` が失敗した silent refresh に古い成功表示を維持することを、書込 form の revocation 保証として引用しない。#703 の trusted TARGET route gate はこの後続結線で扱う。
+- **U02 write adapters（後続、要 refinement）**: 実 `videoSubmit.ts` multipart と xUserSearch/videoCollaborators を canonical contracts に基づき注入する。必要時の D-16-1 provisional comment は保持するが、U01a に仮 no-op client を追加しない。
+- **U03 merge 前**: MIG-0651/MIG-0650 の最終 schema への更新、RH-019 契約・全 U01–U03/T01–T03・trusted-route authority/host/#703・未解決 query parity の実証、最新 main、独立 APPROVE、最終 HEAD 必須 CI。U01a完了だけではこの PR を merge しない。
+
 #### Test cases
-| ID | 入力/操作 | 期待 |
+
+| ID | 入力/操作 | U01a の期待 / 後続 gate |
 | --- | --- | --- |
-| T01 | 投稿済みの枠で再投稿 | API の `{ok:false, message}` を CURRENT と同じ表示 |
-| T02 | 成功 | CURRENT と同じ移動先 |
-| T03 | 受付外のイベント（読みの `kind`） | CURRENT と同じ表示 |
+| U01a-R | 2 GET の ready/redirect、slot/query の slash/percent/Unicode/`&offset=900`/`?`、AbortSignal、失敗系 | 既存 entryIndex suite。exact encoded named query、offset parameter なし、GET1回、canonical schema/404、401/403/unavailable、truncation metadata 保持。既存 index/他clientを不変にする |
+| U01a-P | actual CURRENT page JSX と schema-parsed fixtures、全 block enum、null/empty/epoch0、auth active null と slot snapshot | 既存 entryRoute suite。文言/順/リンク/ARIA/summary/search を比較し、server block が優先。実 child props/port references を直接確認し、test-only injection/export は作らない |
+| U01a-G | 初回 true/100・true/null・false/non-null、不正 origin、redirect-only DTO | form/shell/native draft/IDB/ports を開始しない。redirect は ready fields/origin に触れず、正規化後 family と full navigation seam を試験する |
+| U01a-F | complete slotted と complete/empty unslotted、実 form/shell・入力・所属選択 | MemoryRouter で実 child を mount、fixed event/part、description URL、native FormData を確認。empty unslotted は none 選択後に form。search form の存在を video form と誤認しない |
+| U01a-V | 2 page composition、StatusPanel/search、blocked/empty、390/1440 | 既存 styles exact derivation/order/coverage＋独立 browser。実 Next CSS/maps と actual TARGET main-order CSS、UTF-8、personal wrapper を比較。search=`form[role=search]`、video=`form.vform-form`/actual Next class で別採取。B05 body16/max1160 を実 page rail としない。未変更 child の全 B04/B05 matrix は重複再実行しない |
+| T01 | 投稿済みの枠で再投稿 | 後続実adapter/hostで API `{ok:false,message}` が CURRENT と同じ表示。U01a GET redirect/404 試験だけで PASS にしない |
+| T02 | 成功 | 後続実adapter/hostで CURRENT と同じ結果/移動先。U01a の injected child composition だけで PASS にしない |
+| T03 | 受付外イベント：slotted の ready/redirect、unslotted の DTO/submitBlock（unslotted に kind はない） | U01a の正しい read presentation を足場に、完全 snapshot と trusted route 結線で全 case を受入 |
+
 #### Commands
+
+Node22・既存 local dependencies を使い、既存 suite を先に確認する。source固定後に full app/build/typecheck をまとめ、意味のない再実行をしない。
+
 ```bash
-npm run build --workspace=@flamenode/app
+node node_modules/typescript/bin/tsc -p apps/app/tsconfig.test.json
+node --test apps/app/test/entryIndex.test.mjs apps/app/test/entryRoute.test.mjs apps/app/test/styles.test.mjs
 npm run test --workspace=@flamenode/app
+npm run build --workspace=@flamenode/app
 npm run typecheck
 npm run check:project-docs
+npm run check:migration-work-items
+node scripts/check-migration-file-progress.mjs
 ```
+
+file-progress は実確認した最新 main SHA を `MIGRATION_FILE_BASE_SHA` で与える。移す file の unused-export audit、全旧 CSS 生成出力の byte 比較、独立 source/browser、最終 HEAD CI を別々に記録する。計画段階の PASS は作らない。
+
 #### Ledger updates
-`FILE_MIGRATION_MATRIX.md` の 2 ページ行を IN_PROGRESS（移植先）。`API_MATRIX.md` の SA-086 / 088 に SPA の呼び出し元。
+
+新規5 source/style files と own checkpoint の正確な MIG-0716 row、共有 personal/2 entry suites/CSS registry/main/styles suite への限定証拠追記。CURRENT StatusPanel TSX/CSSとunslotted page CSSの未登録3入力は実target/consumerを示すRETAINED行として登録し、CURRENT source自体は変更しない。既存 first-owner と CURRENT page の MIG-0703 state/provenance は保持し、U01a の未登録 target を route 全体の PARITY_VERIFIED にしない。API_MATRIX の SA-086/088 caller は実 write adapter を結線する後続 unit まで変更しない。U01a source/test/docsは最終証拠前で実測1092行（うち11 source/test filesは915行）。最終checkpointと後続unit追加時に3000行上限を再確認する。未計測の継続分をcap内と確約せず、必要な受入試験を削らず、partial merge例外を推定しない。
+
 #### DONE checklist
-- [ ] U01〜U03 が DONE、T01〜T03 が PASS
-- [ ] MIG-0651 / 0648 / 0650 が DONE で、client が `packages/contracts` の schema を使っている（D-16-1）
+
+- [x] U01a の initial-read/presenter/source/style/native DOM/browser を限定受入。実source S、独立review、原193 findingsと限定説明、実行scopeをown checkpointに記録し、未実施のtrusted host/writeをPASSにしない
+- [ ] U01b trusted host/authority/paging/query/route と #703 の実 TARGET route gate が完了
+- [ ] U02/U03、T01–T03 が完了し、MIG-0651/0648/0650 が DONE、client が最終 canonical schema を利用
+- [ ] query normalization の CURRENT/API drift が担当範囲で解決/正式 disposition 済み、最新 main 統合・最終 HEAD CI・独立 APPROVE
+
 #### STOP
-- API の契約が CURRENT と違うときは止めて担当の API task に返す。
+
+CURRENT `src/lib/video/unslottedEventQuery.ts` は duplicate event_q を空へし、99 ASCII＋emoji の境界を壊さず clip する。既存 API の `.trim().slice(0,100)` / first-value query と parity reference loader は旧式である。U01a は単一 raw query を encode し server-returned eventQuery をそのまま表示し、UI で修復して差を隠さない。duplicate URL parse と実 navigation は U01b、API 差異は別 owner/正式 scope へ戻し、全 route parity 前の STOP として残す。API contract、authority、owner衝突、欠けた CURRENT 参照、diff cap に問題が出た場合も Leadへ戻す。
+
+実CURRENTのmissing-slot GETを390/1440で観測すると、root404はpersonal/auth shell・header・CostGuardを外れた `app/not-found.tsx` / EmptyStateだった（source52d0、10入力はU01a Sと同一、own checkpointにhash）。現PersonalRoutesの子へ404パネルを置くだけでは同じroute compositionにならない。U01bではouter route/layoutと実404表示を正式に所有・設計してから受入する。AuthUnavailableで代用せず、未測定の再取得失敗方針やCURRENT120候補上限・non-forward continuationを暗黙に解決済みとしない。
+
 #### Rollback
-Phase 7 共通契約のとおり。
+
+未登録 client/presenter/派生CSSと2登録行ずつを戻すだけで U01a を除去できる。CURRENT/routes/backend/storage/本番dataは変更しない。実 route/write adapter の rollback は後続正式 scope で追加する。Phase7共通の本番切替 gate は別途維持する。
 
 ### MIG-0717: `/dashboard/edit/:id` の画面（SA-089、MIG-0703 U02 の前半）
 - **Model:** lead

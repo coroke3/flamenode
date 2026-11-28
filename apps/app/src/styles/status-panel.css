@@ -1,0 +1,67 @@
+.status-panel-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px 20px 18px 18px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-surface);
+}
+
+.status-panel-text {
+  min-width: 0;
+}
+
+.status-panel-panel h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.status-panel-body {
+  margin-top: 6px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.75;
+}
+
+.status-panel-info {
+  color: var(--text-secondary);
+}
+
+.status-panel-success {
+  border-color: color-mix(in srgb, var(--accent-success) 36%, var(--border-subtle));
+  background: color-mix(in srgb, var(--accent-success) 8%, var(--bg-surface));
+}
+
+.status-panel-warning {
+  border-color: color-mix(in srgb, var(--accent-warning) 42%, var(--border-subtle));
+  background: var(--accent-warning-soft);
+}
+
+.status-panel-danger {
+  border-color: color-mix(in srgb, var(--accent-danger) 42%, var(--border-subtle));
+  background: var(--accent-danger-soft);
+}
+
+.status-panel-action {
+  flex-shrink: 0;
+}
+
+@media (max-width: 640px) {
+  .status-panel-panel {
+    display: block;
+    padding: 16px;
+  }
+
+  .status-panel-action {
+    margin-top: 14px;
+  }
+
+  .status-panel-action .fn-btn {
+    width: 100%;
+    min-height: 44px;
+    justify-content: center;
+  }
+}

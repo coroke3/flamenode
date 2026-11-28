@@ -1,9 +1,12 @@
 // MIG-0711 U03: /entry UI sections, read-only route, and status/error preservation.
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
-import { MemoryRouter } from "react-router-dom";
+import { renderToStaticMarkup } from "react-dom/server";
+import { MemoryRouter, useLocation, useNavigationType } from "react-router-dom";
 import test from "node:test";
+import ts from "typescript";
 import { dom, entryIndex, fakeApi, mount, onboardingState, user } from "./helpers.mjs";
 
 const entryData = (over = {}) =>
@@ -311,5 +314,334 @@ test("continuation: stale 403 cannot gate refreshed same-account first page", as
     assert.doesNotMatch(container.textContent, /利用が停止されています/);
   } finally {
     await act(async () => root.unmount());
+  }
+});
+
+// MIG-0716 U01a: page presentation only. Trusted route/access/paging and real writes remain later gates.
+const [{ Slotted }, { Unslotted }, { VideoForm }, { UnslottedPostForm }, { StatusPanel },
+  { AppLink, navigation }, { Icon }, { formatUnix }, entryContracts] = await Promise.all([
+  import("../.test-dist/apps/app/src/routes/entry/Slotted.js"),
+  import("../.test-dist/apps/app/src/routes/entry/Unslotted.js"),
+  import("../.test-dist/apps/app/src/components/forms/VideoForm.js"),
+  import("../.test-dist/apps/app/src/components/forms/UnslottedPostForm.js"),
+  import("../.test-dist/apps/app/src/components/ui/StatusPanel.js"),
+  import("../.test-dist/apps/app/src/routes/ui/AppLink.js"),
+  import("../.test-dist/apps/app/src/routes/ui/Icon.js"),
+  import("../.test-dist/apps/app/src/routes/ui/format.js"),
+  import("../.test-dist/packages/contracts/src/personal/index.js"),
+]);
+const origin = "https://public.example:8443/config/path?ignored=1#ignored";
+const portCalls = [];
+const formPorts = Object.fromEntries(["submit", "searchXUsers", "applyPermissionBatch"].map(name =>
+  [name, (...args) => { portCalls.push([name, ...args]); throw new Error(`Unexpected page effect: ${name}`); }]));
+const refresh = () => { portCalls.push(["refresh"]); };
+const pageProps = data => ({ data, publicOrigin: origin, ports: formPorts, onRefresh: refresh });
+
+function formPageData(kind, over = {}) {
+  const option = {
+    id: "event/春%", title: "公開イベント", parts_json: '["A","B"]',
+    youtube_description_template: "{{event_url}}", required_video_fields_json: null, custom_questions: [],
+  };
+  const common = {
+    user: user({ active_x_user_id: "active_x" }), activeXId: "active_x", submitBlock: null,
+    initialProfile: { display_name: "投稿者", icon_url: null, profile_text: "紹介文", youtube_channel_url: null, other_social_links: null },
+    xIdOptions: [{ id: "active_x", x_name: "投稿者" }], softwareSuggestions: ["編集ソフト"],
+    iconCandidates: [], channelCandidates: [], truncated: false, nextOffset: null,
+  };
+  return kind === "slotted" ? entryContracts.SlottedEntryResponseSchema.parse({
+    ...common, kind: "ready", activeXName: "投稿者", slotPart: "A",
+    slot: { id: "slot/予約", slot_label: "通常枠", display_name: null, has_reservation_group: true,
+      reserved_at_x_id: "reserved_x", start_time: 1_800_000_000, end_time: 1_800_000_600, group_size: 2 },
+    event: { id: option.id, title: option.title }, eventOptions: [{ ...option, video_form_settings_json: null }], ...over,
+  }) : entryContracts.UnslottedEntryResponseSchema.parse({
+    ...common, eventQuery: "合成 %_", eventOptions: [{ ...option, status_label: "終了済" }], ...over,
+  });
+}
+
+const sourceRoot = new URL("../../../", import.meta.url);
+const sourceAst = path => ts.createSourceFile(path, readFileSync(new URL(path, sourceRoot), "utf8"),
+  ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+const compileReference = source => ts.transpileModule(source, {
+  compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None },
+}).outputText;
+const panelAst = sourceAst("src/components/ui/StatusPanel.tsx");
+const panelFunction = panelAst.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === "StatusPanel");
+assert.ok(panelFunction, "use the actual CURRENT StatusPanel function");
+const CurrentStatusPanel = new Function("React", "styles",
+  `${compileReference(panelFunction.getText(panelAst).replace(/^export /, ""))}; return StatusPanel;`)(React,
+  Object.fromEntries(["panel", "text", "body", "action", "info", "success", "warning", "danger"].map(name => [name, `status-panel-${name}`])));
+
+// Only the CURRENT page tail/declarations are extracted. Both sides mount the same real TARGET forms;
+// this isolates page mapping from the separately tested B04 controller divergence and browser comparison.
+const currentPages = Object.fromEntries(["slotted", "unslotted"].map(kind => {
+  const ast = sourceAst(`app/(auth)/entry/${kind}/page.tsx`);
+  const page = ast.statements.find(node => ts.isFunctionDeclaration(node) && node.modifiers?.some(m => m.kind === ts.SyntaxKind.DefaultKeyword));
+  const names = new Set([kind === "slotted" ? "activeXApprovalStatus" : "activeXIsLinked", "submitBlockedReason", "canPost", "initialProfile"]);
+  const declarations = page.body.statements.filter(node => ts.isVariableStatement(node) &&
+    node.declarationList.declarations.some(declaration => names.has(declaration.name.getText(ast))));
+  assert.equal(declarations.length, names.size);
+  const lastReturn = [...page.body.statements].reverse().find(ts.isReturnStatement);
+  let body = [...declarations, lastReturn].map(node => node.getText(ast)).join("\n");
+  body = body.replace('<AppShell size="default" className="fn-entry-flow">', '<div className="fn-public-container fn-page fn-entry-flow">')
+    .replace("</AppShell>", "</div>")
+    .replace(/<(VideoForm|UnslottedPostForm)\b/, '<$1 {...ports} onRefresh={onRefresh}');
+  const bindings = "user,slot,ev,activeX,activeXId,xRow,xIdOptions,slotStart,slotEnd,groupSize,reservedAtXId,nextPath,initialEventIds,slotPart,softwareSuggestions,iconCandidates,channelCandidates,eventOptions,enrichedEventOptions,eventQuery,ports,onRefresh";
+  const compiled = compileReference(`function CurrentPage(context) { const {${bindings}} = context; ${body} }`);
+  const Current = new Function("React", "Link", "StatusPanel", "VideoForm", "UnslottedPostForm", "Icon", "formatUnix", "styles",
+    `${compiled}; return CurrentPage;`)(React, AppLink, CurrentStatusPanel, VideoForm, UnslottedPostForm, Icon, formatUnix,
+    Object.fromEntries(["eventSearchForm", "eventSearchLabel", "eventSearchInput", "eventSearchMeta"].map(name => [name, `entry-unslotted-${name}`])));
+  return [kind, Current];
+}));
+
+function currentPageContext(data) {
+  const eventOptions = data.eventOptions.map(option => ({ ...option,
+    youtube_description_event_url: `https://public.example:8443/event/${encodeURIComponent(option.id)}` }));
+  return {
+    ...data, activeX: data.activeXId, activeXId: data.user.active_x_user_id,
+    xRow: { ...data.initialProfile, x_name: data.kind === "ready" ? data.activeXName : data.initialProfile.display_name,
+      approval_status: ["pending", "rejected", "not_approved"].includes(data.submitBlock) ? data.submitBlock : "approved" },
+    slot: data.slot && { ...data.slot, reservation_group_id: data.slot.has_reservation_group ? "group" : null },
+    ev: data.event, slotStart: data.slot?.start_time, slotEnd: data.slot?.end_time, groupSize: data.slot?.group_size,
+    reservedAtXId: data.slot?.reserved_at_x_id, initialEventIds: data.event ? [data.event.id] : [],
+    nextPath: data.slot?.id ? `/entry/slotted?slot=${encodeURIComponent(data.slot.id)}` : "/entry/slotted",
+    eventOptions, enrichedEventOptions: eventOptions, ports: formPorts, onRefresh: refresh,
+  };
+}
+const staticPage = (Page, props) => renderToStaticMarkup(React.createElement(MemoryRouter, null, React.createElement(Page, props)));
+function* pageElements(element) {
+  if (!React.isValidElement(element)) return;
+  yield element;
+  for (const child of React.Children.toArray(element.props.children)) yield* pageElements(child);
+}
+function inspectPage(Page, props) {
+  let tree;
+  function Probe() { tree = Page(props); return null; }
+  staticPage(Probe, {}); // Real React hook dispatcher, without replacing or mounting the child component.
+  return [...pageElements(tree)];
+}
+
+test("MIG-0716 U01a: actual CURRENT page JSX preserves text/order/links/summary/search and block semantics", () => {
+  for (const [kind, Page, blocks] of [
+    ["slotted", Slotted, [null, "no_active_x", "pending", "rejected", "not_approved"]],
+    ["unslotted", Unslotted, [null, "no_active_x", "not_linked", "not_approved"]],
+  ]) {
+    const baseline = formPageData(kind);
+    const cases = blocks.map(submitBlock => formPageData(kind, {
+      submitBlock,
+      user: user({ active_x_user_id: submitBlock === "no_active_x" ? null : "active_x" }),
+      activeXId: kind === "unslotted" && submitBlock === "no_active_x" ? null : "active_x",
+      xIdOptions: submitBlock === "not_linked" ? [] : baseline.xIdOptions,
+    }));
+    const emptyProfile = Object.fromEntries(Object.keys(baseline.initialProfile).map(key => [key, ""]));
+    cases.push(formPageData(kind, { initialProfile: emptyProfile, ...(kind === "slotted"
+      ? { activeXName: "", slot: { ...baseline.slot, start_time: 0, end_time: 0, display_name: "", slot_label: "", reserved_at_x_id: "", has_reservation_group: false } }
+      : { eventQuery: "", eventOptions: [] }) }));
+    if (kind === "slotted") cases.push(formPageData(kind, { activeXName: null,
+      initialProfile: { ...baseline.initialProfile, display_name: baseline.user.name },
+      slot: { ...baseline.slot, start_time: null, end_time: null, slot_label: null, reserved_at_x_id: null } }));
+    for (const [index, data] of cases.entries()) {
+      assert.equal(staticPage(Page, pageProps(data)), staticPage(currentPages[kind], currentPageContext(data)), `${kind} CURRENT case ${index}`);
+    }
+  }
+  assert.deepEqual(portCalls, []);
+});
+
+test("MIG-0716 U01a: exact StatusPanel keeps all four tones, default tone and optional body/action markup", () => {
+  for (const tone of [undefined, "info", "success", "warning", "danger"]) {
+    for (const children of [undefined, "", 0, React.createElement("p", null, "説明")]) {
+      for (const action of [null, React.createElement("a", { href: "/entry" }, "戻る")]) {
+        const props = { title: "状態", tone, children, action };
+        assert.equal(renderToStaticMarkup(React.createElement(StatusPanel, props)),
+          renderToStaticMarkup(React.createElement(CurrentStatusPanel, props)));
+      }
+    }
+  }
+});
+
+test("MIG-0716 U01a: actual child props preserve references, all non-null blocks and origin-derived event context", () => {
+  for (const [kind, Page, Child] of [["slotted", Slotted, VideoForm], ["unslotted", Unslotted, UnslottedPostForm]]) {
+    const base = formPageData(kind), extraId = "other ?&+%";
+    const eventOptions = [{ ...base.eventOptions[0], id: extraId, title: "先頭の別イベント",
+      parts_json: '["C"]', required_video_fields_json: '["music"]',
+      ...(kind === "slotted" ? { video_form_settings_json: '{"stage_permission":{"enabled":true}}' } : {}),
+      custom_questions: [{ id: "q1", event_id: extraId, question_key: "answer", label: "非公開質問", description: null,
+        type: "select", required: true, options: ["A", "B"], placeholder: "選択", max_length: 12,
+        sort_order: 3, is_active: true, visibility: "private" }] }, base.eventOptions[0]];
+    for (const submitBlock of [null, "no_active_x", "not_linked", "pending", "rejected", "not_approved"]) {
+      const data = formPageData(kind, { eventOptions, submitBlock, user: user({ active_x_user_id: null }) });
+      for (const profileValue of [null, ""]) {
+        data.initialProfile = { display_name: "", icon_url: profileValue, profile_text: profileValue,
+          youtube_channel_url: profileValue, other_social_links: profileValue };
+        const child = inspectPage(Page, pageProps(data)).find(element => element.type === Child);
+        assert.ok(child, "blocked pages still compose the real child; they are not incomplete-snapshot guards");
+        for (const name of Object.keys(formPorts)) assert.equal(child.props[name], formPorts[name]);
+        assert.equal(child.props.onRefresh, refresh);
+        for (const name of ["xIdOptions", "softwareSuggestions", "iconCandidates", "channelCandidates"]) assert.equal(child.props[name], data[name]);
+        assert.equal(child.props.draftAuthUserId, data.user.id);
+        assert.equal(child.props.activeXId, data.activeXId, "slot snapshot is presentation identity, never local authorization");
+        assert.equal(typeof child.props.submitBlockedReason, submitBlock === null ? "undefined" : "string");
+        if (submitBlock !== null) assert.ok(child.props.submitBlockedReason.length > 0);
+        for (const [name, value] of Object.entries(data.initialProfile)) {
+          assert.equal(child.props.defaultProfile[name], value ?? undefined);
+          assert.equal(child.props.initial[name], value ?? undefined);
+        }
+        assert.deepEqual(child.props.eventOptions, data.eventOptions.map(option => ({ ...option,
+          youtube_description_event_url: `https://public.example:8443/event/${encodeURIComponent(option.id)}` })));
+        assert.equal(child.props.eventOptions[0].custom_questions, data.eventOptions[0].custom_questions);
+        if (kind === "slotted") {
+          assert.equal(child.props.mode, "slot"); assert.equal(child.props.slotId, data.slot.id);
+          assert.deepEqual(child.props.initial.event_ids, [data.event.id]); assert.equal(child.props.initial.part, data.slotPart);
+        }
+      }
+    }
+    const httpChild = inspectPage(Page, { ...pageProps(formPageData(kind)), publicOrigin: "http://localhost:9012/subpath" }).find(element => element.type === Child);
+    assert.match(httpChild.props.eventOptions[0].youtube_description_event_url, /^http:\/\/localhost:9012\/event\//);
+  }
+});
+
+async function mountFormPage(element, path = "/entry/unslotted") {
+  const previous = new Map();
+  for (const name of ["FormData", "File", "Blob", "HTMLFormElement", "HTMLInputElement", "HTMLTextAreaElement", "HTMLSelectElement"]) {
+    previous.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, { configurable: true, value: dom.window[name] });
+  }
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  await act(async () => root.render(React.createElement(MemoryRouter, { initialEntries: [path] }, element)));
+  return { container, unmount: async () => {
+    try { await act(async () => root.unmount()); } finally {
+      container.remove();
+      for (const [name, descriptor] of previous) {
+        if (descriptor) Object.defineProperty(globalThis, name, descriptor); else delete globalThis[name];
+      }
+    }
+  } };
+}
+
+test("MIG-0716 U01a: initial incomplete/origin guards never transiently mount forms or touch drafts, IDB or ports", async () => {
+  const storage = dom.window.Storage.prototype, original = new Map(), accesses = [], transientForms = [];
+  const idb = Object.getOwnPropertyDescriptor(dom.window, "indexedDB");
+  let m;
+  for (const name of ["getItem", "setItem", "removeItem"]) {
+    original.set(name, storage[name]);
+    storage[name] = function (...args) { accesses.push([name, ...args]); return original.get(name).apply(this, args); };
+  }
+  Object.defineProperty(dom.window, "indexedDB", { configurable: true, value: { open() { accesses.push(["indexedDB.open"]); throw Error("Guard mounted a draft"); } } });
+  const observer = new dom.window.MutationObserver(records => {
+    for (const record of records) for (const node of record.addedNodes) {
+      if (node.nodeType === 1 && (node.matches("form,fieldset") || node.querySelector("form,fieldset"))) transientForms.push(node.outerHTML);
+    }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+  try {
+    const guarded = [];
+    for (const [kind, Page] of [["slotted", Slotted], ["unslotted", Unslotted]]) {
+      for (const [truncated, nextOffset] of [[true, 100], [true, null], [false, 100]]) {
+        guarded.push(React.createElement(Page, { key: `${kind}-${truncated}-${nextOffset}`, ...pageProps(formPageData(kind, { truncated, nextOffset })) }));
+      }
+      for (const publicOrigin of ["", "/relative", "not a URL", "ftp://public.example", "mailto:operator@example.test"]) {
+        guarded.push(React.createElement(Page, { key: `${kind}-${publicOrigin}`, ...pageProps(formPageData(kind)), publicOrigin }));
+      }
+    }
+    m = await mountFormPage(React.createElement(React.Fragment, null, ...guarded));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 650)); });
+    assert.equal(m.container.querySelectorAll('[role="alert"]').length, guarded.length);
+    assert.equal(m.container.querySelector("form,fieldset"), null);
+    assert.deepEqual(transientForms, []); assert.deepEqual(accesses, []); assert.deepEqual(portCalls, []);
+  } finally {
+    if (m) await m.unmount();
+    observer.disconnect();
+    for (const [name, fn] of original) storage[name] = fn;
+    if (idb) Object.defineProperty(dom.window, "indexedDB", idb); else delete dom.window.indexedDB;
+  }
+  assert.deepEqual(transientForms, []); assert.deepEqual(accesses, []); assert.deepEqual(portCalls, []);
+});
+
+test("MIG-0716 U01a: redirect-only DTO uses the same normalized family and existing full-navigation seam", async () => {
+  const original = navigation.replace, replacements = [];
+  navigation.replace = to => replacements.push(to);
+  function Location() { const here = useLocation(), type = useNavigationType(); return React.createElement("output", null, type + " " + here.pathname + here.search + here.hash); }
+  const unsafe = ["https://evil.example/dashboard/edit/id", "//evil.example/entry", "/dashboard\\edit\\id", "/entry\n",
+    "/entry-extra", "/entry/nested", "/dashboard/editing/id", "/dashboard/edit/", "/dashboard/edit/id/extra",
+    "/dashboard/edit/../../../outside", "/dashboard/edit/%2e%2e/%2e%2e/outside", "/dashboard/edit/%ZZ",
+    "/e%6etry", "/dashboard/%65dit/id", "/dashboard/edit/%5c%5cevil", "/dashboard/edit/%0A"];
+  try {
+    for (const [to, expected, full] of [
+      ["/entry?from=slot#form", "/entry?from=slot#form", false],
+      ["/dashboard/edit/video-1?from=slot#form", "/dashboard/edit/video-1?from=slot#form", true],
+      ["/dashboard/./edit/video-1", "/dashboard/edit/video-1", true],
+      ...unsafe.map(to => [to, "/entry", false]),
+    ]) {
+      replacements.length = 0;
+      const data = entryContracts.SlottedEntryResponseSchema.parse({ kind: "redirect", to });
+      const m = await mountFormPage(React.createElement(React.Fragment, null,
+        React.createElement(Slotted, { ...pageProps(data), publicOrigin: "invalid-ready-only-origin" }), React.createElement(Location)), "/entry/slotted?slot=old");
+      try {
+        assert.equal(m.container.querySelector("form"), null);
+        assert.deepEqual(replacements, full ? [expected] : [], to);
+        assert.equal(m.container.querySelector("output").textContent, full ? "POP /entry/slotted?slot=old" : "REPLACE " + expected, to);
+      } finally { await m.unmount(); }
+    }
+  } finally { navigation.replace = original; }
+  assert.deepEqual(portCalls, []);
+});
+
+test("MIG-0716 U01a: real slotted form receives fixed event/part, profile, input and description URL", async () => {
+  dom.window.localStorage.clear();
+  const data = formPageData("slotted"), m = await mountFormPage(React.createElement(Slotted, pageProps(data)));
+  try {
+    assert.equal(document.title, "枠提出 | FlameNode");
+    const form = m.container.querySelector("form.vform-form");
+    assert.ok(form); assert.equal(m.container.querySelectorAll("form").length, 1);
+    let payload = new dom.window.FormData(form);
+    assert.equal(payload.get("mode"), "slot"); assert.equal(payload.get("slot_id"), data.slot.id);
+    assert.deepEqual(payload.getAll("event_ids"), [data.event.id]); assert.equal(payload.get("part"), "A");
+    assert.equal(payload.get("creator_x_user_id"), "active_x"); assert.equal(payload.get("active_x_snapshot"), "active_x");
+    assert.equal(payload.get("display_name"), "投稿者"); assert.equal(payload.get("profile_text"), "紹介文");
+    assert.ok([...form.querySelectorAll("textarea")].some(input => input.value === `https://public.example:8443/event/${encodeURIComponent(data.event.id)}`));
+    await act(async () => {
+      const input = form.elements.namedItem("title");
+      Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value").set.call(input, "作品の新しい題名");
+      input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    });
+    payload = new dom.window.FormData(form);
+    assert.equal(payload.get("title"), "作品の新しい題名"); assert.equal(payload.get("part"), "A");
+    assert.deepEqual(payload.getAll("event_ids"), [data.event.id]); assert.deepEqual(portCalls, []);
+  } finally { await m.unmount(); dom.window.localStorage.clear(); }
+});
+
+test("MIG-0716 U01a: complete empty/eligible unslotted pages keep search separate from the actual selected free form", async () => {
+  for (const empty of [true, false]) {
+    dom.window.localStorage.clear();
+    const data = formPageData("unslotted", empty ? { eventOptions: [] } : {});
+    const m = await mountFormPage(React.createElement(Unslotted, pageProps(data)));
+    try {
+      assert.equal(document.title, "枠なし投稿 | FlameNode");
+      const search = m.container.querySelector('form[role="search"]');
+      assert.equal(search.method, "get"); assert.equal(search.elements.event_q.maxLength, 100);
+      assert.equal(new dom.window.FormData(search).get("event_q"), data.eventQuery);
+      assert.equal(m.container.querySelector("form.vform-form"), null, "an affiliation choice precedes the real form");
+      const radios = m.container.querySelectorAll('input[name="unslotted_affiliation_choice"]');
+      assert.equal(radios[0].disabled, false); assert.equal(radios[1].disabled, empty);
+      await act(async () => radios[empty ? 0 : 1].click());
+      if (!empty) {
+        assert.equal(m.container.querySelector("form.vform-form"), null, "event affiliation also needs an eligible event selection");
+        await act(async () => {
+          const select = m.container.querySelector("#unslotted_event_choice");
+          select.value = data.eventOptions[0].id;
+          select.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+        });
+      }
+      const form = m.container.querySelector("form.vform-form");
+      assert.ok(form); assert.equal(m.container.querySelectorAll("form").length, 2);
+      const payload = new dom.window.FormData(form);
+      assert.equal(payload.get("mode"), "free"); assert.equal(payload.has("slot_id"), false); assert.equal(payload.has("event_q"), false);
+      assert.deepEqual(payload.getAll("event_ids"), empty ? [] : [data.eventOptions[0].id]);
+      assert.equal(payload.get("creator_x_user_id"), "active_x"); assert.equal(payload.get("display_name"), "投稿者");
+      assert.equal(new dom.window.FormData(search).get("event_q"), data.eventQuery);
+      if (!empty) assert.ok([...form.querySelectorAll("textarea")].some(input => input.value === `https://public.example:8443/event/${encodeURIComponent(data.eventOptions[0].id)}`));
+      assert.deepEqual(portCalls, []);
+    } finally { await m.unmount(); dom.window.localStorage.clear(); }
   }
 });

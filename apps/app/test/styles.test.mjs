@@ -153,5 +153,27 @@ test("MIG-0701 U04 T07: main imports CSS in CURRENT order", async () => {
     "./styles/settings.css", "./styles/xid-settings.css", "./styles/onboarding.css", "./styles/entry.css", "./styles/xid-requests.css", "./styles/video-members.css", "./styles/forms-a.css", "./styles/shared-social.css",
     "./styles/cost-guard-banner.css",
     "./styles/video-form.css",
+    "./styles/status-panel.css", "./styles/entry-unslotted.css",
   ]);
+});
+
+// The two new modules have real page consumers; the generic derivation test above checks every byte.
+test("MIG-0716 U01a: entry pages and the shared StatusPanel reference their derived classes", async () => {
+  for (const [prefix, style, sources] of [
+    ["status-panel", "status-panel", ["apps/app/src/components/ui/StatusPanel.tsx"]],
+    ["entry-unslotted", "entry-unslotted", ["apps/app/src/routes/entry/Unslotted.tsx"]],
+  ]) {
+    const css = await read(`apps/app/src/styles/${style}.css`);
+    const defined = new Set([...css.matchAll(/\.(-?[A-Za-z_][\w-]*)/g)].map(m => m[1]));
+    const used = new Set();
+    for (const file of sources) {
+      for (const [name] of (await read(file)).matchAll(new RegExp(`\\b${prefix}-[A-Za-z_][\\w-]*`, "g"))) used.add(name);
+    }
+    if (prefix === "status-panel") for (const tone of ["info", "success", "warning", "danger"]) used.add(`status-panel-${tone}`);
+    assert.ok(used.size > 0);
+    for (const name of used) assert.ok(defined.has(name), `missing derived class ${name}`);
+  }
+  for (const page of ["Slotted", "Unslotted"]) {
+    assert.match(await read(`apps/app/src/routes/entry/${page}.tsx`), /<StatusPanel\b/);
+  }
 });
