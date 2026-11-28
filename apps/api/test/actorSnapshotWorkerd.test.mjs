@@ -274,6 +274,34 @@ test("U04a-U04h: local workerd/D1 actor history, bounded reader, lease retention
     "  }",
     "  return {cases,productionRowsScanned:0};",
     "}",
+    "async function probeRevisionIntegrity(db) {",
+    "  // Disposable fixture: intentionally allow direct pointer writes to characterize",
+    "  // invalid references before any production schema or write policy is adopted.",
+    "  await run(db, \"CREATE TABLE u04j_actor(id TEXT PRIMARY KEY NOT NULL, x_name TEXT, icon_url TEXT, actor_snapshot_version INTEGER NOT NULL)\");",
+    "  await run(db, \"CREATE TABLE u04j_history(version INTEGER PRIMARY KEY, id, x_name, icon_url)\");",
+    "  await run(db, \"INSERT INTO u04j_actor VALUES ('a','current',NULL,2)\");",
+    "  await run(db, \"INSERT INTO u04j_history VALUES (0,'a','current',NULL),(1,'a','old',NULL),(2,'a','current',NULL),(3,'b','current',NULL),(4,'a',CAST('current' AS BLOB),NULL),(5,'a','current',''),(6,'a','current',NULL),(7,'a',CAST(X'FF8000C3' AS TEXT),NULL),(8,'a',CAST(X'EFBFBDEFBFBD00EFBFBD' AS TEXT),NULL),(9,'a',X'FF8000C3',NULL)\");",
+    "  // Compare identity, storage class and exact raw bytes inside SQL, not provider-decoded strings.",
+    "  const rawEquality = ['id','x_name','icon_url'].map(k => 'typeof(h.'+k+')=typeof(a.'+k+') AND CAST(h.'+k+' AS BLOB) IS CAST(a.'+k+' AS BLOB)').join(' AND ');",
+    "  const receiptSql = \"SELECT CASE WHEN typeof(a.actor_snapshot_version)='integer' AND a.actor_snapshot_version BETWEEN 1 AND 9007199254740991 AND EXISTS(SELECT 1 FROM u04j_history h WHERE h.version=a.actor_snapshot_version AND \" + rawEquality + \") THEN 1 ELSE 0 END AS ok FROM u04j_actor a WHERE a.id=?\";",
+    "  const checks = [];",
+    "  const check = async (label, version) => {",
+    "    await run(db, 'UPDATE u04j_actor SET actor_snapshot_version=? WHERE id=?', [version,'a']);",
+    "    const rows = await all(db, receiptSql, ['a']);",
+    "    if (rows.length !== 1 || ![0,1].includes(rows[0].ok)) throw new Error('invalid revision receipt');",
+    "    checks.push([label, rows[0].ok]);",
+    "  };",
+    "  for (const [label, version] of [['current',2],['cross-actor',3],['stale-different',1],['missing',999],['zero',0],['fractional',2.5],['same-bytes-blob',4],['empty-v-null',5],['same-content-other-version',6]]) {",
+    "    await check(label, version);",
+    "  }",
+    "  await run(db, \"UPDATE u04j_actor SET x_name=CAST(X'FF8000C3' AS TEXT) WHERE id='a'\");",
+    "  for (const [label, version] of [['raw-malformed-exact',7],['replacement-different',8],['raw-blob-v-text',9]]) {",
+    "    await check(label, version);",
+    "  }",
+    "  // A same-content different incarnation cannot be distinguished by this receipt alone.",
+    "  // Generic write/restore paths must still prohibit external version assignment.",
+    "  return {checks,missingActor:(await all(db, receiptSql, ['missing'])).length===0,productionRowsScanned:0};",
+    "}",
     "async function probe(db) {",
     "  await run(db, 'CREATE TABLE IF NOT EXISTS u04a_user (id TEXT PRIMARY KEY, discord_id TEXT, name TEXT, active_x_user_id TEXT, image TEXT, actor_snapshot_version INTEGER NOT NULL DEFAULT 0)');",
     "  await run(db, 'CREATE TABLE IF NOT EXISTS u04a_x_users (id TEXT PRIMARY KEY, x_name TEXT NOT NULL, icon_url TEXT, approval_status TEXT NOT NULL DEFAULT \\'pending\\', actor_snapshot_version INTEGER NOT NULL DEFAULT 0)');",
@@ -659,6 +687,7 @@ test("U04a-U04h: local workerd/D1 actor history, bounded reader, lease retention
     "  const backfill = await probeBackfill(db);",
     "  const pendingBackfill = await probePendingBackfill(db);",
     "  const pendingScale = await probePendingBackfillScale(db);",
+    "  const revisionIntegrity = await probeRevisionIntegrity(db);",
     "  // Exhaustion is terminal for this disposable fixture. Explicit RAISE(ABORT)",
     "  // must not be weakened by an outer OR IGNORE or OR FAIL statement.",
     "  const allocatorOut = [];",
@@ -680,7 +709,7 @@ test("U04a-U04h: local workerd/D1 actor history, bounded reader, lease retention
     "  const missingFailed = await batchFailed([db.prepare(\"UPDATE OR IGNORE u04a_x_users SET x_name='after-missing' WHERE id='u04a-x'\")]);",
     "  const missing = { failed: missingFailed, versions: await getVersions(), name: (await all(db, sourceSql, ['admin-1']))[0]?.x_name, rows: (await all(db, 'SELECT n FROM u04a_actor_sequence')).length };",
     "  const allocator = { fractionalRejected, oldVersions, atMaxSeq, maxToken, allocatorOut, overflowBatch, missing };",
-    "return { cases: casesOut, blobCanonicalJson: blobCase?.sourceJson ?? null, blobJson1FixtureMatches, json1, json1Error, staleChanges, staleCount, rollbackFailed, rollbackCount, abandonedCount, successRef, fenceOut, positive, interleaving, interleavingFence, interleavingFailure, interleavingFailureFence, immutableHistory, immutableHistoryFailureOut, immutableHistoryLifecycle, cleanupRace: { noFk: cleanupNoFk, fk: cleanupFk }, reader, leaseLifecycle, leaseOrphan, leaseExpiry, lateRollback, allocator, metrics, backfill, pendingBackfill, pendingScale };",
+    "return { cases: casesOut, blobCanonicalJson: blobCase?.sourceJson ?? null, blobJson1FixtureMatches, json1, json1Error, staleChanges, staleCount, rollbackFailed, rollbackCount, abandonedCount, successRef, fenceOut, positive, interleaving, interleavingFence, interleavingFailure, interleavingFailureFence, immutableHistory, immutableHistoryFailureOut, immutableHistoryLifecycle, cleanupRace: { noFk: cleanupNoFk, fk: cleanupFk }, reader, leaseLifecycle, leaseOrphan, leaseExpiry, lateRollback, allocator, metrics, backfill, pendingBackfill, pendingScale, revisionIntegrity };",
     "}",
     "export default {",
     "  async fetch(request, env) {",
@@ -907,6 +936,17 @@ test("U04a-U04h: local workerd/D1 actor history, bounded reader, lease retention
       assert.ok(c.maxRead <= 16, "each atomic backfill transaction has a bounded local D1 rows_read envelope");
       assert.ok(c.maxWritten <= 3, "each atomic transaction has at most three logical D1 row writes");
     }
+    const revisionIntegrity = body.revisionIntegrity;
+    console.log('U04J_REVISION_INTEGRITY ' + JSON.stringify(revisionIntegrity));
+    assert.deepEqual(revisionIntegrity, {
+      checks: [
+        ["current",1], ["cross-actor",0], ["stale-different",0],
+        ["missing",0], ["zero",0], ["fractional",0], ["same-bytes-blob",0],
+        ["empty-v-null",0], ["same-content-other-version",1],
+        ["raw-malformed-exact",1], ["replacement-different",0], ["raw-blob-v-text",0],
+      ],
+      missingActor: true, productionRowsScanned: 0,
+    });
     const allocator = body.allocator;
     assert.equal(allocator.fractionalRejected, true);
     assert.equal(allocator.atMaxSeq, Number.MAX_SAFE_INTEGER);
