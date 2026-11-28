@@ -37,6 +37,8 @@ import {
   projectLegacyVideoCreate,
   readLegacyVideoReplacementSnapshot,
   buildLegacyVideoReplacementAssertion,
+  prepareLegacyVideoReplacementAnswers,
+  buildLegacyAnswerReplacementAssertion,
 } from "@flamenode/server-core/legacyImport/d1Apply";
 import { createAdminD1, seedBase, seedEvent } from "./helpers/sqliteD1.mjs";
 
@@ -1545,6 +1547,80 @@ test("MIG-0645 U02al Hono: new video rows, provenance, queue and receipt are ato
     await assertBatch(snapshot);
     assert.equal(sqlite.prepare("SELECT score FROM videos WHERE id = ?").get(video.id).score, 0);
     assert.equal(wakes.length, wakesBefore + 2, "transaction assertions never send queue wakes");
+
+    // U02ao: omitted and identical answers keep their exact timestamps.
+    // Changed answers require a separate unique latest legacy audit, even
+    // though the seven-digest entity proof is still valid.
+    const now = saved.updated_at + 10;
+    const answerInput = { db: serverDb, snapshot, projection: projected, now };
+    const beforeUnchangedReads = stats.reads;
+    const unchanged = await prepareLegacyVideoReplacementAnswers(answerInput);
+    assert.deepEqual(unchanged.nextAnswers, snapshot.beforeAnswers);
+    assert.equal(unchanged.replaced.length, 0);
+    assert.equal(unchanged.created.length, 0);
+    assert.equal(stats.reads, beforeUnchangedReads, "no extra proof read for unchanged answers");
+    const omitted = await prepareLegacyVideoReplacementAnswers({
+      ...answerInput, projection: { ...projected, nextAnswers: [] },
+    });
+    assert.deepEqual(omitted.nextAnswers, unchanged.nextAnswers);
+    await assert.rejects(prepareLegacyVideoReplacementAnswers({
+      ...answerInput, projection: { ...projected, nextEvents: [], nextAnswers: [] },
+    }), "cannot orphan retained answers by removing their event");
+
+    const incoming = [
+      { ...projected.nextAnswers[0], answer_text: "Replacement answer" },
+      { ...projected.nextAnswers[0], question_id: "another-question", answer_text: "New answer" },
+    ];
+    const changedInput = { ...answerInput, projection: { ...projected, nextAnswers: incoming } };
+    const proofReads = stats.reads;
+    const prepared = await prepareLegacyVideoReplacementAnswers(changedInput);
+    assert.equal(stats.reads - proofReads, 1);
+    assert.equal(prepared.replaced.length, 1);
+    assert.equal(prepared.created.length, 1);
+    assert.equal(prepared.replaced[0].after.created_at, snapshot.beforeAnswers[0].created_at);
+    assert.equal(prepared.replaced[0].after.updated_at, now);
+    assert.equal(prepared.created[0].created_at, now);
+    assert.equal(prepared.nextAnswers.length, 2);
+    assert.equal(prepared.proofs.length, 1);
+    assert.equal(prepared.custom_answers_digest, createHash("sha256").update(JSON.stringify(prepared.nextAnswers)).digest("hex"));
+    await serverDb.batch([buildLegacyAnswerReplacementAssertion(serverDb, prepared)]);
+
+    const answerProofId = prepared.proofs[0].id;
+    const cloneAnswerProof = sqlite.prepare("INSERT INTO audit_logs (" + auditColumns.map(quote).join(", ") + ") SELECT " +
+      auditColumns.map((column) => column === "id" ? "?" : quote(column)).join(", ") +
+      " FROM audit_logs WHERE id = ?");
+    cloneAnswerProof.run("competing-answer-proof", answerProofId);
+    await assert.rejects(prepareLegacyVideoReplacementAnswers(changedInput), "tied answer proofs are ambiguous");
+    const answerGuardedBatch = async () => serverDb.batch([
+      buildLegacyVideoReplacementAssertion(serverDb, snapshot),
+      buildLegacyAnswerReplacementAssertion(serverDb, prepared),
+      serverDb.run(sql`UPDATE videos SET score = 99 WHERE id = ${video.id}`),
+    ]);
+    await assert.rejects(answerGuardedBatch(), "a tied answer audit appearing after read must abort");
+    sqlite.prepare("UPDATE audit_logs SET created_at = created_at + 1, context = ? WHERE id = ?")
+      .run("manual-edit", "competing-answer-proof");
+    await assert.rejects(prepareLegacyVideoReplacementAnswers(changedInput), "later non-import audit blocks replacement");
+    await assert.rejects(answerGuardedBatch(), "newer non-import audit appearing after read must abort");
+    assert.equal(sqlite.prepare("SELECT score FROM videos WHERE id = ?").get(video.id).score, 0);
+    sqlite.prepare("DELETE FROM audit_logs WHERE id = ?").run("competing-answer-proof");
+    await serverDb.batch([buildLegacyAnswerReplacementAssertion(serverDb, prepared)]);
+
+    const originalAfterJson = prepared.proofs[0].after_json;
+    sqlite.prepare("UPDATE audit_logs SET after_json = ? WHERE id = ?")
+      .run(JSON.stringify({ ...snapshot.beforeAnswers[0], updated_at: now }), answerProofId);
+    await assert.rejects(prepareLegacyVideoReplacementAnswers(changedInput), "mismatched answer snapshot blocks replacement");
+    await assert.rejects(answerGuardedBatch(), "changed proof payload must abort");
+    sqlite.prepare("UPDATE audit_logs SET after_json = ? WHERE id = ?").run(originalAfterJson, answerProofId);
+    await assert.rejects(prepareLegacyVideoReplacementAnswers({
+      ...changedInput, projection: {
+        ...projected,
+        nextAnswers: Array.from({ length: 4 }, (_, i) => ({
+          ...projected.nextAnswers[0], question_id: "additional-" + i,
+        })),
+      },
+    }), "existing plus incoming answers must respect the cap");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM video_custom_answers").get().n, 1);
+    assert.equal(wakes.length, wakesBefore + 2);
 
     const replacement = await createApplyCredential(bucket, ADMIN.id, plan, "replace_imported");
     await reachQuestionStage(request, replacement.form);

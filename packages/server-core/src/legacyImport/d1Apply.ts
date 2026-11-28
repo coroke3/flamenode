@@ -705,6 +705,182 @@ export function buildLegacyVideoReplacementAssertion(
   `);
 }
 
+const CUSTOM_ANSWER_AUDIT_CONTEXT = "legacy_import:custom-answer";
+type ExistingVideoAnswer = typeof videoCustomAnswers.$inferSelect;
+type AnswerReplacementProof = {
+  id: string;
+  target_id: string;
+  context: typeof CUSTOM_ANSWER_AUDIT_CONTEXT;
+  after_json: string;
+  created_at: number;
+};
+const ANSWER_SNAPSHOT_KEYS = [
+  "video_id", "event_id", "question_id", "answer_text", "answer_json", "created_at", "updated_at",
+] as const;
+
+function answerAuditTarget(row: Pick<ExistingVideoAnswer, "video_id" | "event_id" | "question_id">): string {
+  return [row.video_id, row.event_id, row.question_id].map(encodeURIComponent).join(":");
+}
+
+function parseExistingVideoAnswer(row: Record<string, unknown>, videoId: string): ExistingVideoAnswer {
+  if (row.video_id !== videoId || typeof row.event_id !== "string" ||
+      typeof row.question_id !== "string" ||
+      (row.answer_text !== null && typeof row.answer_text !== "string") ||
+      (row.answer_json !== null && typeof row.answer_json !== "string") ||
+      !Number.isSafeInteger(row.created_at) || !Number.isSafeInteger(row.updated_at)) {
+    return fixedFailure("旧形式インポートのカスタム質問回答snapshotが不正です。");
+  }
+  // Explicit CURRENT field order for the video entity's answer digest.
+  return {
+    video_id: videoId, event_id: row.event_id, question_id: row.question_id,
+    answer_text: row.answer_text as string | null, answer_json: row.answer_json as string | null,
+    created_at: row.created_at as number, updated_at: row.updated_at as number,
+  };
+}
+
+/**
+ * U02ao: prepare answer changes only, without executing any writes.
+ * CURRENT retains omitted/identical answers and their timestamps. Only
+ * a changed existing answer needs a separate, unique latest import audit.
+ * The caller must use the full video CAS and the proof assertion in the
+ * same audited D1 batch before applying any returned writes.
+ */
+export async function prepareLegacyVideoReplacementAnswers(input: {
+  db: ServerCoreDb;
+  snapshot: Awaited<ReturnType<typeof readLegacyVideoReplacementSnapshot>>;
+  projection: Awaited<ReturnType<typeof projectLegacyVideoCreate>>;
+  now: number;
+}) {
+  const { db, snapshot, projection, now } = input;
+  const videoId = projection.managed.id;
+  const error = "旧形式インポートのカスタム質問回答の置換snapshotを確認できません。";
+  if (snapshot.video.id !== videoId || !Number.isSafeInteger(now) || now < 0 ||
+      snapshot.beforeAnswers.length > MAX_LEGACY_CUSTOM_ANSWERS_PER_VIDEO ||
+      projection.nextAnswers.length > MAX_LEGACY_CUSTOM_ANSWERS_PER_VIDEO) {
+    return fixedFailure(error);
+  }
+  const before = snapshot.beforeAnswers.map((row) => parseExistingVideoAnswer(row, videoId));
+  const incoming = projection.nextAnswers.map((row) => parseExistingVideoAnswer(row, videoId));
+  const beforeByTarget = new Map(before.map((row) => [answerAuditTarget(row), row]));
+  if (beforeByTarget.size !== before.length ||
+      new Set(incoming.map(answerAuditTarget)).size !== incoming.length) {
+    return fixedFailure(error);
+  }
+  const post = new Map(beforeByTarget);
+  const replaced: Array<{ before: ExistingVideoAnswer; after: ExistingVideoAnswer }> = [];
+  const created: ExistingVideoAnswer[] = [];
+  for (const row of incoming) {
+    const target = answerAuditTarget(row);
+    const current = beforeByTarget.get(target);
+    if (current && current.answer_text === row.answer_text && current.answer_json === row.answer_json) {
+      continue;
+    }
+    const after = { ...row, created_at: current?.created_at ?? now, updated_at: now };
+    if (current) replaced.push({ before: current, after });
+    else created.push(after);
+    post.set(target, after);
+  }
+  const allowedEvents = new Set(projection.nextEvents.map((row) => row.event_id));
+  const nextAnswers = [...post.values()].sort((left, right) =>
+    left.event_id.localeCompare(right.event_id) || left.question_id.localeCompare(right.question_id));
+  if (nextAnswers.length > MAX_LEGACY_CUSTOM_ANSWERS_PER_VIDEO ||
+      nextAnswers.some((row) => !allowedEvents.has(row.event_id)) ||
+      new TextEncoder().encode(JSON.stringify({ before, nextAnswers })).byteLength > MAX_LEGACY_IMPORT_STEP_BYTES) {
+    return fixedFailure(error);
+  }
+  const proofs: AnswerReplacementProof[] = [];
+  if (replaced.length > 0) {
+    const expected = new Map(replaced.map(({ before: row }) => [answerAuditTarget(row), row]));
+    const targets = JSON.stringify([...expected.keys()]);
+    // Latest means latest across ALL audit contexts, not only import.
+    // A later manual audit or a tie must refuse replacement.
+    const rows = await db.all(sql`
+      WITH latest_rows AS (
+        SELECT json_object('id', a.id, 'target_id', a.target_id,
+          'context', a.context, 'after_json', a.after_json, 'created_at', a.created_at) AS payload
+        FROM audit_logs AS a
+        WHERE a.table_name = 'video_custom_answers'
+          AND a.target_id IN (SELECT value FROM json_each(${targets}))
+          AND a.created_at = (
+            SELECT MAX(b.created_at) FROM audit_logs AS b
+            WHERE b.table_name = a.table_name AND b.target_id = a.target_id
+          )
+        ORDER BY a.target_id, a.id
+        LIMIT ${replaced.length * 2 + 1}
+      )
+      SELECT 'answer_proof' AS kind,
+        CASE WHEN SUM(length(CAST(payload AS BLOB))) OVER () <= ${MAX_LEGACY_IMPORT_STEP_BYTES}
+          THEN payload ELSE NULL END AS payload
+      FROM latest_rows
+    `) as unknown as ReadRow[];
+    if (rows.length !== expected.size || rows.some((row) => row.kind !== "answer_proof" || typeof row.payload !== "string") ||
+        new TextEncoder().encode(JSON.stringify(rows)).byteLength > MAX_LEGACY_IMPORT_STEP_BYTES) {
+      return fixedFailure(error);
+    }
+    const seen = new Set<string>();
+    for (const row of rows) {
+      const proof = parseJsonRecord(row.payload, error);
+      if (typeof proof.target_id !== "string" || seen.has(proof.target_id) ||
+          typeof proof.id !== "string" || proof.context !== CUSTOM_ANSWER_AUDIT_CONTEXT ||
+          typeof proof.after_json !== "string" || !Number.isSafeInteger(proof.created_at)) {
+        return fixedFailure(error);
+      }
+      const current = expected.get(proof.target_id);
+      const after = parseJsonRecord(proof.after_json, error);
+      if (!current || ANSWER_SNAPSHOT_KEYS.some((key) => after[key] !== current[key])) {
+        return fixedFailure(error);
+      }
+      seen.add(proof.target_id);
+      proofs.push({
+        id: proof.id, target_id: proof.target_id, context: CUSTOM_ANSWER_AUDIT_CONTEXT,
+        after_json: proof.after_json, created_at: proof.created_at as number,
+      });
+    }
+  }
+  return { replaced, created, nextAnswers, proofs, custom_answers_digest: await snapshotDigest(nextAnswers) };
+}
+
+/** Construct an unexecuted assertion that the separate answer proofs still own the latest state. */
+export function buildLegacyAnswerReplacementAssertion(
+  db: ServerCoreDb,
+  prepared: Awaited<ReturnType<typeof prepareLegacyVideoReplacementAnswers>>,
+) {
+  const error = "旧形式インポートのカスタム質問回答の置換snapshotを確認できません。";
+  const targets = new Set(prepared.replaced.map(({ before }) => answerAuditTarget(before)));
+  if (prepared.proofs.length !== targets.size || targets.size !== prepared.replaced.length ||
+      prepared.proofs.length > MAX_LEGACY_CUSTOM_ANSWERS_PER_VIDEO ||
+      new Set(prepared.proofs.map((row) => row.target_id)).size !== targets.size ||
+      prepared.proofs.some((row) => !targets.has(row.target_id) || row.context !== CUSTOM_ANSWER_AUDIT_CONTEXT ||
+        typeof row.id !== "string" || typeof row.after_json !== "string" || !Number.isSafeInteger(row.created_at))) {
+    return fixedFailure(error);
+  }
+  const payload = JSON.stringify(prepared.proofs);
+  if (new TextEncoder().encode(payload).byteLength > MAX_LEGACY_IMPORT_STEP_BYTES) {
+    return fixedFailure(error);
+  }
+  return db.run(sql`
+    SELECT CASE WHEN NOT EXISTS (
+      SELECT 1 FROM json_each(${payload}) AS expected
+      WHERE NOT EXISTS (
+        SELECT 1 FROM audit_logs AS proof
+        WHERE proof.table_name = 'video_custom_answers'
+          AND proof.id = json_extract(expected.value, '$.id')
+          AND proof.target_id = json_extract(expected.value, '$.target_id')
+          AND proof.context = ${CUSTOM_ANSWER_AUDIT_CONTEXT}
+          AND proof.after_json IS json_extract(expected.value, '$.after_json')
+          AND proof.created_at = json_extract(expected.value, '$.created_at')
+          AND NOT EXISTS (
+            SELECT 1 FROM audit_logs AS competing
+            WHERE competing.table_name = proof.table_name
+              AND competing.target_id = proof.target_id
+              AND (competing.created_at > proof.created_at OR
+                (competing.created_at = proof.created_at AND competing.id <> proof.id))
+          )
+      )
+    ) THEN 1 ELSE json_extract('legacy_import_answer_proof_mismatch', '$') END
+  `);
+}
+
 /** U02al supports new-video creation and the existing marker-only paths; replacement is disabled. */
 function nextVideoProgress(
   input: ApplyInput,
