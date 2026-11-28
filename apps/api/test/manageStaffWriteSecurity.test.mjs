@@ -4,7 +4,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Hono } from "hono";
-import { redirect, unstable_rethrow } from "next/navigation";
+import navigation from "next/navigation.js";
 import { EventStaffCsvBodySchema } from "@flamenode/contracts";
 import { drizzle } from "drizzle-orm/d1";
 import * as schema from "@flamenode/db/schema";
@@ -15,6 +15,9 @@ import {
   transferEventOwnership,
 } from "@flamenode/server-core/event/eventOwnership";
 import { createAdminD1, seedBase, seedEvent } from "./helpers/sqliteD1.mjs";
+
+// Native Node ESM requires the explicit CommonJS package entry.
+const { redirect, unstable_rethrow } = navigation;
 
 const ADMIN = { id: "admin-1", name: "Admin", role: "admin", is_banned: 0 };
 const MEMBER = { ...ADMIN, role: "user" };
