@@ -9,6 +9,7 @@ import type { ServerCoreDb } from "../db.ts";
 import type { CanonicalLegacyPlan, LegacyImportStrategy } from "./normalize.ts";
 import type { LegacyImportApplyProgress } from "./previewStore.ts";
 import {
+  LEGACY_IMPORT_SOFTWARE_STEP_SIZE,
   LEGACY_IMPORT_X_USER_STEP_SIZE,
   legacyImportReceiptMatchesProgress,
   legacyImportSkipSnapshotFingerprint,
@@ -40,7 +41,34 @@ type StepIdentity = {
 type StoredStepOutcome =
   | { kind: "system_user" }
   | { kind: "none" }
-  | { kind: "x_users"; created: number; createdAuthUsers: number };
+  | { kind: "x_users"; created: number; createdAuthUsers: number }
+  | { kind: "softwares"; created: number };
+
+type PlannedSoftwareRow = { id: string; name: string; normalized_name: string };
+
+function normalizeSoftwareName(label: string): string {
+  return label.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function stableSoftwareId(normalizedName: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < normalizedName.length; index += 1) {
+    hash ^= normalizedName.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `sw_imp_${(hash >>> 0).toString(16).padStart(8, "0")}`;
+}
+
+function plannedSoftwareCatalogRows(plan: CanonicalLegacyPlan): PlannedSoftwareRow[] {
+  const normalizedToLabel = new Map<string, string>();
+  plan.videoSoftwares.forEach(({ label }) => {
+    const normalized = normalizeSoftwareName(label);
+    if (normalized) normalizedToLabel.set(normalized, label.trim());
+  });
+  return [...normalizedToLabel].map(([normalized_name, name]) => ({
+    id: stableSoftwareId(normalized_name), name, normalized_name,
+  }));
+}
 
 function fixedFailure(message: string): never {
   throw new Error(message);
@@ -103,6 +131,40 @@ function nextXUsersProgress(
   if (progress.index + 1 < groupCount) next.index += 1;
   else {
     next.stage = "softwares";
+    next.index = 0;
+  }
+  return next;
+}
+
+function nextSoftwareProgress(
+  plan: CanonicalLegacyPlan,
+  progress: LegacyImportApplyProgress,
+  outcome: StoredStepOutcome,
+): LegacyImportApplyProgress {
+  const next: LegacyImportApplyProgress = {
+    ...progress,
+    counts: { ...progress.counts },
+    skipExistingEventIds: [...progress.skipExistingEventIds],
+    skipExistingVideoIds: [...progress.skipExistingVideoIds],
+  };
+  const rows = plannedSoftwareCatalogRows(plan);
+  if (rows.length === 0) {
+    if (outcome.kind !== "none") return fixedFailure("旧形式インポートの使用ソフト進捗が不正です。");
+    next.stage = "events";
+    next.index = 0;
+    return next;
+  }
+  if (outcome.kind !== "softwares") return fixedFailure("旧形式インポートの使用ソフト進捗が不正です。");
+  const groupRows = rows.slice(
+    progress.index * LEGACY_IMPORT_SOFTWARE_STEP_SIZE,
+    (progress.index + 1) * LEGACY_IMPORT_SOFTWARE_STEP_SIZE,
+  );
+  if (outcome.created > groupRows.length) return fixedFailure("旧形式インポートの使用ソフト進捗が不正です。");
+  next.counts.createdSoftwares += outcome.created;
+  const groupCount = Math.ceil(rows.length / LEGACY_IMPORT_SOFTWARE_STEP_SIZE);
+  if (progress.index + 1 < groupCount) next.index += 1;
+  else {
+    next.stage = "events";
     next.index = 0;
   }
   return next;
@@ -173,6 +235,12 @@ function parseReceipt(value: Record<string, unknown>) {
       created: outcomeRecord.created as number,
       createdAuthUsers: outcomeRecord.createdAuthUsers as number,
     };
+  } else if (
+    outcomeRecord.kind === "softwares" &&
+    Number.isSafeInteger(outcomeRecord.created) &&
+    (outcomeRecord.created as number) >= 0
+  ) {
+    outcome = { kind: "softwares", created: outcomeRecord.created as number };
   } else {
     return fixedFailure("旧形式インポートのステップ監査が破損しています。");
   }
@@ -215,7 +283,7 @@ export async function legacyImportD1ApplyStep(
 ): Promise<{ progress: LegacyImportApplyProgress; complete: boolean }> {
   if (input.plan.errors.length > 0) return fixedFailure(input.plan.errors.join("\n"));
   const stage = input.progress.stage;
-  if (stage !== "system_user" && stage !== "x_users") {
+  if (stage !== "system_user" && stage !== "x_users" && stage !== "softwares") {
     return fixedFailure("旧形式インポートのこの段階はHono側でまだ利用できません。");
   }
   if (stage === "system_user" && input.progress.index !== 0) {
@@ -231,6 +299,14 @@ export async function legacyImportD1ApplyStep(
       input.progress.index < 0 ||
       input.progress.index >= groupCount
     ) {
+      return fixedFailure("旧形式インポートの進捗位置が不正です。");
+    }
+  }
+
+  const allSoftwareRows = stage === "softwares" ? plannedSoftwareCatalogRows(input.plan) : [];
+  if (stage === "softwares") {
+    const groupCount = Math.max(1, Math.ceil(allSoftwareRows.length / LEGACY_IMPORT_SOFTWARE_STEP_SIZE));
+    if (!Number.isSafeInteger(input.progress.index) || input.progress.index < 0 || input.progress.index >= groupCount) {
       return fixedFailure("旧形式インポートの進捗位置が不正です。");
     }
   }
@@ -258,9 +334,15 @@ export async function legacyImportD1ApplyStep(
         (input.progress.index + 1) * LEGACY_IMPORT_X_USER_STEP_SIZE,
       )
     : [];
+  const plannedSoftwareRows = stage === "softwares"
+    ? allSoftwareRows.slice(
+        input.progress.index * LEGACY_IMPORT_SOFTWARE_STEP_SIZE,
+        (input.progress.index + 1) * LEGACY_IMPORT_SOFTWARE_STEP_SIZE,
+      )
+    : [];
 
-  // One bounded D1 read per request: receipt plus either the reserved principal
-  // or the current 40-row X-ID existence snapshot.
+  // One bounded D1 read per request: receipt plus the reserved principal or a
+  // 40-row X/software normalized-name existence snapshot.
   const readRows = stage === "system_user"
     ? await input.db.all(sql`
         WITH marker_rows AS (
@@ -298,29 +380,53 @@ export async function legacyImportD1ApplyStep(
         UNION ALL
         SELECT 'principal' AS kind, payload FROM principal_rows
       `) as unknown as ReadRow[]
-    : await input.db.all(sql`
-        WITH marker_rows AS (
-          SELECT after_json AS payload
-            FROM audit_logs
-           WHERE table_name = ${STEP_AUDIT_TABLE}
-             AND target_id = ${identity.targetId}
-             AND context = ${STEP_AUDIT_CONTEXT}
-           LIMIT 2
-        ),
-        existing_rows AS (
-          SELECT id AS payload
-            FROM x_users
-           WHERE id IN (
-             SELECT CAST(json_extract(value, '$.id') AS TEXT)
-               FROM json_each(${JSON.stringify(plannedXUserRows)})
-           )
-             AND NOT EXISTS (SELECT 1 FROM marker_rows)
-           LIMIT ${LEGACY_IMPORT_X_USER_STEP_SIZE}
-        )
-        SELECT 'marker' AS kind, payload FROM marker_rows
-        UNION ALL
-        SELECT 'existing' AS kind, payload FROM existing_rows
-      `) as unknown as ReadRow[];
+    : stage === "x_users"
+      ? await input.db.all(sql`
+          WITH marker_rows AS (
+            SELECT after_json AS payload
+              FROM audit_logs
+             WHERE table_name = ${STEP_AUDIT_TABLE}
+               AND target_id = ${identity.targetId}
+               AND context = ${STEP_AUDIT_CONTEXT}
+             LIMIT 2
+          ),
+          existing_rows AS (
+            SELECT id AS payload
+              FROM x_users
+             WHERE id IN (
+               SELECT CAST(json_extract(value, '$.id') AS TEXT)
+                 FROM json_each(${JSON.stringify(plannedXUserRows)})
+             )
+               AND NOT EXISTS (SELECT 1 FROM marker_rows)
+             LIMIT ${LEGACY_IMPORT_X_USER_STEP_SIZE}
+          )
+          SELECT 'marker' AS kind, payload FROM marker_rows
+          UNION ALL
+          SELECT 'existing' AS kind, payload FROM existing_rows
+        `) as unknown as ReadRow[]
+      : await input.db.all(sql`
+          WITH marker_rows AS (
+            SELECT after_json AS payload
+              FROM audit_logs
+             WHERE table_name = ${STEP_AUDIT_TABLE}
+               AND target_id = ${identity.targetId}
+               AND context = ${STEP_AUDIT_CONTEXT}
+             LIMIT 2
+          ),
+          existing_rows AS (
+            SELECT normalized_name AS payload
+              FROM software_catalog
+             WHERE normalized_name IN (
+               SELECT CAST(json_extract(value, '$.normalized_name') AS TEXT)
+                 FROM json_each(${JSON.stringify(plannedSoftwareRows)})
+             )
+               AND NOT EXISTS (SELECT 1 FROM marker_rows)
+             LIMIT ${LEGACY_IMPORT_SOFTWARE_STEP_SIZE}
+          )
+          SELECT 'marker' AS kind, payload FROM marker_rows
+          UNION ALL
+          SELECT 'existing' AS kind, payload FROM existing_rows
+        `) as unknown as ReadRow[];
 
   const markerRows = readRows.filter((row) => row.kind === "marker");
   const principalRows = readRows.filter((row) => row.kind === "principal");
@@ -331,9 +437,9 @@ export async function legacyImportD1ApplyStep(
   if (
     markerRows.length > 1 ||
     principalRows.length > 1 ||
-    existingRows.length > plannedXUserRows.length ||
+    existingRows.length > (stage === "x_users" ? plannedXUserRows.length : plannedSoftwareRows.length) ||
     (stage === "system_user" && existingRows.length !== 0) ||
-    (stage === "x_users" && principalRows.length !== 0) ||
+    ((stage === "x_users" || stage === "softwares") && principalRows.length !== 0) ||
     (markerRows.length === 1 && (principalRows.length !== 0 || existingRows.length !== 0))
   ) {
     return fixedFailure("旧形式インポートのステップ監査または既存ID snapshotが不正です。");
@@ -353,7 +459,9 @@ export async function legacyImportD1ApplyStep(
             input.strategy === "skip_existing" ? input.progress.skipExistingVideoIds : [],
           )
         : fixedFailure("旧形式インポートのステップ監査と進捗が一致しません。")
-      : nextXUsersProgress(input.plan, input.progress, receipt.outcome);
+      : stage === "x_users"
+        ? nextXUsersProgress(input.plan, input.progress, receipt.outcome)
+        : nextSoftwareProgress(input.plan, input.progress, receipt.outcome);
     if (!legacyImportReceiptMatchesProgress(receipt, identity, expected)) {
       return fixedFailure("旧形式インポートのステップ監査と進捗が一致しません。");
     }
@@ -466,9 +574,151 @@ export async function legacyImportD1ApplyStep(
     return { progress: nextProgress, complete: false };
   }
 
-  if (input.plan.xUsers.length === 0) {
-    const outcome = { kind: "none" } as const;
+  if (stage === "x_users") {
+    if (input.plan.xUsers.length === 0) {
+      const outcome = { kind: "none" } as const;
+      const nextProgress = nextXUsersProgress(input.plan, input.progress, outcome);
+      await mutateWithAudit(input.db, {
+        preMutationAssertions: [markerAbsenceAssertion],
+        mutationStatements: [
+          input.db.run(sql`
+            SELECT CASE WHEN 1 THEN 1
+            ELSE json_extract('legacy_import_step_marker', '$') END
+          `),
+        ],
+        expectedMutationChanges: [null],
+        audits: [buildMarkerAudit(nextProgress, outcome)],
+        callerQueryCount: 3,
+        preloaded: input.preloaded,
+      });
+      return { progress: nextProgress, complete: false };
+    }
+  
+    const existingIds = new Set<string>();
+    for (const row of existingRows) {
+      if (typeof row.payload !== "string" || row.payload.length === 0) {
+        return fixedFailure("旧形式インポートの既存X名義ID snapshotが不正です。");
+      }
+      existingIds.add(row.payload);
+    }
+    if (existingIds.size !== existingRows.length) {
+      return fixedFailure("旧形式インポートの既存X名義ID snapshotが重複しています。");
+    }
+    const missing = plannedXUserRows.filter((row) => !existingIds.has(row.id));
+    const outcome = {
+      kind: "x_users",
+      created: missing.length,
+      createdAuthUsers: 0,
+    } as const;
     const nextProgress = nextXUsersProgress(input.plan, input.progress, outcome);
+    const markerAudit = buildMarkerAudit(nextProgress, outcome);
+  
+    if (missing.length === 0) {
+      await mutateWithAudit(input.db, {
+        preMutationAssertions: [markerAbsenceAssertion],
+        mutationStatements: [
+          input.db.run(sql`
+            SELECT CASE WHEN 1 THEN 1
+            ELSE json_extract('legacy_import_step_marker', '$') END
+          `),
+        ],
+        expectedMutationChanges: [null],
+        audits: [markerAudit],
+        callerQueryCount: 3,
+        preloaded: input.preloaded,
+      });
+      return { progress: nextProgress, complete: false };
+    }
+  
+    const now = Math.floor(Date.now() / 1000);
+    const xUserPayload = JSON.stringify(missing);
+    const queuePayload = JSON.stringify([{
+      id: legacyImportRebuildQueueId(identity.targetId, 0),
+      target_type: "users_index",
+      target_id: "global",
+      reason: "legacy_import_x_users",
+      priority: "low",
+    }]);
+    await mutateWithAudit(input.db, {
+      preMutationAssertions: [markerAbsenceAssertion],
+      mutationStatements: [
+        input.db.run(sql`
+          INSERT INTO x_users (
+            id, x_name, icon_url, profile_text, portfolio_contact,
+            youtube_channel_url, other_social_links, creative_start_date, approval_status
+          )
+          SELECT
+            json_extract(value, '$.id'),
+            json_extract(value, '$.x_name'),
+            json_extract(value, '$.icon_url'),
+            NULL,
+            NULL,
+            json_extract(value, '$.youtube_channel_url'),
+            json_extract(value, '$.other_social_links'),
+            NULL,
+            'imported'
+          FROM json_each(${xUserPayload})
+        `),
+        input.db.run(sql`
+          INSERT INTO static_rebuild_queue (
+            id, target_type, target_id, reason, priority, status,
+            attempt_count, requested_by_user_id, created_at, updated_at
+          )
+          SELECT
+            json_extract(incoming.value, '$.id'),
+            json_extract(incoming.value, '$.target_type'),
+            json_extract(incoming.value, '$.target_id'),
+            json_extract(incoming.value, '$.reason'),
+            json_extract(incoming.value, '$.priority'),
+            'pending', 0, ${input.actorAuthUserId}, ${now}, ${now}
+          FROM json_each(${queuePayload}) AS incoming
+          WHERE 1 = 1
+          ON CONFLICT(target_type, target_id) WHERE status IN ('pending', 'processing')
+          DO UPDATE SET
+            reason = CASE
+              WHEN static_rebuild_queue.reason = 'video_visibility_update'
+                   AND excluded.reason <> 'video_visibility_update'
+                THEN static_rebuild_queue.reason
+              ELSE excluded.reason
+            END,
+            priority = CASE
+              WHEN static_rebuild_queue.priority = 'high' OR excluded.priority = 'high' THEN 'high'
+              WHEN static_rebuild_queue.priority = 'normal' OR excluded.priority = 'normal' THEN 'normal'
+              ELSE 'low'
+            END,
+            requested_by_user_id = excluded.requested_by_user_id,
+            updated_at = MAX(static_rebuild_queue.updated_at + 1, excluded.updated_at)
+        `),
+      ],
+      expectedMutationChanges: [missing.length, 1],
+      audits: [
+        {
+          table_name: "x_users_import_batch",
+          target_id: "legacy:" + missing[0].id,
+          operation: "CREATE" as const,
+          before: null,
+          after: { ids: missing.map((row) => row.id) },
+          actor_user_id: input.actorAuthUserId,
+          reason: "旧形式からX名義を新正本へ作成",
+          context: "legacy_import",
+          retention_class: "long_audit" as const,
+          restore_strategy: "none" as const,
+        },
+        markerAudit,
+      ],
+      callerQueryCount: 3,
+      preloaded: input.preloaded,
+    });
+    return { progress: nextProgress, complete: false };
+  }
+
+  
+  if (stage !== "softwares") {
+    return fixedFailure("旧形式インポートのこの段階はHono側でまだ利用できません。");
+  }
+  if (allSoftwareRows.length === 0) {
+    const outcome = { kind: "none" } as const;
+    const nextProgress = nextSoftwareProgress(input.plan, input.progress, outcome);
     await mutateWithAudit(input.db, {
       preMutationAssertions: [markerAbsenceAssertion],
       mutationStatements: [
@@ -485,23 +735,19 @@ export async function legacyImportD1ApplyStep(
     return { progress: nextProgress, complete: false };
   }
 
-  const existingIds = new Set<string>();
+  const existingSoftwareNames = new Set<string>();
   for (const row of existingRows) {
     if (typeof row.payload !== "string" || row.payload.length === 0) {
-      return fixedFailure("旧形式インポートの既存X名義ID snapshotが不正です。");
+      return fixedFailure("旧形式インポートの既存使用ソフトsnapshotが不正です。");
     }
-    existingIds.add(row.payload);
+    existingSoftwareNames.add(row.payload);
   }
-  if (existingIds.size !== existingRows.length) {
-    return fixedFailure("旧形式インポートの既存X名義ID snapshotが重複しています。");
+  if (existingSoftwareNames.size !== existingRows.length) {
+    return fixedFailure("旧形式インポートの既存使用ソフトsnapshotが重複しています。");
   }
-  const missing = plannedXUserRows.filter((row) => !existingIds.has(row.id));
-  const outcome = {
-    kind: "x_users",
-    created: missing.length,
-    createdAuthUsers: 0,
-  } as const;
-  const nextProgress = nextXUsersProgress(input.plan, input.progress, outcome);
+  const missing = plannedSoftwareRows.filter((row) => !existingSoftwareNames.has(row.normalized_name));
+  const outcome = { kind: "softwares", created: missing.length } as const;
+  const nextProgress = nextSoftwareProgress(input.plan, input.progress, outcome);
   const markerAudit = buildMarkerAudit(nextProgress, outcome);
 
   if (missing.length === 0) {
@@ -522,75 +768,33 @@ export async function legacyImportD1ApplyStep(
   }
 
   const now = Math.floor(Date.now() / 1000);
-  const xUserPayload = JSON.stringify(missing);
-  const queuePayload = JSON.stringify([{
-    id: legacyImportRebuildQueueId(identity.targetId, 0),
-    target_type: "users_index",
-    target_id: "global",
-    reason: "legacy_import_x_users",
-    priority: "low",
-  }]);
+  const softwarePayload = JSON.stringify(missing);
   await mutateWithAudit(input.db, {
     preMutationAssertions: [markerAbsenceAssertion],
     mutationStatements: [
       input.db.run(sql`
-        INSERT INTO x_users (
-          id, x_name, icon_url, profile_text, portfolio_contact,
-          youtube_channel_url, other_social_links, creative_start_date, approval_status
+        INSERT INTO software_catalog (
+          id, name, normalized_name, category, usage_count,
+          is_active, is_verified, created_at, updated_at
         )
         SELECT
           json_extract(value, '$.id'),
-          json_extract(value, '$.x_name'),
-          json_extract(value, '$.icon_url'),
-          NULL,
-          NULL,
-          json_extract(value, '$.youtube_channel_url'),
-          json_extract(value, '$.other_social_links'),
-          NULL,
-          'imported'
-        FROM json_each(${xUserPayload})
-      `),
-      input.db.run(sql`
-        INSERT INTO static_rebuild_queue (
-          id, target_type, target_id, reason, priority, status,
-          attempt_count, requested_by_user_id, created_at, updated_at
-        )
-        SELECT
-          json_extract(incoming.value, '$.id'),
-          json_extract(incoming.value, '$.target_type'),
-          json_extract(incoming.value, '$.target_id'),
-          json_extract(incoming.value, '$.reason'),
-          json_extract(incoming.value, '$.priority'),
-          'pending', 0, ${input.actorAuthUserId}, ${now}, ${now}
-        FROM json_each(${queuePayload}) AS incoming
-        WHERE 1 = 1
-        ON CONFLICT(target_type, target_id) WHERE status IN ('pending', 'processing')
-        DO UPDATE SET
-          reason = CASE
-            WHEN static_rebuild_queue.reason = 'video_visibility_update'
-                 AND excluded.reason <> 'video_visibility_update'
-              THEN static_rebuild_queue.reason
-            ELSE excluded.reason
-          END,
-          priority = CASE
-            WHEN static_rebuild_queue.priority = 'high' OR excluded.priority = 'high' THEN 'high'
-            WHEN static_rebuild_queue.priority = 'normal' OR excluded.priority = 'normal' THEN 'normal'
-            ELSE 'low'
-          END,
-          requested_by_user_id = excluded.requested_by_user_id,
-          updated_at = MAX(static_rebuild_queue.updated_at + 1, excluded.updated_at)
+          json_extract(value, '$.name'),
+          json_extract(value, '$.normalized_name'),
+          NULL, 0, 1, 0, ${now}, ${now}
+        FROM json_each(${softwarePayload})
       `),
     ],
-    expectedMutationChanges: [missing.length, 1],
+    expectedMutationChanges: [missing.length],
     audits: [
       {
-        table_name: "x_users_import_batch",
+        table_name: "software_catalog_import_batch",
         target_id: "legacy:" + missing[0].id,
         operation: "CREATE" as const,
         before: null,
-        after: { ids: missing.map((row) => row.id) },
+        after: { rows: missing },
         actor_user_id: input.actorAuthUserId,
-        reason: "旧形式からX名義を新正本へ作成",
+        reason: "旧形式の使用ソフトを新正本辞書へ追加",
         context: "legacy_import",
         retention_class: "long_audit" as const,
         restore_strategy: "none" as const,
