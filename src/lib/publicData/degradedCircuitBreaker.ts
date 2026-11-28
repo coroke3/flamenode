@@ -40,6 +40,18 @@ const lastKvWriteAttemptAt = new Map<string, number>();
 let lastMissWriteKey: string | null = null;
 let openMarkerKnown = false;
 
+// Acknowledged counter writes and OPEN reconciliation are separate receipts.
+// Retain one bounded repair intent, never a request-scoped binding or Promise.
+type OpenRepair = {
+  expiresAt: number;
+  lastAttemptAt: number;
+  stage: "marker" | "cleanup";
+  missCount: number | null;
+};
+let openRepair: OpenRepair | null = null;
+let openRepairInFlight = false;
+let hitCloseInFlight = false;
+
 let localCircuitState: {
   open: boolean;
   openUntil: number;
@@ -64,6 +76,7 @@ function markCircuitClosed(nowMs: number): void {
   localCircuitState.hitStreak = 0;
   localCircuitState.lastKvProbeAt = nowMs;
   openMarkerKnown = false;
+  openRepair = null;
 }
 
 async function waitForKvWriteSlot(key: string): Promise<void> {
@@ -79,8 +92,10 @@ async function waitForKvWriteSlot(key: string): Promise<void> {
 async function putOpenMarkerIfNeeded(
   kv: KVNamespace,
   nowMs: number,
+  expiresAt = Number.POSITIVE_INFINITY,
 ): Promise<void> {
   const key = degradedCircuitOpenKey();
+  if (Date.now() >= expiresAt) throw new Error("degraded circuit repair expired");
   if (
     openMarkerKnown &&
     localCircuitState.open &&
@@ -110,6 +125,7 @@ async function putOpenMarkerIfNeeded(
     return;
   }
 
+  if (Date.now() >= expiresAt) throw new Error("degraded circuit repair expired");
   lastKvWriteAttemptAt.set(key, Date.now());
   try {
     await kv.put(key, "1", {
@@ -175,51 +191,94 @@ function scheduleCircuitBookkeeping(taskFactory: () => Promise<void>): void {
   }
 }
 
+function beginOpenRepair(nowMs: number, missCount: number | null): void {
+  markCircuitOpen(nowMs);
+  openRepair = {
+    expiresAt: localCircuitState.openUntil,
+    lastAttemptAt: Number.NEGATIVE_INFINITY,
+    stage: "marker",
+    missCount,
+  };
+}
+
+async function reconcileOpenRepair(kv: KVNamespace, nowMs: number): Promise<void> {
+  const repair = openRepair;
+  if (!repair || openRepairInFlight || hitCloseInFlight) return;
+  if (nowMs >= repair.expiresAt) {
+    openRepair = null;
+    return;
+  }
+  const elapsed = nowMs - repair.lastAttemptAt;
+  if (elapsed >= 0 && elapsed < DEGRADED_CIRCUIT_KV_WRITE_INTERVAL_MS) return;
+  repair.lastAttemptAt = nowMs;
+  openRepairInFlight = true;
+  try {
+    if (repair.stage === "marker") {
+      await putOpenMarkerIfNeeded(kv, nowMs, repair.expiresAt);
+      if (openRepair !== repair) return;
+      if (repair.missCount === null) {
+        // Preserve the local-threshold fast-open path: no new cleanup/log.
+        openRepair = null;
+        return;
+      }
+      repair.stage = "cleanup";
+    } else if ((await kv.get(degradedCircuitOpenKey())) !== "1") {
+      // An acknowledged marker may have been closed elsewhere.
+      // Cleanup must not reopen that marker.
+      if (openRepair === repair) openRepair = null;
+      return;
+    }
+    await kv.delete(degradedCircuitHitStreakKey());
+    if (openRepair !== repair) return;
+    openRepair = null;
+    try {
+      console.warn(
+        JSON.stringify({
+          service: "degraded-circuit",
+          result: "opened",
+          miss_count: repair.missCount,
+          threshold: DEGRADED_CIRCUIT_MISS_THRESHOLD,
+          window_sec: DEGRADED_CIRCUIT_MISS_WINDOW_SEC,
+        }),
+      );
+    } catch {
+      // Diagnostics are best-effort; preserve successful KV accounting.
+    }
+  } catch {
+    // Retry only the unfinished OPEN stage on a later request.
+  } finally {
+    openRepairInFlight = false;
+  }
+}
+
 async function flushMissCount(
   kv: KVNamespace,
   bucket: number,
   pending: number,
   nowMs: number,
+  acknowledge: () => void,
 ): Promise<void> {
   if ((await kv.get(degradedCircuitOpenKey())) === "1") {
     markCircuitOpen(nowMs);
-    // Keep the bounded miss counter useful for the next window. This is
-    // telemetry/safety state only; failure never affects the public response.
+    // Keep the bounded miss counter useful for the next window.
     await persistMissCounter(kv, bucket, pending);
+    acknowledge();
     return;
   }
   if (localCircuitState.open && nowMs < localCircuitState.openUntil) {
     await putOpenMarkerIfNeeded(kv, nowMs);
     await persistMissCounter(kv, bucket, pending);
+    acknowledge();
     return;
   }
 
   markCircuitClosed(nowMs);
   const nextCount = await persistMissCounter(kv, bucket, pending);
-
+  acknowledge();
   if (!shouldOpenDegradedCircuit(nextCount)) return;
 
-  await putOpenMarkerIfNeeded(kv, nowMs);
-  await kv.delete(degradedCircuitHitStreakKey());
-  // KV miss count, OPEN marker and hit-streak cleanup have already committed.
-  // A diagnostic sink failure must not make the caller re-credit pending misses.
-  try {
-    console.warn(
-      JSON.stringify({
-        service: "degraded-circuit",
-        result: "opened",
-        miss_count: nextCount,
-        threshold: DEGRADED_CIRCUIT_MISS_THRESHOLD,
-        window_sec: DEGRADED_CIRCUIT_MISS_WINDOW_SEC,
-      }),
-    );
-  } catch {
-    // Diagnostics are best-effort; preserve successful KV accounting.
-  }
-}
-
-async function persistOpenMarker(kv: KVNamespace, nowMs: number): Promise<void> {
-  await putOpenMarkerIfNeeded(kv, nowMs);
+  beginOpenRepair(nowMs, nextCount);
+  await reconcileOpenRepair(kv, nowMs);
 }
 
 async function flushPendingMissesIfReady(
@@ -237,12 +296,15 @@ async function flushPendingMissesIfReady(
   state.pending = 0;
   state.lastFlushAt = nowMs;
   missFlushInFlight = true;
+  let acknowledged = false;
   try {
-    await flushMissCount(kv, state.bucket, pending, nowMs);
+    await flushMissCount(kv, state.bucket, pending, nowMs, () => {
+      acknowledged = true;
+    });
   } catch {
     // Keep the count for a later request, but never retain the KV binding or
     // the rejected Promise itself in isolate-global state.
-    if (missAccumulator === state) {
+    if (!acknowledged && missAccumulator === state) {
       state.pending += pending;
       state.lastFlushAt = nowMs;
     }
@@ -257,7 +319,7 @@ export async function isDegradedD1CircuitOpen(): Promise<boolean> {
   const kv = getOperationModeKv();
   if (!kv) return false;
   const now = Date.now();
-  if (localCircuitState.open && now < localCircuitState.openUntil) {
+  if (localCircuitState.open && (now < localCircuitState.openUntil || openRepairInFlight)) {
     return true;
   }
   if (
@@ -287,8 +349,12 @@ export async function recordDegradedCircuitR2Miss(
   if (!kv) return;
   try {
     const bucket = currentDegradedCircuitMinuteBucket(nowMs);
+    if (openRepair) {
+      await reconcileOpenRepair(kv, nowMs);
+      if (openRepair) return;
+    }
     if (localCircuitState.open && nowMs < localCircuitState.openUntil) {
-      if (missAccumulator?.bucket === bucket) {
+      if (missAccumulator?.bucket === bucket && !hitCloseInFlight) {
         await flushPendingMissesIfReady(kv, nowMs);
       }
       return;
@@ -306,19 +372,21 @@ export async function recordDegradedCircuitR2Miss(
     missAccumulator.pending += 1;
     if (
       missAccumulator.observed >= DEGRADED_CIRCUIT_MISS_THRESHOLD &&
-      !localCircuitState.open
+      !localCircuitState.open &&
+      !missFlushInFlight &&
+      !hitCloseInFlight
     ) {
       // Local observation is a fast fail-closed guard. KV only propagates the
       // open marker to other isolates; no request awaits a prior request's I/O.
-      markCircuitOpen(nowMs);
-      await persistOpenMarker(kv, nowMs);
+      beginOpenRepair(nowMs, null);
+      await reconcileOpenRepair(kv, nowMs);
       return;
     }
     const elapsed = nowMs - missAccumulator.lastFlushAt;
     if (elapsed >= 0 && elapsed < DEGRADED_CIRCUIT_MISS_LOCAL_FLUSH_MS) {
       return;
     }
-    await flushPendingMissesIfReady(kv, nowMs);
+    if (!hitCloseInFlight) await flushPendingMissesIfReady(kv, nowMs);
   } catch {
     // Circuit bookkeeping must not take down public pages.
   }
@@ -343,6 +411,9 @@ export function resetDegradedCircuitBookkeepingForTests(): void {
   lastKvWriteAttemptAt.clear();
   lastMissWriteKey = null;
   openMarkerKnown = false;
+  openRepair = null;
+  openRepairInFlight = false;
+  hitCloseInFlight = false;
   localCircuitState = {
     open: false,
     openUntil: 0,
@@ -381,6 +452,9 @@ export async function recordDegradedCircuitR2Hit(): Promise<void> {
     return;
   }
 
+  // A repair and close must not mutate the marker concurrently in this isolate.
+  if (openRepairInFlight || hitCloseInFlight || missFlushInFlight) return;
+  hitCloseInFlight = true;
   try {
     localCircuitState.lastKvProbeAt = now;
     if ((await kv.get(degradedCircuitOpenKey())) !== "1") {
@@ -402,6 +476,8 @@ export async function recordDegradedCircuitR2Hit(): Promise<void> {
     await waitForKvWriteSlot(openKey);
     lastKvWriteAttemptAt.set(openKey, Date.now());
     await kv.delete(openKey);
+    // Do not replay stale OPEN intent after an acknowledged close.
+    openRepair = null;
     await kv.delete(streakKey);
     markCircuitClosed(now);
     console.warn(
@@ -413,5 +489,7 @@ export async function recordDegradedCircuitR2Hit(): Promise<void> {
     );
   } catch {
     // Best effort only.
+  } finally {
+    hitCloseInFlight = false;
   }
 }
