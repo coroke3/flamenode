@@ -7,6 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 import { spawnSync } from "node:child_process";
 import { materializeD1CompatibleMigrations } from "./d1-migration-compat.mjs";
 import {
+  operationModeMirrorFixtureCases, buildOperationModeMirrorFixture, operationModeBannerReceiptMismatch,
   BUDGETS_MS, KINDS, MIN_SAMPLES, QUIET_BASELINE_MAX_MS, ROUTE_INVENTORY, SEED, WARM_KINDS, aggregate, applyBudgetVerdicts, benchmarkRequestHeaders, benchmarkRequestEnv, enforceCpuMeasurementEnvironment, buildPendingScenarios, buildScenarios, createInprocTarget, createReplayTarget, createReplayInputScope, runCold, runScenario, validateCpuProfilerCalibration, eventExportCacheRequestUrls, judge, parseArgs, percentile, playlistResponseMismatch, templateResponseMismatch, renderMarkdown, returnedRows, replayIdentity, replayEvidenceMismatch, requireBenchmarkControl, snapshotReplayResult, snapshotReplayScript, summarize, workerSource,
 } from "./benchmark-api-cpu.mjs";
 
@@ -18,6 +19,49 @@ async function loadReplayWorker(generation, script, body) {
   } }; const sessionMiddleware = () => async () => {};`;
   return (await import("data:text/javascript," + encodeURIComponent(stubs + source))).default;
 }
+
+test("MIG-0639 / #918: lazy operation-mode KV workload catalog has exact UTF-8 sizes and strict banner receipts", () => {
+  const ids = operationModeMirrorFixtureCases();
+  assert.equal(ids.length, 67);
+  assert.equal(new Set(ids).size, 67);
+  for (const id of ids) {
+    const f = buildOperationModeMirrorFixture(id);
+    let parsed;
+    try { parsed = JSON.parse(f.raw); } catch { parsed = null; }
+    assert.equal(parsed !== null && Number.isFinite(parsed.updated_at), f.valid, id);
+    assert.equal(Buffer.byteLength(f.raw, "utf8"), f.bytes, id);
+    if (id === "canonical") {
+      assert.equal(f.bytes, 3062);
+      assert.equal(parsed.reason.length, 500);
+      assert.deepEqual(Object.keys(parsed), ["mode", "reason", "updated_at"]);
+    } else {
+      assert.equal(f.bytes, Number(id.split(":")[1]), id);
+    }
+    if (f.valid) {
+      assert.equal(parsed.mode, f.expected.mode, id);
+      assert.equal(parsed.updated_at, f.updatedAt, id);
+      const reason = f.bytes <= 65536 && typeof parsed.reason === "string" && parsed.reason.length <= 2048 ? parsed.reason : null;
+      assert.equal(reason, f.expected.reason, id);
+    } else {
+      assert.deepEqual(f.expected, { mode: "normal", reason: null }, id);
+    }
+    const body = JSON.stringify(f.expected);
+    const receipt = { status: 200, d1: 0, kvGets: 1, kvPuts: 0, kvDeletes: 0,
+      bytes: Buffer.byteLength(body), body, contentType: "application/json; charset=UTF-8", cacheControl: "no-store" };
+    assert.equal(operationModeBannerReceiptMismatch(f, receipt, "miss"), false, id);
+    assert.equal(operationModeBannerReceiptMismatch(f, receipt, "expiry"), false, id);
+    assert.equal(operationModeBannerReceiptMismatch(f, { ...receipt, kvGets: 0 }, "hit"), false, id);
+    const wrongBody = JSON.stringify({ ...f.expected, extra: true });
+    for (const bad of [{ status: 503 }, { kvGets: 0 }, { d1: 1 }, { kvPuts: 1 }, { kvDeletes: 1 },
+      { cacheControl: "public" }, { contentType: "text/plain" }, { bytes: receipt.bytes + 1 },
+      { kvGets: undefined }, { d1: undefined }, { body: wrongBody, bytes: Buffer.byteLength(wrongBody) }]) {
+      assert.equal(operationModeBannerReceiptMismatch(f, { ...receipt, ...bad }, "miss"), true, id);
+    }
+    assert.equal(operationModeBannerReceiptMismatch(f, receipt, "hit"), true, id);
+    assert.equal(operationModeBannerReceiptMismatch(f, receipt, "unknown"), true, id);
+  }
+  assert.throws(() => buildOperationModeMirrorFixture("plain-reason:999999999"), /unknown/);
+});
 
 test("D1 returned-row proxy counts first/all/raw/batch and preserves per-query sample evidence", () => {
   assert.equal(returnedRows("first", null), 0);

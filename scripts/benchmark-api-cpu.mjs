@@ -30,6 +30,91 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { isMainThread, parentPort, threadId, Worker, workerData } from "node:worker_threads";
 
 // ---------------------------------------------------------------- pure logic
+
+// MIG-0639 / #918 fixture descriptors: generated lazily outside any request timer.
+// This catalog alone does not register a scenario or establish CPU acceptance.
+export function operationModeMirrorFixtureCases() {
+  const sizes = [65535, 65536, 65537, 256 * 1024, 1024 * 1024, 4 * 1024 * 1024];
+  const shapes = ["plain-reason", "multibyte", "escaped-reason", "deep-array", "deep-object", "dense-array", "dense-object", "long-integer", "long-exponent", "duplicate-mode", "malformed-tail"];
+  return ["canonical", ...sizes.flatMap(size => shapes.map(shape => `${shape}:${size}`))];
+}
+
+export function buildOperationModeMirrorFixture(id) {
+  if (!operationModeMirrorFixtureCases().includes(id)) throw new Error("unknown operation-mode mirror fixture");
+  const fixedReason = "bounded note";
+  const mode = "maintenance";
+  const canonicalReason = "\u0001".repeat(500);
+  if (id === "canonical") {
+    // A safe synthetic Unix-seconds timestamp, not a claim about all possible writer timestamps.
+    const raw = JSON.stringify({ mode: "static_only", reason: canonicalReason, updated_at: 99999999999999 });
+    return { id, raw, bytes: Buffer.byteLength(raw, "utf8"), expected: { mode: "static_only", reason: canonicalReason }, valid: true, updatedAt: 99999999999999 };
+  }
+  const [shape, sizeText] = id.split(":");
+  const size = Number(sizeText);
+  // All generated tokens other than the explicit multibyte fill are ASCII.
+  const prefix = '{"mode":"maintenance","updated_at":1,"reason":"bounded note","extra":';
+  const reasonPrefix = '{"mode":"maintenance","updated_at":1,"reason":"';
+  const rootNumber = '{"mode":"maintenance","reason":"bounded note","updated_at":';
+  const fit = (start, unit, end, pad = " ") => {
+    const remaining = size - Buffer.byteLength(start + end, "utf8");
+    if (remaining < 0) throw new Error("fixture size too small");
+    const n = Buffer.byteLength(unit, "utf8");
+    return start + unit.repeat(Math.floor(remaining / n)) + pad.repeat(remaining % n) + end;
+  };
+  const nested = (open, close, maxDepth) => {
+    const remaining = size - prefix.length - 2; // scalar 0 and final root brace
+    const depth = Math.min(maxDepth, Math.floor(remaining / (open.length + close.length)));
+    const core = open.repeat(depth) + "0" + close.repeat(depth);
+    return prefix + core + " ".repeat(size - prefix.length - core.length - 1) + "}";
+  };
+  let raw, valid = true, expectedMode = mode, expectedReason = size <= 65536 ? fixedReason : null, updatedAt = 1;
+  switch (shape) {
+    case "plain-reason":
+      raw = fit(reasonPrefix, "x", '"}', "x"); expectedReason = null; break;
+    case "multibyte":
+      raw = fit(prefix + '"', "日", '"}', "x"); break;
+    case "escaped-reason":
+      raw = fit(reasonPrefix, "\\u0001", '"}', "x"); expectedReason = null; break;
+    case "deep-array":
+      raw = nested("[", "]", 65536); break;
+    case "deep-object":
+      raw = nested('{"x":', "}", 32768); break;
+    case "dense-array":
+      raw = fit(prefix + "[", "0,", "0]}"); break;
+    case "dense-object":
+      raw = fit(prefix + "{", '"x":0,', '"z":0}}'); break;
+    case "long-integer":
+      raw = fit(rootNumber, "9", "}", "9"); valid = false; expectedMode = "normal"; expectedReason = null; updatedAt = null; break;
+    case "long-exponent":
+      raw = fit(rootNumber + "1e-", "9", "}", "9"); updatedAt = 0; break;
+    case "duplicate-mode":
+      raw = fit('{"mode":"normal","updated_at":1,"reason":"bounded note","extra":"', "x", '","mode":"maintenance"}', "x"); break;
+    case "malformed-tail":
+      raw = fit(prefix + '"', "x", '","tail":[1,]}', "x"); valid = false; expectedMode = "normal"; expectedReason = null; updatedAt = null; break;
+    default: throw new Error("unreachable fixture shape");
+  }
+  const bytes = Buffer.byteLength(raw, "utf8");
+  if (bytes !== size) throw new Error("operation-mode mirror fixture byte mismatch");
+  return { id, raw, bytes, expected: { mode: expectedMode, reason: expectedReason }, valid, updatedAt };
+}
+
+export function operationModeBannerReceiptMismatch(fixture, receipt, phase) {
+  if (phase !== "miss" && phase !== "hit" && phase !== "expiry") return true;
+  const expectedReads = phase === "hit" ? 0 : 1;
+  if (receipt?.status !== 200 || receipt.d1 !== 0 || receipt.kvGets !== expectedReads
+    || receipt.kvPuts !== 0 || receipt.kvDeletes !== 0
+    || receipt.cacheControl !== "no-store"
+    || typeof receipt.contentType !== "string" || !/^application\/json(?:\s*;|$)/i.test(receipt.contentType)
+    || typeof receipt.body !== "string" || !Number.isSafeInteger(receipt.bytes)
+    || receipt.bytes !== Buffer.byteLength(receipt.body, "utf8") || receipt.bytes > 64 * 1024) return true;
+  try {
+    const parsed = JSON.parse(receipt.body);
+    return parsed === null || typeof parsed !== "object" || Array.isArray(parsed)
+      || Object.keys(parsed).length !== 2 || parsed.mode !== fixture.expected.mode
+      || parsed.reason !== fixture.expected.reason;
+  } catch { return true; }
+}
+
 export const BUDGETS_MS = Object.freeze({ S2: 7, S3: 8, S4: 2 });
 export const WARM_KINDS = Object.freeze(["normal", "limit", "invalid"]);
 export const KINDS = Object.freeze([...WARM_KINDS, "cold"]);
