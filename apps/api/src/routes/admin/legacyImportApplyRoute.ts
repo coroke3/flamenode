@@ -12,6 +12,10 @@ import {
   LegacyImportPreviewError,
   type LegacyImportApplyProgress,
 } from "@flamenode/server-core/legacyImport/previewStore";
+import {
+  MAX_LEGACY_IMPORT_STEP_BYTES,
+  MAX_LEGACY_VIDEO_EVENTS_PER_VIDEO,
+} from "@flamenode/server-core/legacyImport/cpuBudget";
 import type { AppEnv } from "../../env.ts";
 import type { PreloadedAuditContext } from "@flamenode/server-core/audit/logger";
 import type { EnvValues, QueueWakeHostLoader } from "@flamenode/server-core/ports";
@@ -100,7 +104,69 @@ export async function precommitLegacyImportVisibilityFence(input: {
   }
 }
 
-/** Unmounted RH-002 event replacement effects. Constructing the host is I/O-free. */
+function eventSnapshotCacheKeys(eventId: string): string[] {
+  return [
+    eventComposedObjectKey(eventId), eventBaseObjectKey(eventId),
+    eventSlotsObjectKey(eventId), eventReleaseObjectKey(eventId),
+  ];
+}
+
+// Conservative Free-plan ceiling pending the shared visibility/Cache API
+// acceptance decision (#733). This is not the total request budget: callers
+// must supply the number of cache calls still available BEFORE precommit.
+const LEGACY_IMPORT_CACHE_API_MAX_CALLS = 50;
+
+type LegacyImportVideoCacheInput = {
+  videoId: string;
+  beforeYoutubeId: string | null;
+  afterYoutubeId: string | null;
+  beforeEventIds: readonly string[];
+  afterEventIds: readonly string[];
+  remainingCacheCalls: number;
+};
+
+/**
+ * U02at: preflight the entire video cache fanout before any visibility mutation.
+ * CURRENT deletes old/new video alias keys and four event snapshot keys.
+ * Include the canonical ID and both old/new relation/primary sets so a removed
+ * event or alias is not omitted. Do not add export/global keys here: those are
+ * not part of CURRENT's video-import cache delete path, and any expanded
+ * invalidation requires a new reviewed budget. The caller must separately
+ * establish cross-colo/read-time fence safety and actual request headroom.
+ *
+ * This pure planner neither authorizes transitions nor truncates the set.
+ */
+export function planLegacyImportVideoCacheInvalidation(input: LegacyImportVideoCacheInput) {
+  const {
+    videoId, beforeYoutubeId, afterYoutubeId, beforeEventIds, afterEventIds, remainingCacheCalls,
+  } = input;
+  const validId = (id: unknown): id is string => typeof id === "string" && id.length > 0;
+  const maxEvents = MAX_LEGACY_VIDEO_EVENTS_PER_VIDEO + 1; // primary plus relations
+  if (!validId(videoId) ||
+      (beforeYoutubeId !== null && !validId(beforeYoutubeId)) ||
+      (afterYoutubeId !== null && !validId(afterYoutubeId)) ||
+      !Array.isArray(beforeEventIds) || !Array.isArray(afterEventIds) ||
+      beforeEventIds.length > maxEvents || afterEventIds.length > maxEvents ||
+      !beforeEventIds.every(validId) || !afterEventIds.every(validId) ||
+      !Number.isSafeInteger(remainingCacheCalls) || remainingCacheCalls < 0 ||
+      remainingCacheCalls > LEGACY_IMPORT_CACHE_API_MAX_CALLS ||
+      new TextEncoder().encode(JSON.stringify(input)).byteLength > MAX_LEGACY_IMPORT_STEP_BYTES) {
+    throw new Error("legacy_import_video_cache_plan_invalid");
+  }
+  const videoIds = [...new Set([videoId, beforeYoutubeId, afterYoutubeId]
+    .filter((id): id is string => id !== null))];
+  const eventIds = [...new Set([...beforeEventIds, ...afterEventIds])];
+  const keys = [...new Set([
+    ...videoIds.map((id) => `videos/${id}.json`),
+    ...eventIds.flatMap(eventSnapshotCacheKeys),
+  ])];
+  return {
+    keys, requiredDeletes: keys.length, remainingCacheCalls,
+    fitsBudget: keys.length <= remainingCacheCalls,
+  };
+}
+
+/** Unmounted RH-002 event/video replacement effects. Construction is I/O-free. */
 export function createLegacyImportEventEffects(
   bucket: VisibilityManifestBucket | null | undefined,
   readEdgeCache: PublicJsonCacheDeleteHost["readEdgeCache"] =
@@ -133,6 +199,21 @@ export function createLegacyImportEventEffects(
   };
   return {
     fenceHost,
+    // Preparation is I/O-free, before the future R2 fence/D1 transaction.
+    // An over-budget plan has no executable cache effect. No partial delete.
+    prepareVideoCacheInvalidation: (input: LegacyImportVideoCacheInput) => {
+      const plan = planLegacyImportVideoCacheInvalidation(input);
+      if (!plan.fitsBudget) {
+        return { status: "blocked" as const, requiredDeletes: plan.requiredDeletes };
+      }
+      // Keep a private immutable copy; callers cannot alter the approved set.
+      const keys = [...plan.keys];
+      return {
+        status: "ready" as const,
+        requiredDeletes: plan.requiredDeletes,
+        invalidateAfterCommit: () => deletePublicJsonCaches(keys, cacheHost),
+      };
+    },
     invalidateEventCaches: async (eventId: string) => {
       const exportKeys = (["v5", "legacy"] as const).flatMap((format) =>
         EVENT_EXPORT_REFRESH_MINUTES.map((refreshMinutes) =>
@@ -140,10 +221,7 @@ export function createLegacyImportEventEffects(
         ),
       );
       await deletePublicJsonCaches([
-        eventComposedObjectKey(eventId),
-        eventBaseObjectKey(eventId),
-        eventSlotsObjectKey(eventId),
-        eventReleaseObjectKey(eventId),
+        ...eventSnapshotCacheKeys(eventId),
         ...exportKeys,
       ], cacheHost);
     },

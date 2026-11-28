@@ -17,6 +17,7 @@ import {
   createLegacyImportApplyRoutes,
   createLegacyImportEventEffects,
   precommitLegacyImportVisibilityFence,
+  planLegacyImportVideoCacheInvalidation,
 } from "../src/routes/admin/legacyImportApplyRoute.ts";
 import { preCommitEventVisibilityTransition } from "@flamenode/server-core/visibility/eventTransition";
 import {
@@ -547,6 +548,88 @@ test("MIG-0645 U02ag event cache host: four snapshot and eight export keys, best
   assert.equal(fixture.attempts.length, 0);
 });
 
+test("MIG-0645 U02at video cache plan: old/new aliases and removed/added events; local best effort", async () => {
+  const deleted = [];
+  const fixture = manifestBucket();
+  const effects = createLegacyImportEventEffects(fixture.bucket, () => ({
+    async delete(url) {
+      deleted.push(url);
+      if (deleted.length === 1) throw new Error("test-only cache failure");
+      return true;
+    },
+  }));
+  const input = {
+    videoId: "video-1", beforeYoutubeId: "old-youtube", afterYoutubeId: "new-youtube",
+    beforeEventIds: ["removed", "shared", "shared"], afterEventIds: ["shared", "added"],
+    remainingCacheCalls: 15,
+  };
+  const keys = [
+    "videos/video-1.json", "videos/old-youtube.json", "videos/new-youtube.json",
+    ...["removed", "shared", "added"].flatMap((id) => [
+      eventComposedObjectKey(id), eventBaseObjectKey(id), eventSlotsObjectKey(id), eventReleaseObjectKey(id),
+    ]),
+  ];
+  const plan = planLegacyImportVideoCacheInvalidation(input);
+  assert.deepEqual(plan.keys, keys);
+  assert.equal(plan.requiredDeletes, 15);
+  assert.equal(plan.fitsBudget, true);
+  const prepared = effects.prepareVideoCacheInvalidation(input);
+  assert.equal(prepared.status, "ready");
+  assert.equal(prepared.requiredDeletes, 15);
+  assert.equal(deleted.length, 0, "planning performs no Cache API calls");
+  input.beforeEventIds.push("late-change");
+  await prepared.invalidateAfterCommit();
+  assert.deepEqual(deleted, keys.map(publicJsonCacheUrl), "failure must not omit later keys");
+  assert.equal(fixture.reads(), 0);
+  assert.equal(fixture.attempts.length, 0, "no R2 operations");
+});
+
+test("MIG-0645 U02at video cache budget: exact 50, one above, existing call consumption, no truncation", async () => {
+  let deletes = 0;
+  const effects = createLegacyImportEventEffects(undefined, () => ({
+    async delete() {
+      deletes++;
+      if (deletes > 50) throw new Error("fixture cache quota exceeded");
+      return true;
+    },
+  }));
+  const events = Array.from({ length: 12 }, (_, i) => "event-" + i);
+  const exact = {
+    videoId: "video-1", beforeYoutubeId: "same-youtube", afterYoutubeId: "same-youtube",
+    beforeEventIds: events.slice(0, 6), afterEventIds: events.slice(6),
+    remainingCacheCalls: 50,
+  };
+  const exactPlan = planLegacyImportVideoCacheInvalidation(exact);
+  assert.equal(exactPlan.requiredDeletes, 50);
+  assert.equal(exactPlan.fitsBudget, true);
+  const over = { ...exact, afterYoutubeId: "new-youtube" };
+  const overPlan = planLegacyImportVideoCacheInvalidation(over);
+  assert.equal(overPlan.requiredDeletes, 51);
+  assert.equal(overPlan.keys.length, 51, "never truncate a privacy-sensitive key set");
+  assert.equal(overPlan.fitsBudget, false);
+  assert.deepEqual(effects.prepareVideoCacheInvalidation(over), { status: "blocked", requiredDeletes: 51 });
+  assert.deepEqual(effects.prepareVideoCacheInvalidation({ ...exact, remainingCacheCalls: 49 }),
+    { status: "blocked", requiredDeletes: 50 });
+  assert.equal(deletes, 0, "an over-budget candidate is not executable");
+  const prepared = effects.prepareVideoCacheInvalidation(exact);
+  assert.equal(prepared.status, "ready");
+  await prepared.invalidateAfterCommit();
+  assert.equal(deletes, 50);
+
+  const minimal = { ...exact, beforeYoutubeId: null, afterYoutubeId: null, beforeEventIds: [], afterEventIds: [] };
+  assert.deepEqual(planLegacyImportVideoCacheInvalidation(minimal).keys, ["videos/video-1.json"]);
+  assert.equal(effects.prepareVideoCacheInvalidation({ ...minimal, remainingCacheCalls: 0 }).status, "blocked");
+  for (const invalid of [
+    { ...minimal, remainingCacheCalls: 51 }, { ...minimal, remainingCacheCalls: -1 },
+    { ...minimal, remainingCacheCalls: NaN }, { ...minimal, videoId: "" },
+    { ...minimal, beforeEventIds: Array(18).fill("same") },
+    { ...minimal, afterEventIds: [""] }, { ...minimal, videoId: "x".repeat(128 * 1024) },
+  ]) {
+    assert.throws(() => effects.prepareVideoCacheInvalidation(invalid), /legacy_import_video_cache_plan_invalid/);
+  }
+  assert.equal(deletes, 50, "rejected or unexecuted plans never delete");
+});
+
 test("MIG-0645 U02 apply Hono: authenticated request DB and owner reach exactly one step, then R2 advances", async () => {
   const { bucket, record } = previewBucket();
   const { credential, form } = await createApplyCredential(bucket);
@@ -555,6 +638,7 @@ test("MIG-0645 U02 apply Hono: authenticated request DB and owner reach exactly 
     applyStep: async (input) => {
       assert.equal(typeof input.db.select, "function", "request-scoped Drizzle DB required");
       assert.equal(typeof input.eventEffects.invalidateEventCaches, "function");
+      assert.equal(typeof input.eventEffects.prepareVideoCacheInvalidation, "function");
       const manifest = await input.eventEffects.fenceHost.manifest.read();
       assert.equal(manifest.etag, null);
       assert.deepEqual(manifest.manifest.entities, []);
