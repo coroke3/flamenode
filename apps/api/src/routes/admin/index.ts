@@ -21,7 +21,7 @@ import { adminReadGuardMiddleware, onlyReads } from "../../middleware/adminReadG
 import { dbMiddleware } from "../../middleware/db.ts";
 import { announcementRoutes } from "./announcements.ts";
 import { apiEndpointRoutes } from "./apiEndpoints.ts";
-import { auditAdminRoutes } from "./audit.ts";
+import { auditAdminRoutes, auditRestoreCandidateRoutes } from "./audit.ts";
 import { listEventTemplatesForAdminApi } from "../events/templates.ts";
 import { costGuardAdminRoutes } from "./costGuard.ts";
 import { adminEventGroupRoutes } from "./eventGroups.ts";
@@ -32,7 +32,11 @@ import { adminUsersRoutes, adminXUsersRoutes } from "./users.ts";
 import { mountMig0643AdminRoutes } from "./mig0643.ts";
 
 export function createAdminRoutes(
-  options: { session?: MiddlewareHandler<AppEnv> } = {},
+  options: {
+    session?: MiddlewareHandler<AppEnv>;
+    /** Test-only MIG-0662 candidate; never passed by deployed app.ts. */
+    enableAuditRestoreCandidate?: boolean;
+  } = {},
 ): Hono<AppEnv> {
   const admin = new Hono<AppEnv>();
   const originOptions = (c: Context<AppEnv>) => ({
@@ -60,6 +64,11 @@ export function createAdminRoutes(
   admin.route("/announcements", announcementRoutes);
   admin.route("/api-endpoints", apiEndpointRoutes);
   admin.route("/audit", auditAdminRoutes);
+  // MIG-0662 STOP: isolate SA-011 from production/default route registration.
+  // Only explicit test harnesses mount this unapproved write-capable candidate.
+  if (options.enableAuditRestoreCandidate === true) {
+    admin.route("/audit", auditRestoreCandidateRoutes);
+  }
   admin.route("/cost-guard", costGuardAdminRoutes);
   // SA-025..030: event-group candidate search (GET) and group/membership writes.
   admin.route("/event-groups", adminEventGroupRoutes);
