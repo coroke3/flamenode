@@ -16,7 +16,7 @@ const CANDIDATES = [
   ["DELETE", "/api/manage/events/ev-1/slots/a"],
   ["POST", "/api/manage/events/ev-1/slots/a/release"],
   ["POST", "/api/manage/events/ev-1/slots/a/force-release-submitted"],
-  ["POST", "/api/manage/events/ev-1/slots/a/release-submitted-video"],
+  ["POST", "/api/manage/events/ev-1/slots/a/release-video-keep-reservation"],
 ];
 
 const content = readFileSync(new URL("../src/routes/manage/index.ts", import.meta.url), "utf8");
@@ -107,7 +107,7 @@ const EXPECTED_HANDLER_STATUS_WITHOUT_SLOTS_TABLE = new Map([
   ["/api/manage/events/ev-1/slots/generate-chunk", 400],
   ["/api/manage/events/ev-1/slots/delete-available-chunk", 503],
   ["/api/manage/events/ev-1/slots/a/force-release-submitted", 503],
-  ["/api/manage/events/ev-1/slots/a/release-submitted-video", 503],
+  ["/api/manage/events/ev-1/slots/a/release-video-keep-reservation", 503],
 ]);
 
 /**
