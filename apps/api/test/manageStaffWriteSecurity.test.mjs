@@ -27,7 +27,7 @@ const csv = (preset = "public_staff") => ({
   }],
 });
 
-function setup({ user = ADMIN, fault, failQueue = false, failRouteDb = false } = {}) {
+function setup({ user = ADMIN, fault, failQueue = false, failRouteDb = false, routeDbError } = {}) {
   const { db, sqlite, stats } = createAdminD1();
   seedBase(sqlite);
   seedEvent(sqlite);
@@ -89,16 +89,22 @@ function setup({ user = ADMIN, fault, failQueue = false, failRouteDb = false } =
     c.set("user", user);
     c.set("db", drizzle(c.env.DB, { schema }));
     c.set("actorSnapshotJsonById", { [user.id]: JSON.stringify({ id: user.id, role: user.role }) });
-    if (failRouteDb) {
-      // Inject at the route's post-commit boundary, independently of whether
-      // SEC-782's shared enqueue implementation catches its own diagnostics.
+    if (failRouteDb || routeDbError !== undefined) {
+      // Inject directly at the route's context boundary. The pre-write fault
+      // bypasses staffPreparationRead; the post-commit fault remains independent
+      // of whether SEC-782's shared enqueue catches its own diagnostics.
       const get = c.get.bind(c);
       c.get = (key) => {
-        if (key === "db" && receipt.routeFaults === 0 &&
-            count("audit_logs") === initial[2] + 2) {
-          receipt.routeFaults++;
-          receipt.committedAtRouteFailure = before();
-          throw new Error(CANARY);
+        if (key === "db" && receipt.routeFaults === 0) {
+          if (routeDbError !== undefined) {
+            receipt.routeFaults++;
+            throw routeDbError;
+          }
+          if (failRouteDb && count("audit_logs") === initial[2] + 2) {
+            receipt.routeFaults++;
+            receipt.committedAtRouteFailure = before();
+            throw new Error(CANARY);
+          }
         }
         return get(key);
       };
@@ -197,9 +203,10 @@ test("SEC-800: direct preparation reads never classify provider text as a domain
 });
 
 test("SEC-800: hostile error inspection and permission diagnostics fail closed", async () => {
+  let inspections = 0;
   const getter = new Error();
-  Object.defineProperty(getter, "message", { get() { throw new Error(CANARY); } });
-  const proxy = new Proxy(new Error(), { getPrototypeOf() { throw new Error(CANARY); } });
+  Object.defineProperty(getter, "message", { get() { inspections++; throw new Error(CANARY); } });
+  const proxy = new Proxy(new Error(), { getPrototypeOf() { inspections++; throw new Error(CANARY); } });
   for (const [error, user, match, expectedLog] of [
     [getter, ADMIN, staffRead, "staff upsert unavailable"],
     [proxy, ADMIN, staffRead, "staff upsert unavailable"],
@@ -215,6 +222,31 @@ test("SEC-800: hostile error inspection and permission diagnostics fail closed",
         assert.deepEqual(errors, [["[MIG-0654] " + expectedLog]]);
       });
       assert.equal(s.receipt.readFaults, 1);
+      assert.equal(s.stats.batches, 0);
+      assert.deepEqual(s.before(), s.initial);
+    } finally {
+      s.sqlite.close();
+    }
+  }
+  // Direct preparation failures discard the exception before classification.
+  assert.equal(inspections, 0);
+  // The transfer handler accesses its db context inside the mutation catch,
+  // outside staffPreparationRead. Both hostile values must actually reach the
+  // guarded classifier, rather than being hidden by the direct-read wrapper.
+  for (const error of [getter, proxy]) {
+    const s = setup({ routeDbError: error });
+    const previousInspections = inspections;
+    try {
+      await withThrowingDiagnostics(async ({ errors }) => {
+        const result = await s.send("POST", "/owner-transfer", transfer);
+        assert.equal(result.status, 503, await result.clone().text());
+        assert.equal(result.headers.get("cache-control"), "private, no-store");
+        assert.deepEqual(await result.json(), { ok: false, message: GENERIC });
+        assert.deepEqual(errors, [["[MIG-0654] owner transfer unavailable"]]);
+      });
+      assert.equal(inspections, previousInspections + 1);
+      assert.equal(s.receipt.routeFaults, 1);
+      assert.equal(s.receipt.readFaults, 0);
       assert.equal(s.stats.batches, 0);
       assert.deepEqual(s.before(), s.initial);
     } finally {
