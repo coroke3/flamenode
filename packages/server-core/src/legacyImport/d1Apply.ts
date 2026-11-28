@@ -8,12 +8,20 @@ import {
 import { mutateWithAudit } from "../audit/mutate.ts";
 import type { ServerCoreDb } from "../db.ts";
 import type { QueueWakeHostLoader } from "../ports.ts";
-import type { CanonicalLegacyPlan, LegacyImportStrategy } from "./normalize.ts";
+import {
+  MAX_LEGACY_CUSTOM_ANSWERS_PER_VIDEO,
+  type CanonicalLegacyPlan,
+  type LegacyImportStrategy,
+} from "./normalize.ts";
 import type { LegacyImportApplyProgress } from "./previewStore.ts";
 import {
   MAX_LEGACY_EVENT_STAFF_PER_EVENT,
   MAX_LEGACY_IMPORT_STEP_BYTES,
   MAX_LEGACY_IMPORT_SELECTED_ROWS,
+  MAX_LEGACY_VIDEO_EVENTS_PER_VIDEO,
+  MAX_LEGACY_VIDEO_MEMBERS_PER_VIDEO,
+  MAX_LEGACY_VIDEO_CHAPTERS_PER_VIDEO,
+  MAX_LEGACY_VIDEO_SOFTWARES_PER_VIDEO,
 } from "./cpuBudget.ts";
 import {
   LEGACY_IMPORT_SOFTWARE_STEP_SIZE,
@@ -312,6 +320,165 @@ function nextQuestionProgress(
     next.index = 0;
   }
   return next;
+}
+
+/**
+ * U02ak: bounded, I/O-free (except local SHA-256) new-video write projection.
+ * Keep the object field order byte-for-byte equal to CURRENT's managedVideoSnapshot
+ * and related-row projections, so future replace_imported provenance works across
+ * Next and Hono. The caller must obtain the creator/catalog snapshot from D1 and
+ * atomically assert it, question definitions, relation existence and row absence
+ * before using this projection. This helper alone authorizes no writes.
+ */
+export async function projectLegacyVideoCreate(input: {
+  plan: CanonicalLegacyPlan;
+  videoId: string;
+  creator: { profile_text: string | null; other_social_links: string | null } | null;
+  softwareIds: ReadonlyMap<string, string>;
+  now: number;
+}) {
+  const { plan, videoId, creator, softwareIds, now } = input;
+  const matches = plan.videos.filter((row) => row.id === videoId);
+  if (matches.length !== 1 || !Number.isSafeInteger(now) || now < 0) {
+    return fixedFailure("旧形式インポートの作品planが不正です。");
+  }
+  const video = matches[0];
+  const relations = plan.videoEvents.filter((row) => row.video_id === videoId);
+  const members = plan.videoMembers.filter((row) => row.video_id === videoId);
+  const chapters = plan.videoChapters.filter((row) => row.video_id === videoId);
+  const softwareLabels = plan.videoSoftwares.filter((row) => row.video_id === videoId);
+  const answers = plan.videoCustomAnswers.filter((row) => row.video_id === videoId);
+  const unique = <T>(rows: readonly T[], key: (row: T) => string) =>
+    new Set(rows.map(key)).size === rows.length;
+  if (
+    relations.length > MAX_LEGACY_VIDEO_EVENTS_PER_VIDEO ||
+    members.length > MAX_LEGACY_VIDEO_MEMBERS_PER_VIDEO ||
+    chapters.length > MAX_LEGACY_VIDEO_CHAPTERS_PER_VIDEO ||
+    softwareLabels.length > MAX_LEGACY_VIDEO_SOFTWARES_PER_VIDEO ||
+    answers.length > MAX_LEGACY_CUSTOM_ANSWERS_PER_VIDEO ||
+    !unique(relations, (row) => row.event_id) ||
+    !unique(members, (row) => row.id) ||
+    !unique(chapters, (row) => row.id) ||
+    !unique(answers, (row) => JSON.stringify([row.event_id, row.question_id]))
+  ) {
+    return fixedFailure("旧形式インポートの作品関連行が重複または上限超過です。");
+  }
+  const relationIds = new Set(relations.map((row) => row.event_id));
+  const questionIds = new Set(answers.map((row) => row.question_id));
+  const plannedQuestions = plan.eventCustomQuestions.filter((row) => questionIds.has(row.id));
+  if (
+    plannedQuestions.length !== questionIds.size ||
+    !unique(plannedQuestions, (row) => row.id) ||
+    answers.some((answer) => !relationIds.has(answer.event_id) ||
+      !plannedQuestions.some((q) => q.id === answer.question_id &&
+        q.event_id === answer.event_id && q.question_key === answer.question_key))
+  ) {
+    return fixedFailure("旧形式インポートの作品カスタム質問snapshotが不正です。");
+  }
+  if (new TextEncoder().encode(JSON.stringify({
+    video, relations, members, chapters, softwareLabels, answers, plannedQuestions,
+  })).byteLength > MAX_LEGACY_IMPORT_STEP_BYTES) {
+    return fixedFailure("旧形式インポートの作品ステップが上限超過です。");
+  }
+  // Explicit order is part of the CURRENT SHA-256 receipt contract.
+  const managed = {
+    id: video.id,
+    primary_event_id: video.primary_event_id,
+    creator_x_user_id: video.creator_x_user_id,
+    submitted_by_user_id: SYSTEM_USER_ID,
+    collaboration_type: video.collaboration_type,
+    part: null,
+    source_type: video.source_type,
+    creator_display_name: video.creator_display_name,
+    creator_display_name_yomi: video.creator_display_name_yomi,
+    creator_icon_url: video.creator_icon_url,
+    creator_youtube_channel_url: video.creator_youtube_channel_url,
+    creator_profile_text: video.creator_profile_text ?? creator?.profile_text ?? null,
+    creator_other_social_links: video.creator_other_social_links ?? creator?.other_social_links ?? null,
+    title: video.title,
+    music: video.music,
+    credit: video.credit,
+    music_reference_url: video.music_reference_url,
+    closing_comment: video.closing_comment,
+    youtube_video_id: video.youtube_video_id,
+    intro_comment: video.intro_comment,
+    highlights: video.highlights,
+    production_story: video.production_story,
+    visibility_status: video.visibility_status,
+    scheduling_type: "manual" as const,
+    scheduled_time: video.scheduled_time,
+    created_at: video.created_at,
+  };
+  const nextEvents = relations.map((row) => ({
+    video_id: row.video_id, event_id: row.event_id,
+  })).sort((left, right) => left.event_id.localeCompare(right.event_id));
+  const nextMembers = members.map((row) => ({
+    id: row.id, video_id: row.video_id, x_user_id: row.x_user_id,
+    name: row.name, role: row.role, comment: null, order_index: row.order_index,
+    can_edit: 0, is_public_member: 1, edit_granted_by_auth_user_id: null,
+    edit_granted_at: null, edit_updated_at: null,
+  })).sort((left, right) => left.id.localeCompare(right.id));
+  const nextChapters = chapters.map((row) => ({
+    id: row.id, video_id: row.video_id, x_user_id: row.x_user_id,
+    chapter_time: row.chapter_time, chapter_label: row.chapter_label, note: row.note,
+    visibility: "public" as const, created_at: now, updated_at: now,
+  })).sort((left, right) => left.id.localeCompare(right.id));
+  const nextSoftwares = softwareLabels.map((row) => {
+    const softwareId = softwareIds.get(normalizeSoftwareName(row.label));
+    if (!softwareId) return fixedFailure("旧形式インポートの使用ソフトがcatalogに存在しません。");
+    return { video_id: videoId, software_id: softwareId, raw_label: row.label };
+  }).sort((left, right) => left.software_id.localeCompare(right.software_id));
+  if (!unique(nextSoftwares, (row) => row.software_id)) {
+    return fixedFailure("旧形式インポートの使用ソフトIDが重複しています。");
+  }
+  const nextMetadata = video.youtube_video_id ? [{
+    video_id: videoId, youtube_privacy_status: null, youtube_availability_status: null,
+    duration_seconds: null, view_count: 0, synced_at: null, sync_status: "pending" as const,
+    sync_error: null, updated_at: now,
+  }] : [];
+  const nextAnswers = answers.map((row) => ({
+    video_id: row.video_id, event_id: row.event_id, question_id: row.question_id,
+    answer_text: row.answer_text, answer_json: row.answer_json,
+    created_at: now, updated_at: now,
+  })).sort((left, right) =>
+    left.event_id.localeCompare(right.event_id) || left.question_id.localeCompare(right.question_id),
+  );
+  const rebuildEventIds = [...new Set(
+    [video.primary_event_id, ...nextEvents.map((row) => row.event_id)]
+      .filter((eventId): eventId is string => !!eventId),
+  )];
+  const rebuildTargets = [
+    { target_type: "video", target_id: videoId, priority: "high" },
+    ...["top_recommended", "top_latest", "top_nostalgic", "top_stats", "recommend_core",
+      "list_recent", "list_popular", "search_index"].map((target_type) =>
+        ({ target_type, target_id: "global", priority: "normal" })),
+    ...(video.creator_x_user_id
+      ? [{ target_type: "user", target_id: video.creator_x_user_id, priority: "normal" }]
+      : []),
+    ...rebuildEventIds.flatMap((eventId) => ["event_base", "event_slots", "event_release"]
+      .map((target_type) => ({ target_type, target_id: eventId, priority: "high" }))),
+  ].map((row) => ({ ...row, reason: "legacy_import" }));
+  // Fallback creator fields may come from D1 rather than the bounded preview.
+  // Bound the final projection as well, before hashing or building SQL.
+  const projected = {
+    managed, nextEvents, nextMembers, nextChapters, nextSoftwares, nextMetadata,
+    nextAnswers, plannedQuestions, rebuildTargets,
+  };
+  if (new TextEncoder().encode(JSON.stringify(projected)).byteLength > MAX_LEGACY_IMPORT_STEP_BYTES) {
+    return fixedFailure("旧形式インポートの作品書込snapshotが上限超過です。");
+  }
+  const [managed_digest, events_digest, members_digest, chapters_digest,
+    softwares_digest, metadata_digest, custom_answers_digest] = await Promise.all([
+    managed, nextEvents, nextMembers, nextChapters, nextSoftwares, nextMetadata, nextAnswers,
+  ].map(snapshotDigest));
+  return {
+    ...projected,
+    snapshotProof: {
+      entity_kind: "video" as const, managed_digest, events_digest, members_digest,
+      chapters_digest, softwares_digest, metadata_digest, custom_answers_digest,
+    },
+    youtubeWakeRequired: !!video.youtube_video_id,
+  };
 }
 
 /** The U02aj video boundary only permits marker-only empty/confirmed-skip steps. */

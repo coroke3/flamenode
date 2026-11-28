@@ -32,6 +32,7 @@ import {
   eventReleaseObjectKey,
 } from "@flamenode/server-core/publicData/eventDetailCore";
 import { legacyImportD1ApplyStep } from "../src/routes/admin/legacyImportD1ApplyAdapter.ts";
+import { projectLegacyVideoCreate } from "@flamenode/server-core/legacyImport/d1Apply";
 import { createAdminD1, seedBase, seedEvent } from "./helpers/sqliteD1.mjs";
 
 const SITE = "https://app.flamenode.example";
@@ -1198,6 +1199,102 @@ function extendLegacyImportQuestionSchema(sqlite) {
     CREATE TABLE videos (id TEXT PRIMARY KEY);
   `);
 }
+
+test("MIG-0645 U02ak: new video projection matches CURRENT audit key order and related-row defaults", async () => {
+  const plan = questionPlan(2);
+  const video = {
+    id: "video-projection", primary_event_id: "ev-1", creator_x_user_id: "creator-1",
+    collaboration_type: "collab", source_type: "youtube", creator_display_name: "Creator",
+    creator_display_name_yomi: null, creator_icon_url: null, creator_youtube_channel_url: null,
+    creator_profile_text: null, creator_other_social_links: "legacy-links",
+    title: "Video", music: null, credit: null, music_reference_url: null, closing_comment: null,
+    youtube_video_id: "abcdefghijk", intro_comment: null, highlights: null, production_story: null,
+    visibility_status: "private", scheduling_type: "manual", scheduled_time: null, created_at: 100,
+  };
+  plan.videos.push(video);
+  plan.videoEvents.push(
+    { video_id: video.id, event_id: "ev-2" }, { video_id: video.id, event_id: "ev-1" },
+  );
+  plan.videoMembers.push(
+    { id: "member-b", video_id: video.id, x_user_id: null, name: "B", role: null, order_index: 1 },
+    { id: "member-a", video_id: video.id, x_user_id: "creator-1", name: "A", role: "Editor", order_index: 0 },
+  );
+  plan.videoChapters.push({ id: "chapter", video_id: video.id, x_user_id: null, chapter_time: 5, chapter_label: "Intro", note: null, visibility: "public" });
+  plan.videoSoftwares.push({ video_id: video.id, label: "  Test   Software " });
+  plan.videoCustomAnswers.push(
+    { video_id: video.id, event_id: "ev-1", question_id: "question-1", question_key: "question_1", answer_text: "B", answer_json: null },
+    { video_id: video.id, event_id: "ev-1", question_id: "question-0", question_key: "question_0", answer_text: "A", answer_json: null },
+  );
+  const args = {
+    plan, videoId: video.id, creator: { profile_text: "fallback-profile", other_social_links: "fallback-links" },
+    softwareIds: new Map([["test software", "software-1"]]), now: 200,
+  };
+  const before = JSON.stringify(plan);
+  const projected = await projectLegacyVideoCreate(args);
+  assert.equal(JSON.stringify(plan), before, "pure projection never changes the claimed plan");
+  const expectedManaged = {
+    id: video.id, primary_event_id: "ev-1", creator_x_user_id: "creator-1",
+    submitted_by_user_id: "system_legacy_import", collaboration_type: "collab", part: null,
+    source_type: "youtube", creator_display_name: "Creator", creator_display_name_yomi: null,
+    creator_icon_url: null, creator_youtube_channel_url: null,
+    creator_profile_text: "fallback-profile", creator_other_social_links: "legacy-links",
+    title: "Video", music: null, credit: null, music_reference_url: null, closing_comment: null,
+    youtube_video_id: "abcdefghijk", intro_comment: null, highlights: null, production_story: null,
+    visibility_status: "private", scheduling_type: "manual", scheduled_time: null, created_at: 100,
+  };
+  assert.equal(JSON.stringify(projected.managed), JSON.stringify(expectedManaged));
+  assert.deepEqual(projected.nextEvents, [
+    { video_id: video.id, event_id: "ev-1" }, { video_id: video.id, event_id: "ev-2" },
+  ]);
+  assert.deepEqual(projected.nextMembers[0], {
+    id: "member-a", video_id: video.id, x_user_id: "creator-1", name: "A", role: "Editor",
+    comment: null, order_index: 0, can_edit: 0, is_public_member: 1,
+    edit_granted_by_auth_user_id: null, edit_granted_at: null, edit_updated_at: null,
+  });
+  assert.deepEqual(projected.nextChapters, [{
+    id: "chapter", video_id: video.id, x_user_id: null, chapter_time: 5,
+    chapter_label: "Intro", note: null, visibility: "public", created_at: 200, updated_at: 200,
+  }]);
+  assert.deepEqual(projected.nextSoftwares, [{
+    video_id: video.id, software_id: "software-1", raw_label: "  Test   Software ",
+  }]);
+  assert.deepEqual(projected.nextMetadata, [{
+    video_id: video.id, youtube_privacy_status: null, youtube_availability_status: null,
+    duration_seconds: null, view_count: 0, synced_at: null, sync_status: "pending",
+    sync_error: null, updated_at: 200,
+  }]);
+  assert.deepEqual(projected.nextAnswers, [
+    { video_id: video.id, event_id: "ev-1", question_id: "question-0", answer_text: "A", answer_json: null, created_at: 200, updated_at: 200 },
+    { video_id: video.id, event_id: "ev-1", question_id: "question-1", answer_text: "B", answer_json: null, created_at: 200, updated_at: 200 },
+  ]);
+  const digest = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+  assert.deepEqual(projected.snapshotProof, {
+    entity_kind: "video", managed_digest: digest(expectedManaged),
+    events_digest: digest(projected.nextEvents), members_digest: digest(projected.nextMembers),
+    chapters_digest: digest(projected.nextChapters), softwares_digest: digest(projected.nextSoftwares),
+    metadata_digest: digest(projected.nextMetadata), custom_answers_digest: digest(projected.nextAnswers),
+  });
+  assert.equal(projected.rebuildTargets.length, 16);
+  assert.deepEqual(projected.rebuildTargets.filter((row) => row.target_id === "ev-1").map((row) => row.target_type),
+    ["event_base", "event_slots", "event_release"]);
+  assert.equal(projected.youtubeWakeRequired, true);
+  assert.deepEqual(await projectLegacyVideoCreate(args), projected);
+
+  await assert.rejects(projectLegacyVideoCreate({ ...args, softwareIds: new Map() }));
+  await assert.rejects(projectLegacyVideoCreate({ ...args, creator: { profile_text: "x".repeat(128 * 1024), other_social_links: null } }));
+  const duplicate = structuredClone(plan);
+  duplicate.videoEvents.push(duplicate.videoEvents[0]);
+  await assert.rejects(projectLegacyVideoCreate({ ...args, plan: duplicate }));
+  const missingQuestion = structuredClone(plan);
+  missingQuestion.eventCustomQuestions.pop();
+  await assert.rejects(projectLegacyVideoCreate({ ...args, plan: missingQuestion }));
+  const external = structuredClone(plan);
+  external.videos[0].youtube_video_id = null;
+  external.videos[0].source_type = "external";
+  const noYoutube = await projectLegacyVideoCreate({ ...args, plan: external });
+  assert.deepEqual(noYoutube.nextMetadata, []);
+  assert.equal(noYoutube.youtubeWakeRequired, false);
+});
 
 function questionPlan(count) {
   const plan = normalizeLegacyFiles([], {
