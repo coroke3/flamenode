@@ -32,10 +32,38 @@ function payload(video: Record<string, unknown>): Record<string, unknown> {
 }
 
 export const FIXTURE_VIDEO_DETAIL_PAYLOADS: Readonly<Record<string, Record<string, unknown>>> = {
-  "vid-aaa": payload({
-    id: "vid-aaa", title: "【文字PV】スチールワンダー", youtube_video_id: "dKw1xV41f8s", creator_display_name: "スティックのり",
-    creator_x_user_id: null, intro_comment: "ひとことコメントです。", music: "スチールワンダー", credit: "スティックのり",
-  }),
+  "vid-aaa": {
+    ...payload({
+      id: "vid-aaa", title: "【文字PV】スチールワンダー", youtube_video_id: "dKw1xV41f8s", creator_display_name: "スティックのり",
+      creator_x_user_id: null, intro_comment: "ひとことコメントです。", music: "スチールワンダー", credit: "スティックのり",
+    }),
+    // MIG-0507 U12: member-present browser fixture. Test-only names/IDs; this
+    // fixture is used only when the real snapshot environment is fully unset.
+    // Include one published profile and one unlinked profile to verify both states.
+    public_members: [
+      {
+        id: "fixture-member-public", display_name: "映像担当（公開）", x_user_id: "minimal_user",
+        role_label: "映像", comment: "イントロ", has_public_profile: true, icon_url: null,
+      },
+      {
+        id: "fixture-member-unlinked", display_name: "音楽担当（非公開）", x_user_id: null,
+        role_label: "音楽", comment: "編集協力", has_public_profile: false, icon_url: null,
+      },
+    ],
+    member_chapters: [
+      { id: "fixture-chapter-1", video_member_id: "fixture-member-public", chapter_time: 24, chapter_label: "冒頭" },
+    ],
+    // U12 representative *public* content: real video-detail rendering branches
+    // for later visual inspection. Related links must resolve to built fixtures.
+    public_chapters: [
+      { id: "fixture-public-chapter-1", chapter_time: 70, chapter_label: "ここが好き", author_name: "視聴者" },
+      { id: "fixture-public-chapter-2", chapter_time: 96, chapter_label: "後半", author_name: "視聴者" },
+    ],
+    software_labels: ["After Effects", "Blender"],
+    related_videos: [
+      { id: "vid-bbb", title: "模範囚", youtube_video_id: null, display_name: "hato", visibility_status: "public" },
+    ],
+  },
   "vid-bbb": payload({
     id: "vid-bbb", title: "模範囚", youtube_video_id: null, creator_display_name: "hato", creator_x_user_id: "hato",
     creator_has_public_profile: true, intro_comment: "YouTube ID のない作品です。",
