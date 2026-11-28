@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { flushSync } from "react-dom";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { unstable_rethrow, usePathname, useRouter } from "next/navigation";
@@ -120,10 +121,13 @@ const COMMUNICATION_ERROR_MESSAGE =
 async function runSlotAction<T>(
   action: () => Promise<T>,
   onCommunicationError: () => void,
+  isCurrent: () => boolean,
 ): Promise<T | null> {
   try {
     return await action();
   } catch (error) {
+    // An obsolete action must not rethrow a control exception into the successor.
+    if (!isCurrent()) return null;
     // NEXT_REDIRECT / notFound / forbidden / unauthorized など Next の制御例外は再 throw する。
     unstable_rethrow(error);
     onCommunicationError();
@@ -267,7 +271,9 @@ export function SlotGrid({
     [router],
   );
 
-  React.useEffect(() => {
+  // Retire the previous committed viewer before the next paint, including
+  // a keyed unmount. Passive cleanup alone leaves a commit-to-effect gap.
+  React.useLayoutEffect(() => {
     const clearViewerPrivateUi = () => {
       viewerGeneration.current += 1;
       setError(null);
@@ -284,12 +290,31 @@ export function SlotGrid({
       setSavedName("");
     };
     clearViewerPrivateUi();
-    setSavedName(readSavedSlotDisplayName(viewerXId));
+    // Authentication can retire a viewer even when both X IDs are null.
+    setSavedName(isAuthenticated ? readSavedSlotDisplayName(viewerXId) : "");
     // A successful Active X switch must clear an already-open dialog even
     // before the parent overlay supplies a different viewerXId.
+    // Retire private UI before BFCache captures this document.
+    const onPageHide = (event: PageTransitionEvent) => {
+      if (event.persisted) flushSync(clearViewerPrivateUi);
+    };
+    // BFCache can restore a pre-logout dialog without a React remount.
+    // Retire the former viewer's in-flight mutation callbacks and private UI.
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) clearViewerPrivateUi();
+    };
     window.addEventListener(ACTIVE_X_CHANGED_EVENT, clearViewerPrivateUi);
-    return () => window.removeEventListener(ACTIVE_X_CHANGED_EVENT, clearViewerPrivateUi);
-  }, [viewerXId]);
+    window.addEventListener("pagehide", onPageHide);
+    window.addEventListener("pageshow", onPageShow);
+    return () => {
+      // Unmount/identity-key replacement must also retire pre-switch action callbacks.
+      // Otherwise a late resolved action can still refresh the new route after unmount.
+      viewerGeneration.current += 1;
+      window.removeEventListener(ACTIVE_X_CHANGED_EVENT, clearViewerPrivateUi);
+      window.removeEventListener("pagehide", onPageHide);
+      window.removeEventListener("pageshow", onPageShow);
+    };
+  }, [viewerXId, isAuthenticated]);
 
   React.useEffect(() => {
     setActionMenu(null);
@@ -468,7 +493,7 @@ export function SlotGrid({
         if (submittedGeneration !== viewerGeneration.current) return;
         setError(COMMUNICATION_ERROR_MESSAGE);
         router.refresh();
-      });
+      }, () => submittedGeneration === viewerGeneration.current);
       if (submittedGeneration !== viewerGeneration.current || !result) return;
       if (!result.ok) {
         if (redirectForGuardReason(result.reason)) return;
@@ -507,7 +532,7 @@ export function SlotGrid({
         if (submittedGeneration !== viewerGeneration.current) return;
         setError(COMMUNICATION_ERROR_MESSAGE);
         router.refresh();
-      });
+      }, () => submittedGeneration === viewerGeneration.current);
       if (submittedGeneration !== viewerGeneration.current || !result) return;
       if (!result.ok) {
         if (redirectForGuardReason(result.reason)) return;
@@ -540,7 +565,7 @@ export function SlotGrid({
         if (submittedGeneration !== viewerGeneration.current) return;
         setError(COMMUNICATION_ERROR_MESSAGE);
         router.refresh();
-      });
+      }, () => submittedGeneration === viewerGeneration.current);
       if (submittedGeneration !== viewerGeneration.current || !result) return;
       if (!result.ok) {
         if (redirectForGuardReason(result.reason)) return;
@@ -578,7 +603,7 @@ export function SlotGrid({
         if (submittedGeneration !== viewerGeneration.current) return;
         setError(COMMUNICATION_ERROR_MESSAGE);
         router.refresh();
-      });
+      }, () => submittedGeneration === viewerGeneration.current);
       if (submittedGeneration !== viewerGeneration.current || !result) return;
       if (!result.ok) {
         if (redirectForGuardReason(result.reason)) return;
