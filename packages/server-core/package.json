@@ -117,6 +117,7 @@
     "./legacyImport/applyResult": "./src/legacyImport/applyResult.ts",
     "./legacyImport/progress": "./src/legacyImport/progress.ts",
     "./legacyImport/previewStore": "./src/legacyImport/previewStore.ts",
+    "./legacyImport/d1Apply": "./src/legacyImport/d1Apply.ts",
     "./legacyImport/preflight": "./src/legacyImport/preflight.ts"
   },
   "scripts": {
