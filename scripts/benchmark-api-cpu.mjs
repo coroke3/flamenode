@@ -2788,6 +2788,7 @@ async function createWranglerTarget(plan, opts) {
   const post = (p, body, method = "POST") => fetchWithDeadline(base + p, { method, body }, {
     timeoutMs: BENCHMARK_REQUEST_TIMEOUT_MS, label: "benchmark control " + method + " " + p,
   });
+  try {
   const exec = async (list) => {
     for (let i = 0; i < list.length; i += 40) {
       const res = await post("/__bench/exec", json({ list: list.slice(i, i + 40) }));
