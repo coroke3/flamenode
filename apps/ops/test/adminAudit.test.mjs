@@ -14,7 +14,8 @@ import { JSDOM } from "jsdom";
 import { parseAuditListQuery, auditListApiPath, auditViewHref } from "../.test-dist/apps/ops/src/lib/auditListQuery.js";
 import { createAdminAuditApi } from "../.test-dist/apps/ops/src/api/adminAudit.js";
 import { AuditListContent, parseChangedKeys, parseAuditActorSnapshot } from "../.test-dist/apps/ops/src/routes/admin/AuditList.js";
-import { AdminAuditDetailRoute } from "../.test-dist/apps/ops/src/routes/router.js";
+import { AdminAuditDetailRoute, OpsRoutes } from "../.test-dist/apps/ops/src/routes/router.js";
+import { createOpsApi } from "../.test-dist/apps/ops/src/api/account.js";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 
 const row = (overrides={}) => ({
@@ -432,4 +433,108 @@ test("MIG-0733 U04: detail route extracts URL id and never enables restore in Op
   ));
   assert.match(screen,/読み込み中/);
   assert.doesNotMatch(screen,/確認テキスト:|リストア実行|競合チェック実行/);
+});
+
+test("MIG-0733 U04: actual OpsRoutes gate all four audit views before fetching and keep admin reads GET-only", async () => {
+  const dom = new JSDOM("<!doctype html><html><body></body></html>", {url:"https://flamenode.test/admin"});
+  const assigned = [];
+  const win = new Proxy(dom.window, {
+    get(target, prop) {
+      if (prop === "location") return {assign: url => assigned.push(url), href: target.location.href, origin: target.location.origin};
+      const value = Reflect.get(target, prop);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  const raf = cb => setTimeout(cb, 0);
+  const caf = id => clearTimeout(id);
+  dom.window.requestAnimationFrame = raf;
+  dom.window.cancelAnimationFrame = caf;
+  dom.window.matchMedia = () => ({matches:false,media:"",onchange:null,addEventListener(){},removeEventListener(){},
+    addListener(){},removeListener(){},dispatchEvent(){return false;}});
+  const globals = Object.fromEntries(["document","navigator","Element","HTMLElement","HTMLInputElement",
+    "HTMLSelectElement","Node","FormData","Event","MouseEvent"].map(key=>[key,dom.window[key]]));
+  Object.assign(globals,{window:win,requestAnimationFrame:raf,cancelAnimationFrame:caf,
+    IS_REACT_ACT_ENVIRONMENT:true,fetch:globalThis.fetch});
+  const original = new Map(Object.keys(globals).map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)]));
+  const json = (status,body)=>new Response(JSON.stringify(body),{status,headers:{"content-type":"application/json"}});
+  const marker = "PRIVATE_AUDIT_CANARY";
+  const runs = {runs:[{id:"run1",audit_log_id:"aud-1",status:"success",executed_at:1735776000,
+    executed_by_user_id:"admin",reason:marker,error_message:null,log:{table_name:"videos",target_id:"v1"}}]};
+  const detail = {...detailFixture,row:{...detailFixture.row,reason:marker,payload_size_bytes:0},
+    payload:{before:null,after:null,inverse:null}};
+  const list = {...sample,rows:[row({actor_snapshot_json:JSON.stringify({discord_name:marker,x_name:null,x_user_id:null})})]};
+  const cases = [
+    {path:"/admin/audit?operator=op1&view=table",api:"/api/admin-read/audit?actor=op1&limit=50",heading:"監査ログ",visible:marker,body:list},
+    {path:"/admin/audit/aud-1",api:"/api/admin-read/audit/aud-1",heading:"監査ログ aud-1",visible:marker,body:detail},
+    {path:"/admin/audit/restore",api:"/api/admin-read/audit/restore",heading:"復元履歴",visible:marker,body:runs},
+    {path:"/admin/audit/settings",api:"/api/admin-read/audit-settings",heading:"監査ログ設定",visible:"normal_retention_days",body:{settings:settingsFixture}},
+  ];
+  const actors = [
+    {name:"anonymous",summary:{loggedIn:false},redirect:"/entry"},
+    {name:"non-admin",summary:{loggedIn:true,role:"moderator",canAccessAdmin:false,canAccessManage:true},redirect:"/dashboard"},
+    {name:"admin",summary:{loggedIn:true,role:"admin",canAccessAdmin:true,canAccessManage:true},redirect:null},
+  ];
+  let root;
+  try {
+    for (const [key,value] of Object.entries(globals)) Object.defineProperty(globalThis,key,{configurable:true,writable:true,value});
+    for (const scenario of cases) {
+      for (const actor of actors) {
+        assigned.length=0;
+        const calls=[];
+        let resolveSummary;
+        const summaryReceipt=new Promise(resolve=>{resolveSummary=resolve;});
+        globalThis.fetch=(path,init)=>{
+          calls.push({path:String(path),method:init?.method,cache:init?.cache,credentials:init?.credentials});
+          if(path==="/api/account/summary") return summaryReceipt;
+          if(path==="/api/admin-read/cost-guard-banner") return Promise.resolve(json(200,{mode:"normal",reason:null}));
+          if(path===scenario.api) return Promise.resolve(json(200,scenario.body));
+          return Promise.resolve(json(500,{}));
+        };
+        const target=document.createElement("div");
+        document.body.append(target);
+        root=createRoot(target);
+        const api=createOpsApi();
+        await React.act(async()=>{
+          root.render(React.createElement(MemoryRouter,{initialEntries:[scenario.path]},React.createElement(OpsRoutes,{api})));
+        });
+        assert.deepEqual(calls.map(c=>c.path),["/api/account/summary"],"pending gate must not fetch protected data");
+        assert.equal(target.querySelector("[data-admin-shell]"),null);
+        assert.doesNotMatch(target.textContent,/PRIVATE_AUDIT_CANARY/);
+        await React.act(async()=>{resolveSummary(json(200,actor.summary));});
+        if(actor.redirect) {
+          assert.deepEqual(assigned,[actor.redirect],actor.name+" "+scenario.path);
+          assert.deepEqual(calls.map(c=>c.path),["/api/account/summary"]);
+          assert.equal(target.querySelector("[data-admin-shell]"),null);
+          assert.doesNotMatch(target.textContent,/PRIVATE_AUDIT_CANARY/);
+        } else {
+          assert.deepEqual(assigned,[]);
+          assert.ok(target.querySelector("[data-admin-shell]"));
+          assert.equal(target.querySelector("main.admin-main h1")?.textContent,scenario.heading);
+          assert.ok(target.querySelector("main.admin-main").textContent.includes(scenario.visible),scenario.path);
+          assert.deepEqual(calls.map(c=>c.path).sort(),
+            ["/api/account/summary","/api/admin-read/cost-guard-banner",scenario.api].sort());
+          assert.doesNotMatch(target.querySelector("main.admin-main").textContent,/確認テキスト:|リストア実行|競合チェック実行|設定を保存/);
+          if(scenario.path==="/admin/audit/settings") {
+            assert.equal(target.querySelector("main.admin-main input[type='number']"),null);
+          }
+          if(scenario.api.startsWith("/api/admin-read/audit?")) {
+            assert.equal(target.querySelector("main.admin-main input[name='limit']")?.value,"50");
+          }
+        }
+        assert.ok(calls.every(c=>c.method==="GET"&&c.cache==="no-store"&&c.credentials==="same-origin"));
+        await React.act(async()=>{root.unmount();});
+        root=undefined;
+        target.remove();
+      }
+    }
+  } finally {
+    try {if(root)await React.act(async()=>{root.unmount();});}
+    finally {
+      dom.window.close();
+      for(const [key,descriptor] of original) {
+        if(descriptor)Object.defineProperty(globalThis,key,descriptor);
+        else delete globalThis[key];
+      }
+    }
+  }
 });
