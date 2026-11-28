@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
-import { publicVisibilityFences, videos } from "@flamenode/db/schema";
+import { videos } from "@flamenode/db/schema";
 import { planVideoVisibilityFence, validateVideoPublicEligibility } from "@flamenode/domain/video";
 import { expectedRowCondition } from "../audit/expectedRowCondition.ts";
 import { AuditMutationError } from "../audit/mutate.ts";
@@ -15,6 +15,10 @@ import type { QueueWakeSource } from "../queues/wakeBudget.ts";
 import type { StaticRebuildQueueBatch } from "../staticRebuild/enqueue.ts";
 import { buildAfterVideoStatusChangeQueueBatch } from "../staticRebuild/hooks.ts";
 import { getPublicVisibilityFence } from "./fenceStore.ts";
+import {
+  buildPublicVisibilityFenceUpsertStatement,
+  planPublicVisibilityFenceTransition,
+} from "./fenceTransition.ts";
 import type { VisibilityFenceHost } from "./manifestHost.ts";
 import {
   isEntityBlockedInManifest,
@@ -97,50 +101,6 @@ function userPublicCacheKeys(xUserId: string | null, userMaxPages: number): stri
   return keys;
 }
 
-function buildFenceUpsertStatement(
-  db: ServerCoreDb,
-  input: {
-    videoId: string;
-    fenceToken: string;
-    state: "blocked" | "release_pending";
-    reason?: string | null;
-    actorUserId: string;
-    now: number;
-    blockedAt?: number | null;
-  },
-): BatchItem<"sqlite"> {
-  return db
-    .insert(publicVisibilityFences)
-    .values({
-      entity_type: "video",
-      entity_id: input.videoId,
-      fence_token: input.fenceToken,
-      state: input.state,
-      reason: input.reason ?? null,
-      requirements_json: null,
-      blocked_at: input.blockedAt ?? null,
-      release_requested_at: input.state === "release_pending" ? input.now : null,
-      requested_by_auth_user_id: input.actorUserId,
-      updated_at: input.now,
-    })
-    .onConflictDoUpdate({
-      target: [
-        publicVisibilityFences.entity_type,
-        publicVisibilityFences.entity_id,
-      ],
-      set: {
-        fence_token: input.fenceToken,
-        state: input.state,
-        reason: input.reason ?? null,
-        blocked_at: input.blockedAt ?? null,
-        release_requested_at:
-          input.state === "release_pending" ? input.now : null,
-        requested_by_auth_user_id: input.actorUserId,
-        updated_at: input.now,
-      },
-    });
-}
-
 export type VideoVisibilityFenceTransitionPlan = {
   mutationStatements: BatchItem<"sqlite">[];
   expectedMutationChanges: number[];
@@ -152,7 +112,7 @@ export type VideoVisibilityFenceTransitionPlan = {
  * 既存の videos 更新を別の atomic mutation（監査復元など）が担当する場合に、
  * 公開状態フェンスだけを同じ D1 batch へ追加するための軽量 planner。
  */
-export function planVideoVisibilityFenceTransition(
+export async function planVideoVisibilityFenceTransition(
   db: ServerCoreDb,
   input: {
     videoId: string;
@@ -162,7 +122,7 @@ export function planVideoVisibilityFenceTransition(
     reason?: string | null;
     now: number;
   },
-): VideoVisibilityFenceTransitionPlan {
+): Promise<VideoVisibilityFenceTransitionPlan> {
   const fence = planVideoVisibilityFence(input.previousStatus, input.nextStatus);
   if (!fence) {
     return {
@@ -173,21 +133,25 @@ export function planVideoVisibilityFenceTransition(
     };
   }
 
-  const fenceToken = generateId("vf");
+  // Audit restore and legacy import must use the same authoritative D1
+  // token/state CAS as normal status changes. Never resurrect a deleted
+  // owner or replace another writer's token via an unconditional UPSERT.
+  const planned = await planPublicVisibilityFenceTransition({
+    db,
+    entityType: "video",
+    entityId: input.videoId,
+    previousStatus: input.previousStatus,
+    nextStatus: input.nextStatus,
+    isPublic: (status) => status === "public",
+    preserveRequirementsJsonOnUpdate: true,
+    actorUserId: input.actorUserId,
+    reason: input.reason,
+    now: input.now,
+  });
   return {
-    mutationStatements: [
-      buildFenceUpsertStatement(db, {
-        videoId: input.videoId,
-        fenceToken,
-        state: fence.state,
-        reason: input.reason ?? null,
-        actorUserId: input.actorUserId,
-        now: input.now,
-        blockedAt: fence.depublicizedFromPublic ? input.now : null,
-      }),
-    ],
-    expectedMutationChanges: [1],
-    fenceToken,
+    mutationStatements: planned.mutationStatements,
+    expectedMutationChanges: planned.expectedMutationChanges,
+    fenceToken: planned.fenceToken,
     depublicizedFromPublic: fence.depublicizedFromPublic,
   };
 }
@@ -276,16 +240,30 @@ export async function planVideoVisibilityTransition(
     const fence = planVideoVisibilityFence(prevStatus, input.nextStatus);
     if (fence) {
       depublicizedFromPublic = fence.depublicizedFromPublic;
-      fenceToken = generateId("vf");
+      // Keep the authoritative blocked/release_pending owner across
+      // private -> public -> private. Creating a fresh token would make the
+      // initial R2 CAS reject our own existing block as foreign.
+      const observed = await getPublicVisibilityFence(db, "video", input.video.id);
+      fenceToken = observed &&
+        (observed.state === "blocked" || observed.state === "release_pending")
+          ? observed.fence_token
+          : generateId("vf");
+      // A concurrent D1 INSERT/DELETE/token-or-state change after planning
+      // must fail the atomic [1] assertion instead of silently replacing the
+      // other writer's owner or resurrecting a deleted fence.
       mutationStatements.push(
-        buildFenceUpsertStatement(db, {
-          videoId: input.video.id,
+        buildPublicVisibilityFenceUpsertStatement(db, {
+          entityType: "video",
+          entityId: input.video.id,
           fenceToken,
+          observedFence: observed
+            ? { fenceToken: observed.fence_token, state: observed.state }
+            : null,
+          preserveRequirementsJsonOnUpdate: true,
           state: fence.state,
           reason: input.reason ?? null,
           actorUserId: input.actorUserId,
           now,
-          blockedAt: fence.depublicizedFromPublic ? now : null,
         }),
       );
       expectedMutationChanges.push(1);
@@ -374,6 +352,14 @@ export async function preCommitVideoVisibilityDepublicization(
 ): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
   const { manifest, etag } = await host.manifest.read();
+  // A successful initial CAS bypasses mutateOnConflict. Preserve every
+  // previously blocked video token (including duplicate manifest keys).
+  if (manifest.entities.some(
+    (entry) => entry.entity_type === "video" &&
+      entry.entity_id === input.videoId && entry.fence_token !== input.fenceToken,
+  )) {
+    throw new Error("public_visibility_fence_token_mismatch");
+  }
   const updated = upsertBlockedEntityInManifest(
     manifest,
     {
@@ -388,11 +374,10 @@ export async function preCommitVideoVisibilityDepublicization(
   await host.manifest.write(updated, {
     ifMatchEtag: etag,
     mutateOnConflict: (latest) => {
-      const current = latest.entities.find(
-        (entry) =>
-          entry.entity_type === "video" && entry.entity_id === input.videoId,
-      );
-      if (current && current.fence_token !== input.fenceToken) {
+      if (latest.entities.some(
+        (entry) => entry.entity_type === "video" &&
+          entry.entity_id === input.videoId && entry.fence_token !== input.fenceToken,
+      )) {
         throw new Error("public_visibility_fence_token_mismatch");
       }
       return upsertBlockedEntityInManifest(
@@ -416,6 +401,10 @@ export async function preCommitVideoVisibilityDepublicization(
         entry.entity_type === "video" &&
         entry.entity_id === input.videoId &&
         entry.fence_token === input.fenceToken,
+    ) ||
+    confirmed.entities.some(
+      (entry) => entry.entity_type === "video" &&
+        entry.entity_id === input.videoId && entry.fence_token !== input.fenceToken,
     )
   ) {
     throw new Error("public_visibility_fence_token_mismatch");
@@ -484,9 +473,11 @@ export async function compensateDepublicizationFenceOnD1Failure(
   )[0];
   const fence = await getPublicVisibilityFence(db, "video", input.videoId);
   if (
+    // A different writer may already have committed an active D1 fence after
+    // our R2 precommit. Compensating our token must not expose that writer's
+    // now-private/release-pending video before its R2 manifest is installed.
     fence &&
-    (fence.state === "blocked" || fence.state === "release_pending") &&
-    fence.fence_token === input.fenceToken
+    (fence.state === "blocked" || fence.state === "release_pending")
   ) {
     logFlowTrace({
       flow: "video_visibility_depublicize",

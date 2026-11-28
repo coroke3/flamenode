@@ -787,7 +787,7 @@
               1767776000,
               1760000000,
               "adapter_missing",
-              "テーブル「unregistered_table」の復元アダプターがありません。"
+              "復元アダプターが見つかりません。"
             ]
           },
           {
@@ -913,7 +913,7 @@
         "restore_strategy": "update_before",
         "restore_status": "not_restorable",
         "restore_unavailable_reason_code": "adapter_missing",
-        "restore_unavailable_message": "テーブル「unregistered_table」の復元アダプターがありません。",
+        "restore_unavailable_message": "復元アダプターが見つかりません。",
         "payload_size_bytes": 30,
         "expires_at": 1767776000,
         "created_at": 1760000000,

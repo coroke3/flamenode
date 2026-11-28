@@ -197,7 +197,7 @@ export function evaluateRestoreCapability(
   if (!registration) {
     return unavailable(
       RESTORE_CAPABILITY_REASON.adapterMissing,
-      `テーブル「${input.tableName}」の復元アダプターがありません。`,
+      "復元アダプターが見つかりません。",
     );
   }
 

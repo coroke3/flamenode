@@ -580,6 +580,23 @@ export const stagedEventGroupWriteRoutes = new Hono<AppEnv>();
 // Mirror CURRENT eventGroupMutationError: a stable, non-provider-specific failure body.
 export const EVENT_GROUP_WRITE_FAILED = "保存に失敗しました。再読み込みして、もう一度お試しください。";
 
+/** Reuse the fence row included in the bounded D1 preflight, never guess that
+ * a present owner is absent. No additional D1 query or S3 read is needed.
+ * A malformed legacy row yields null: the guarded INSERT then changes 0 rows
+ * on conflict and the audited batch fails closed rather than overwriting it.
+ */
+function observedEventGroupFence(row: {
+  fence_token: string | null;
+  fence_state: string | null;
+}): { fenceToken: string; state: "blocked" | "release_pending" | "released" } | null {
+  const state = row.fence_state;
+  if (row.fence_token && (state === "blocked" || state === "release_pending" || state === "released")) {
+    return { fenceToken: row.fence_token, state };
+  }
+  return null;
+}
+
+
 stagedEventGroupWriteRoutes.post("/", async (c) => {
   c.header("Cache-Control", "private, no-store");
   const body = await readAdminJsonBody(c.req.raw);
@@ -663,6 +680,7 @@ stagedEventGroupWriteRoutes.post("/", async (c) => {
       entityType: "event_group",
       entityId: id,
       fenceToken,
+      observedFence: observedEventGroupFence(snapshot),
       state: "release_pending",
       actorUserId: userId,
       reason: "event_group_create",
@@ -895,6 +913,7 @@ stagedEventGroupWriteRoutes.patch("/:id", async (c) => {
       entityType: "event_group",
       entityId: id,
       fenceToken,
+      observedFence: observedEventGroupFence(snapshot),
       state: updatedValues.visibility_status === "public" ? "release_pending" : "blocked",
       actorUserId: userId,
       reason: "event_group_visibility_update",
@@ -1148,6 +1167,7 @@ stagedEventGroupWriteRoutes.delete("/:id", async (c) => {
       entityType: "event_group",
       entityId: id,
       fenceToken,
+      observedFence: observedEventGroupFence(snapshot),
       state: "blocked",
       actorUserId: userId,
       reason: "event_group_delete",

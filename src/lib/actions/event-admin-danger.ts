@@ -294,6 +294,18 @@ export async function renameEventId(
     (batch) => batch.expectedChanges,
   );
 
+  // Re-read authoritative D1 ownership immediately before any R2 reuse release.
+  // A concurrent release_pending transition after the earlier pendingFence
+  // query must be rejected before preCommitEventIdReuse can mutate R2.
+  const oldFence = await getPublicVisibilityFence(db, "event", oldId);
+  if (oldFence?.state === "release_pending") {
+    return {
+      ok: false,
+      message:
+        "イベントの公開反映中はIDを変更できません。公開反映が完了してから再試行してください。",
+    };
+  }
+
   let targetReusePrecommit: EventIdReusePrecommit | null = null;
   if (targetTombstone) {
     const reuse = await preCommitEventIdReuse({
@@ -315,7 +327,6 @@ export async function renameEventId(
   // Keep every statement-builder await before the R2 pre-commit. If queue
   // planning fails, no manifest mutation has happened and the D1 row remains
   // untouched, so there is nothing to compensate.
-  const oldFence = await getPublicVisibilityFence(db, "event", oldId);
   const renameTombstoneToken = generateId("vf");
   let manifestRename: EventVisibilityFenceRenamePrecommit | null = null;
   let renameTombstone: EventVisibilityRenameTombstonePrecommit | null = null;
@@ -323,10 +334,9 @@ export async function renameEventId(
     // Keep the existing fence move, then retain an
     // old-id tombstone so stale `events/{oldId}.json` cannot be served after
     // the D1 primary key is renamed.
-    if (
-      oldFence &&
-      (oldFence.state === "blocked" || oldFence.state === "release_pending")
-    ) {
+    // release_pending was rejected before any R2 reuse side effect above.
+    // Only an existing blocked owner may be copied to the renamed ID.
+    if (oldFence?.state === "blocked") {
       manifestRename = await preCommitEventVisibilityFenceRename({
         oldEventId: oldId,
         newEventId: newId,
@@ -337,6 +347,9 @@ export async function renameEventId(
     renameTombstone = await preCommitEventVisibilityRenameTombstone({
       eventId: oldId,
       fenceToken: renameTombstoneToken,
+      // The copied R2 fence is still the old-ID owner. If a concurrent writer
+      // replaces it before tombstone CAS, fail closed instead of rotating theirs.
+      expectedPreviousFenceToken: manifestRename?.previousOldEntry?.fence_token ?? null,
       reason: "event_id_rename_old_cleanup",
     });
   } catch (error) {
@@ -415,6 +428,8 @@ export async function renameEventId(
       UPDATE public_visibility_fences
       SET entity_id = ${newId}
       WHERE entity_type = 'event' AND entity_id = ${oldId}
+        AND fence_token = ${oldFence?.fence_token ?? null}
+        AND state = ${oldFence?.state ?? null}
     `),
   ];
   const renameTombstoneStatement = db
@@ -431,19 +446,10 @@ export async function renameEventId(
       requested_by_auth_user_id: actorUserId,
       updated_at: now,
     })
-    .onConflictDoUpdate({
-      target: [publicVisibilityFences.entity_type, publicVisibilityFences.entity_id],
-      set: {
-        fence_token: renameTombstoneToken,
-        state: "blocked",
-        reason: "event_id_rename_old_cleanup",
-        requirements_json: null,
-        blocked_at: now,
-        release_requested_at: null,
-        requested_by_auth_user_id: actorUserId,
-        updated_at: now,
-      },
-    });
+    // A concurrent writer may have claimed oldId since the precommit. Do
+    // not overwrite their D1 fence; the expected 1-row assertion below
+    // rolls back this whole batch on a conflict.
+    .onConflictDoNothing();
   const targetFenceDelete = targetReusePrecommit
     ? db
         .delete(publicVisibilityFences)
@@ -490,7 +496,12 @@ export async function renameEventId(
       null,
       ...(targetFenceDelete ? [1] : []),
       1,
-      ...referenceUpdates.map(() => null),
+      // The last reference update moves the exact D1 fence observed before
+      // the R2 precommit (or intentionally moves zero when none was present).
+      // Any changed owner/state aborts the atomic rename before the tombstone.
+      ...referenceUpdates.map((_, index) =>
+        index === referenceUpdates.length - 1 ? (oldFence ? 1 : 0) : null,
+      ),
       1,
       ...oldQueue.expectedChanges,
       ...newQueue.expectedChanges,
