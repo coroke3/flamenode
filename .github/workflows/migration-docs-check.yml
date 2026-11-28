@@ -240,7 +240,8 @@ jobs:
                 exit 1
               fi
               seen_scenarios["$scenario_id"]=1
-              if ! grep -Fq "  ${scenario_id} " <<< "$dry_run_output"; then
+              # Match the ID column of indented scenario rows, never the class or title.
+              if ! awk -v id="$scenario_id" '/^  [^[:space:]]/ && $1 == id {found=1} END {exit !found}' <<< "$dry_run_output"; then
                 echo "Invalid benchmark_only: unknown scenario ID: $scenario_id" >&2
                 exit 1
               fi
