@@ -33,6 +33,7 @@ import {
   validateSubmissionCustomAnswers,
   validateUniqueUnslottedVideoScalarFields,
   type FreeVideoPreflightContext,
+  type RequiredVideoFieldValues,
   type SubmissionCustomAnswerDraft,
   type VideoFormData,
 } from "@flamenode/domain/video";
@@ -50,11 +51,18 @@ import {
 } from "@flamenode/server-core/notifications/discordText";
 import { buildFreeVideoRow } from "@flamenode/server-core/video/freeVideoRow";
 import {
+  buildSlotSubmissionStagePermissionSubmission,
   decodeGeneralCustomQuestionPolicyProjection,
+  decodeSlotSubmissionGeneralQuestions,
   loadEligibleUnslottedVideoRequiredFields,
+  resolveSlotSubmissionStagePermissionFields,
+  validateSlotSubmissionRequiredFields,
   type LoadedGeneralCustomQuestion,
+  type SlotSubmissionEventConfig,
   type SlotSubmissionReceipt,
   type SlotSubmissionReceiptRow,
+  type SlotSubmissionStagePermissionField,
+  type SlotSubmissionVideoEventReceipt,
 } from "@flamenode/server-core/video/requiredVideoFields";
 import { buildFreeVideoSubmissionWithRebuildPlan } from "@flamenode/server-core/video/unslottedEventPlans";
 import { areSlotsInSamePart, sortSlotsChronologically } from "@flamenode/server-core/video/slotGrouping";
@@ -329,6 +337,56 @@ export function validateSlotSubmissionGroup(
   return { ok: true, rows: submittedSlots, groupIdentity };
 }
 
+/** SA-088 stage/general/required policy validation in CURRENT denial order.
+ * The receipt is server-owned and contains all resolved target-event policies;
+ * event existence remains the final check.
+ */
+export function validateSlotSubmissionPolicies(
+  receipt: SlotSubmissionVideoEventReceipt,
+  formData: FormData,
+  values: Omit<RequiredVideoFieldValues, "existing_icon_url">,
+  slotPart: string | null,
+  existingIconUrl: string | null,
+):
+  | {
+      ok: true;
+      stagePermission: string | null;
+      customAnswerDrafts: SubmissionCustomAnswerDraft[];
+      stageFields: SlotSubmissionStagePermissionField[];
+      questionSnapshot: LoadedGeneralCustomQuestion[];
+      event: SlotSubmissionEventConfig;
+    }
+  | { ok: false; message: string } {
+  const stageFields = resolveSlotSubmissionStagePermissionFields(
+    receipt.targetEventIds,
+    receipt.stageQuestions,
+  );
+  const stage = buildSlotSubmissionStagePermissionSubmission(formData, stageFields);
+  if (!stage.ok) return stage;
+
+  const questionSnapshot = decodeSlotSubmissionGeneralQuestions(receipt);
+  const custom = validateSubmissionCustomAnswers(formData, questionSnapshot);
+  if (!custom.ok) return custom;
+
+  const required = validateSlotSubmissionRequiredFields(
+    receipt.events.map((event) => event.required_video_fields_json),
+    values,
+    formData,
+    slotPart,
+    existingIconUrl,
+  );
+  if (!required.ok) return required;
+
+  if (!receipt.event) return { ok: false, message: "イベントが見つかりません。" };
+  return {
+    ok: true,
+    stagePermission: stage.value,
+    customAnswerDrafts: custom.drafts,
+    stageFields,
+    questionSnapshot,
+    event: receipt.event,
+  };
+}
 type DbReadPreflightInternalResult =
   | { ok: false; message: string; failureKind: "validation" | "duplicate" | "temporary" }
   | {
