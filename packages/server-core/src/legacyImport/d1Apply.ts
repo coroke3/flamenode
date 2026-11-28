@@ -156,6 +156,78 @@ export function buildLegacyImportFenceAssertion(db: ServerCoreDb, snapshot: Lega
   `);
 }
 
+/**
+ * U02as: read-only evidence for recovering a freshly precommitted R2 block
+ * after an unsuccessful or ambiguous D1 batch. A missing marker alone is
+ * NEVER proof of rollback. Compare the complete previous canonical entity
+ * and fence row in the same D1 read. A pre-existing active token is not a
+ * newly installed block and must never be released by this recovery path.
+ *
+ * Even "rollback_candidate" is NOT permission to remove a manifest entry:
+ * shared-writer exclusion and a conditional R2 release must still be proved.
+ * This helper does not write D1/R2, advance progress, or send queue wakes.
+ */
+export async function inspectLegacyImportFenceRecovery(input: {
+  db: ServerCoreDb;
+  before: LegacyImportFenceSnapshot;
+  beforeEntityJson: string;
+  step: { runDigest: string; planHash: string; stage: "events" | "videos"; index: number };
+  d1Outcome: "confirmed_rollback" | "unknown";
+}): Promise<"retain" | "rollback_candidate"> {
+  const { db, before, step, beforeEntityJson } = input;
+  const stage = before.entityType === "event" ? "events" : "videos";
+  // A network error, timeout, or ambiguous provider response is never
+  // upgraded to a definite rollback by this snapshot inspection.
+  if (input.d1Outcome !== "confirmed_rollback" ||
+      before.previousState === "blocked" || before.previousState === "release_pending") {
+    return "retain";
+  }
+  const state = validateLegacyFenceSnapshot(before, before.raw);
+  if (state !== before.previousState || step.stage !== stage ||
+      !/^[a-f0-9]{24}$/.test(step.runDigest) || !/^[a-f0-9]{64}$/.test(step.planHash) ||
+      !Number.isSafeInteger(step.index) || step.index < 0 ||
+      typeof beforeEntityJson !== "string" ||
+      new TextEncoder().encode(beforeEntityJson).byteLength > MAX_LEGACY_IMPORT_STEP_BYTES) {
+    return "retain";
+  }
+  const previous = parseJsonRecord(beforeEntityJson, LEGACY_FENCE_CONFLICT);
+  if (previous.id !== before.entityId ||
+      typeof previous.visibility_status !== "string") return "retain";
+  const targetId = step.runDigest + ":" + step.planHash.slice(0, 24) + ":" + stage + ":" + step.index;
+  const table = before.entityType === "event" ? "events" : "videos";
+  const entityJson = before.entityType === "event"
+    ? existingEventJson : canonicalRowJson(getTableColumns(videos), "videos");
+  const fenceUnchanged = before.raw === null ? sql`
+    NOT EXISTS (SELECT 1 FROM public_visibility_fences
+      WHERE entity_type = ${before.entityType} AND entity_id = ${before.entityId})
+  ` : sql`
+    (SELECT COUNT(*) FROM public_visibility_fences
+      WHERE entity_type = ${before.entityType} AND entity_id = ${before.entityId}) = 1
+    AND EXISTS (SELECT 1 FROM public_visibility_fences
+      WHERE entity_type = ${before.entityType} AND entity_id = ${before.entityId}
+        AND ${existingFenceJson} = ${before.raw})
+  `;
+  // Any record at the step identity, including one with unexpected context
+  // or malformed payload, is enough to prevent a release candidate. Do not
+  // interpret its presence as a valid committed receipt; replay owns that.
+  const rows = await db.all(sql`
+    SELECT
+      CASE WHEN EXISTS (
+        SELECT 1 FROM audit_logs WHERE table_name = ${STEP_AUDIT_TABLE}
+          AND target_id = ${targetId}
+      ) THEN 1 ELSE 0 END AS has_receipt,
+      CASE WHEN EXISTS (
+        SELECT 1 FROM ${sql.raw(table)} WHERE id = ${before.entityId}
+          AND ${entityJson} = ${beforeEntityJson}
+      ) THEN 1 ELSE 0 END AS entity_unchanged,
+      CASE WHEN (${fenceUnchanged}) THEN 1 ELSE 0 END AS fence_unchanged
+  `) as Array<{ has_receipt: number; entity_unchanged: number; fence_unchanged: number }>;
+  const row = rows[0];
+  return rows.length === 1 && row?.has_receipt === 0 &&
+    row.entity_unchanged === 1 && row.fence_unchanged === 1
+    ? "rollback_candidate" : "retain";
+}
+
 // CURRENT legacy import limit (distinct from the interactive new-question limit).
 const MAX_EVENT_CUSTOM_QUESTIONS = 18;
 type PlannedQuestion = CanonicalLegacyPlan["eventCustomQuestions"][number];

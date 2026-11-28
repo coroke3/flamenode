@@ -43,6 +43,7 @@ import {
   buildLegacyAnswerReplacementAssertion,
   readLegacyImportFenceSnapshot,
   buildLegacyImportFenceAssertion,
+  inspectLegacyImportFenceRecovery,
 } from "@flamenode/server-core/legacyImport/d1Apply";
 import { createAdminD1, seedBase, seedEvent } from "./helpers/sqliteD1.mjs";
 
@@ -1800,6 +1801,68 @@ test("MIG-0645 U02al Hono: new video rows, provenance, queue and receipt are ato
     // Make previous proofs unambiguously older than the new proof.
     sqlite.prepare("UPDATE audit_logs SET created_at = 1 WHERE table_name IN ('legacy_import_entity_snapshots', 'video_custom_answers')").run();
     sqlite.prepare("UPDATE videos SET app_like_count = 7, score = 3, score_updated_at = 42 WHERE id = ?").run(video.id);
+    // U02as: a failed future transition may only be considered for rollback
+    // if the fresh token, full old entity and fence are unchanged, and there
+    // is definitely no step receipt. This never writes or releases R2.
+    sqlite.exec(`
+      CREATE TABLE public_visibility_fences (
+        entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, fence_token TEXT NOT NULL,
+        state TEXT NOT NULL, reason TEXT, requirements_json TEXT, blocked_at INTEGER,
+        release_requested_at INTEGER, requested_by_auth_user_id TEXT, updated_at INTEGER NOT NULL,
+        PRIMARY KEY(entity_type, entity_id)
+      );
+    `);
+    const rollbackIdentity = { entityType: "video", entityId: video.id, fenceToken: "fresh-rollback-token" };
+    const fenceBefore = await readLegacyImportFenceSnapshot(serverDb, rollbackIdentity);
+    const entityBefore = await readLegacyVideoReplacementSnapshot(serverDb, video.id);
+    const recoveryStep = { runDigest: "a".repeat(24), planHash: "b".repeat(64), stage: "videos", index: 0 };
+    const recoveryInput = {
+      db: serverDb, before: fenceBefore, beforeEntityJson: entityBefore.raw.video[0],
+      step: recoveryStep, d1Outcome: "confirmed_rollback",
+    };
+    const recoveryReads = stats.reads;
+    const recoveryBatches = stats.batches;
+    const recoveryWakes = wakes.length;
+    assert.equal(await inspectLegacyImportFenceRecovery({ ...recoveryInput, d1Outcome: "unknown" }), "retain");
+    assert.equal(stats.reads, recoveryReads, "unknown outcome is fail-closed without D1 read");
+    assert.equal(await inspectLegacyImportFenceRecovery(recoveryInput), "rollback_candidate");
+    assert.equal(stats.reads - recoveryReads, 1, "all three recovery checks share a D1 snapshot");
+    sqlite.prepare("UPDATE videos SET score = 4 WHERE id = ?").run(video.id);
+    assert.equal(await inspectLegacyImportFenceRecovery(recoveryInput), "retain", "unmanaged drift blocks release");
+    sqlite.prepare("UPDATE videos SET score = 3 WHERE id = ?").run(video.id);
+    const missingBefore = await readLegacyImportFenceSnapshot(serverDb, { ...rollbackIdentity, entityId: "missing-video" });
+    const missingEntity = JSON.stringify({ ...entityBefore.video, id: "missing-video" });
+    assert.equal(await inspectLegacyImportFenceRecovery({
+      ...recoveryInput, before: missingBefore, beforeEntityJson: missingEntity,
+    }), "retain", "missing entity blocks release");
+
+    const insertFence = sqlite.prepare(`
+      INSERT INTO public_visibility_fences
+        (entity_type, entity_id, fence_token, state, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+    `);
+    insertFence.run("video", video.id, rollbackIdentity.fenceToken, "blocked", 1);
+    assert.equal(await inspectLegacyImportFenceRecovery(recoveryInput), "retain", "committed or competing fence blocks release");
+    const activeBefore = await readLegacyImportFenceSnapshot(serverDb, rollbackIdentity);
+    const activeReads = stats.reads;
+    assert.equal(await inspectLegacyImportFenceRecovery({ ...recoveryInput, before: activeBefore }), "retain");
+    assert.equal(stats.reads, activeReads, "pre-existing active token is never a rollback candidate");
+    sqlite.prepare("DELETE FROM public_visibility_fences WHERE entity_type = 'video' AND entity_id = ?").run(video.id);
+
+    const receipt = sqlite.prepare("SELECT id FROM audit_logs WHERE table_name = 'legacy_import_steps' AND target_id LIKE '%:videos:%' LIMIT 1").get();
+    assert.ok(receipt);
+    sqlite.prepare("INSERT INTO audit_logs (" + auditColumns.map(quote).join(", ") + ") SELECT " +
+      auditColumns.map((column) => column === "id" ? "?" : quote(column)).join(", ") +
+      " FROM audit_logs WHERE id = ?").run("recovery-receipt", receipt.id);
+    const recoveryTarget = recoveryStep.runDigest + ":" + recoveryStep.planHash.slice(0, 24) + ":videos:0";
+    sqlite.prepare("UPDATE audit_logs SET target_id = ?, context = ? WHERE id = ?")
+      .run(recoveryTarget, "unexpected-context", "recovery-receipt");
+    assert.equal(await inspectLegacyImportFenceRecovery(recoveryInput), "retain", "even an ambiguous receipt blocks release");
+    sqlite.prepare("DELETE FROM audit_logs WHERE id = ?").run("recovery-receipt");
+    assert.equal(await inspectLegacyImportFenceRecovery(recoveryInput), "rollback_candidate");
+    assert.equal(stats.batches, recoveryBatches, "recovery inspection does not mutate D1");
+    assert.equal(wakes.length, recoveryWakes);
+
     const replacementPlan = structuredClone(plan);
     replacementPlan.videos[0].title = "Replaced video";
     replacementPlan.videos[0].created_at = 1900000000; // must NOT overwrite original created_at.
