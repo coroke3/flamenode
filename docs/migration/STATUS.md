@@ -48,7 +48,7 @@ Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 
 テストは既存suite・fixture・helperを優先し、既存ファイルへの最小限の回帰ケース追加を原則とする。既存テストで受入条件を証明できる場合は新規テストを作らない。重複・同等ケース、証跡だけのtest-only PR、別ファイルへの細分化を避ける。新規ファイルは既存suiteでは必要な契約を検証できない場合に限り、理由・非重複性をPRへ記録する。必須検証・安全性・失敗系カバレッジを削減したり、未実行をPASSにしたりしない。
 
-2026-11-28 集計: 183 MIG / DONE 131 / READY 30 / BLOCKED 22 (71.6% task-count; individual rows authoritative). READYはmainの依存状態であり、稼働中のowner/進捗はopen PRのwork-itemを確認する。
+2026-11-28 集計: 183 MIG / DONE 132 / READY 31 / BLOCKED 20 (72.1% task-count; individual rows authoritative). READYはmainの依存状態であり、稼働中のowner/進捗はopen PRのwork-itemを確認する。
 
 - 1 iteration = exactly 1 MIG task
 - 原則 1 task = 1 short-lived branch = 1 PR = 1 squash merge
