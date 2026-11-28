@@ -38,7 +38,7 @@ function stopTree(child) {
   });
 }
 
-test("U04a-U04c: local workerd/D1 actor history, bounded reader, and lease retention semantics", { timeout: 120_000 }, async () => {
+test("U04a-U04e: local workerd/D1 actor history, bounded reader, lease retention, and write-amplification measurements", { timeout: 120_000 }, async () => {
   const loggerSource = fs.readFileSync(path.join(REPO_ROOT, "packages/server-core/src/audit/logger.ts"), "utf8");
   assert.match(loggerSource, /discord_id: row\.discord_id \?\? null,[\s\S]*discord_name: row\.discord_name \?\? null,[\s\S]*x_user_id: row\.active_x_user_id \?\? null,[\s\S]*x_name: row\.x_name \?\? null,[\s\S]*icon_url: row\.x_icon_url \|\| row\.user_image \|\| null/);
 
@@ -73,6 +73,7 @@ test("U04a-U04c: local workerd/D1 actor history, bounded reader, and lease reten
     "const sourceBytesSql = 'SELECT typeof(u.discord_id) AS discord_id_type, hex(CAST(u.discord_id AS BLOB)) AS discord_id_hex, typeof(u.name) AS discord_name_type, hex(CAST(u.name AS BLOB)) AS discord_name_hex, typeof(u.active_x_user_id) AS active_x_user_id_type, hex(CAST(u.active_x_user_id AS BLOB)) AS active_x_user_id_hex, typeof(u.image) AS user_image_type, hex(CAST(u.image AS BLOB)) AS user_image_hex, typeof(x.x_name) AS x_name_type, hex(CAST(x.x_name AS BLOB)) AS x_name_hex, typeof(x.icon_url) AS x_icon_url_type, hex(CAST(x.icon_url AS BLOB)) AS x_icon_url_hex FROM u04a_user u LEFT JOIN u04a_x_users x ON x.id = u.active_x_user_id WHERE u.id = ?';",
     "const snapshotBytesSql = 'SELECT typeof(discord_id) AS discord_id_type, hex(CAST(discord_id AS BLOB)) AS discord_id_hex, typeof(discord_name) AS discord_name_type, hex(CAST(discord_name AS BLOB)) AS discord_name_hex, typeof(active_x_user_id) AS active_x_user_id_type, hex(CAST(active_x_user_id AS BLOB)) AS active_x_user_id_hex, typeof(user_image) AS user_image_type, hex(CAST(user_image AS BLOB)) AS user_image_hex, typeof(x_name) AS x_name_type, hex(CAST(x_name AS BLOB)) AS x_name_hex, typeof(x_icon_url) AS x_icon_url_type, hex(CAST(x_icon_url AS BLOB)) AS x_icon_url_hex FROM audit_actor_snapshots_u04a WHERE id = ?';",
     "async function run(db, sql, params = []) { const statement = db.prepare(sql); const bound = params.length ? statement.bind(...params) : statement; const r = await bound.run(); if (r.success !== true) throw new Error('D1 run failed'); return Number(r.meta?.changes ?? 0); }",
+    "async function runMeta(db, sql, params = []) { const statement = db.prepare(sql); const bound = params.length ? statement.bind(...params) : statement; const r = await bound.run(); if (r.success !== true) throw new Error('D1 metric run failed'); return r.meta ?? {}; }",
     "async function all(db, sql, params = []) { const statement = db.prepare(sql); const bound = params.length ? statement.bind(...params) : statement; const r = await bound.all(); if (r.success !== true || !Array.isArray(r.results)) throw new Error('D1 all failed'); return r.results; }",
     "async function probe(db) {",
     "  await run(db, 'CREATE TABLE IF NOT EXISTS u04a_user (id TEXT PRIMARY KEY, discord_id TEXT, name TEXT, active_x_user_id TEXT, image TEXT, actor_snapshot_version INTEGER NOT NULL DEFAULT 0)');",
@@ -93,6 +94,8 @@ test("U04a-U04c: local workerd/D1 actor history, bounded reader, and lease reten
     "      await run(db, 'CREATE TRIGGER IF NOT EXISTS ' + table + '_' + kind + ' AFTER ' + event + ' ON ' + table + when + ' BEGIN SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM u04a_actor_sequence WHERE id = 1 AND typeof(n) = \\'integer\\' AND n >= 0 AND n < 9007199254740991) THEN RAISE(ABORT, \\'ACTOR_VERSION_UNAVAILABLE\\') END; UPDATE u04a_actor_sequence SET n = n + 1 WHERE id = 1; UPDATE ' + table + ' SET actor_snapshot_version = (SELECT n FROM u04a_actor_sequence WHERE id = 1) WHERE id = NEW.id; INSERT INTO ' + historyTable + ' (' + historyInsertColumns + ') SELECT ' + historySelectColumns + ' FROM ' + table + ' WHERE id = NEW.id; END');",
     "    }",
     "  }",
+    "  await run(db, 'CREATE TABLE IF NOT EXISTS u04e_user_baseline (id TEXT PRIMARY KEY, discord_id TEXT, name TEXT, active_x_user_id TEXT, image TEXT, actor_snapshot_version INTEGER NOT NULL DEFAULT 0)');",
+    "  await run(db, \"CREATE TABLE IF NOT EXISTS u04e_x_users_baseline (id TEXT PRIMARY KEY, x_name TEXT NOT NULL, icon_url TEXT, approval_status TEXT NOT NULL DEFAULT 'pending', actor_snapshot_version INTEGER NOT NULL DEFAULT 0)\");",
     "  await run(db, 'CREATE TABLE IF NOT EXISTS u04a_resource (id TEXT PRIMARY KEY, value TEXT NOT NULL)');",
     "  await run(db, \"INSERT OR IGNORE INTO u04a_resource VALUES ('target', 'before')\");",
     "  await run(db, 'CREATE TABLE IF NOT EXISTS audit_actor_snapshots_u04a (id TEXT PRIMARY KEY, discord_id, discord_name, active_x_user_id, user_image, x_name, x_icon_url, user_version INTEGER NOT NULL, x_version INTEGER NOT NULL)');",
@@ -433,6 +436,27 @@ test("U04a-U04c: local workerd/D1 actor history, bounded reader, and lease reten
     "  rollbackStatements.push(db.prepare('INSERT INTO u04a_forced_failure(value) VALUES (2)'));",
     "  const lateFailed = await batchFailed(rollbackStatements);",
     "  const lateRollback = { failed: lateFailed, snapshotCount: await countSnapshot('fence-rollback'), refCount: await countRef('fence-rollback'), resource: await getResource(), beforeVersions: beforeRollback, afterVersions: await getVersions(), seqBefore, seqAfter: await getSeq(), liveName: (await all(db, sourceSql, ['admin-1']))[0]?.x_name };",
+    "  // U04e: compare local D1 metadata with and without the test-only history triggers.",
+    "  const metricMeta = meta => ({ rowsWritten: Number(meta?.rows_written ?? -1), rowsRead: Number(meta?.rows_read ?? -1), durationMs: Number(meta?.duration ?? -1), sizeAfter: Number(meta?.size_after ?? -1) });",
+    "  const largeImage = 'u'.repeat(100000);",
+    "  const largeIcon = '🙂'.repeat(10000);",
+    "  const baselineUserMeta = await runMeta(db, 'INSERT INTO u04e_user_baseline (id, discord_id, name, active_x_user_id, image) VALUES (?, ?, ?, ?, ?)', ['u04e-single-user', 'd', 'Baseline', null, largeImage]);",
+    "  const triggeredUserMeta = await runMeta(db, 'INSERT INTO u04a_user (id, discord_id, name, active_x_user_id, image) VALUES (?, ?, ?, ?, ?)', ['u04e-single-user', 'd', 'Baseline', null, largeImage]);",
+    "  const baselineXMeta = await runMeta(db, 'INSERT INTO u04e_x_users_baseline (id, x_name, icon_url) VALUES (?, ?, ?)', ['u04e-single-x', 'Baseline X', largeIcon]);",
+    "  const triggeredXMeta = await runMeta(db, 'INSERT INTO u04a_x_users (id, x_name, icon_url) VALUES (?, ?, ?)', ['u04e-single-x', 'Baseline X', largeIcon]);",
+    "  const bulkRows = Array.from({ length: 8 }, (_, i) => ['u04e-bulk-' + i, 'X ' + i, 'icon-' + i]);",
+    "  const bulkValues = bulkRows.map(() => '(?, ?, ?)').join(',');",
+    "  const bulkParams = bulkRows.flat();",
+    "  const baselineBulkMeta = await runMeta(db, 'INSERT INTO u04e_x_users_baseline (id, x_name, icon_url) VALUES ' + bulkValues, bulkParams);",
+    "  const triggeredBulkMeta = await runMeta(db, 'INSERT INTO u04a_x_users (id, x_name, icon_url) VALUES ' + bulkValues, bulkParams);",
+    "  const sequenceBeforeConcurrent = await getSeq();",
+    "  const concurrentIds = Array.from({ length: 4 }, (_, i) => 'u04e-concurrent-' + i);",
+    "  const concurrentMeta = await Promise.all(concurrentIds.map((id, i) => runMeta(db, 'INSERT INTO u04a_user (id, discord_id, name, active_x_user_id, image) VALUES (?, ?, ?, ?, ?)', [id, 'd-' + i, 'Concurrent ' + i, null, 'image-' + i])));",
+    "  const sequenceAfterConcurrent = await getSeq();",
+    "  const userPayloadBytes = Number((await all(db, 'SELECT COALESCE(SUM(COALESCE(length(CAST(id AS BLOB)),0) + COALESCE(length(CAST(discord_id AS BLOB)),0) + COALESCE(length(CAST(name AS BLOB)),0) + COALESCE(length(CAST(active_x_user_id AS BLOB)),0) + COALESCE(length(CAST(image AS BLOB)),0)),0) AS bytes FROM u04a_user_history WHERE id LIKE ?', ['u04e-%']))[0].bytes);",
+    "  const xPayloadBytes = Number((await all(db, 'SELECT COALESCE(SUM(COALESCE(length(CAST(id AS BLOB)),0) + COALESCE(length(CAST(x_name AS BLOB)),0) + COALESCE(length(CAST(icon_url AS BLOB)),0)),0) AS bytes FROM u04a_x_users_history WHERE id LIKE ?', ['u04e-%']))[0].bytes);",
+    "  const metricMetas = [baselineUserMeta, triggeredUserMeta, baselineXMeta, triggeredXMeta, baselineBulkMeta, triggeredBulkMeta, ...concurrentMeta];",
+    "  const metrics = { metadataAvailable: metricMetas.every(meta => Number.isFinite(Number(meta?.rows_written)) && Number.isFinite(Number(meta?.duration))), single: { user: { baseline: metricMeta(baselineUserMeta), triggered: metricMeta(triggeredUserMeta) }, x: { baseline: metricMeta(baselineXMeta), triggered: metricMeta(triggeredXMeta) } }, bulkX: { count: bulkRows.length, baseline: metricMeta(baselineBulkMeta), triggered: metricMeta(triggeredBulkMeta) }, concurrent: { count: concurrentMeta.length, sequenceDelta: Number(sequenceAfterConcurrent) - Number(sequenceBeforeConcurrent), rowsWritten: concurrentMeta.reduce((sum, meta) => sum + Number(meta?.rows_written ?? 0), 0), maxDurationMs: Math.max(...concurrentMeta.map(meta => Number(meta?.duration ?? 0))) }, historyPayloadBytes: userPayloadBytes + xPayloadBytes, syntheticBackfill: { source: 'synthetic-fixture-only', productionRowsScanned: 0, largeImageBytes: new TextEncoder().encode(largeImage).length, largeIconBytes: new TextEncoder().encode(largeIcon).length, userPayloadBytes, xPayloadBytes } };",
     "  // Exhaustion is terminal for this disposable fixture. Explicit RAISE(ABORT)",
     "  // must not be weakened by an outer OR IGNORE or OR FAIL statement.",
     "  const allocatorOut = [];",
@@ -454,7 +478,7 @@ test("U04a-U04c: local workerd/D1 actor history, bounded reader, and lease reten
     "  const missingFailed = await batchFailed([db.prepare(\"UPDATE OR IGNORE u04a_x_users SET x_name='after-missing' WHERE id='u04a-x'\")]);",
     "  const missing = { failed: missingFailed, versions: await getVersions(), name: (await all(db, sourceSql, ['admin-1']))[0]?.x_name, rows: (await all(db, 'SELECT n FROM u04a_actor_sequence')).length };",
     "  const allocator = { fractionalRejected, oldVersions, atMaxSeq, maxToken, allocatorOut, overflowBatch, missing };",
-    "return { cases: casesOut, blobCanonicalJson: blobCase?.sourceJson ?? null, blobJson1FixtureMatches, json1, json1Error, staleChanges, staleCount, rollbackFailed, rollbackCount, abandonedCount, successRef, fenceOut, positive, interleaving, interleavingFence, interleavingFailure, interleavingFailureFence, immutableHistory, immutableHistoryFailureOut, immutableHistoryLifecycle, cleanupRace: { noFk: cleanupNoFk, fk: cleanupFk }, reader, leaseLifecycle, leaseOrphan, leaseExpiry, lateRollback, allocator };",
+    "return { cases: casesOut, blobCanonicalJson: blobCase?.sourceJson ?? null, blobJson1FixtureMatches, json1, json1Error, staleChanges, staleCount, rollbackFailed, rollbackCount, abandonedCount, successRef, fenceOut, positive, interleaving, interleavingFence, interleavingFailure, interleavingFailureFence, immutableHistory, immutableHistoryFailureOut, immutableHistoryLifecycle, cleanupRace: { noFk: cleanupNoFk, fk: cleanupFk }, reader, leaseLifecycle, leaseOrphan, leaseExpiry, lateRollback, allocator, metrics };",
     "}",
     "export default {",
     "  async fetch(request, env) {",
@@ -627,6 +651,18 @@ test("U04a-U04c: local workerd/D1 actor history, bounded reader, and lease reten
     assert.deepEqual(late.afterVersions, late.beforeVersions);
     assert.equal(late.seqAfter, late.seqBefore);
     assert.equal(late.liveName, "X before");
+    const metrics = body.metrics;
+    assert.equal(metrics.metadataAvailable, true, "Workerd D1 metadata must expose rows_written and duration");
+    assert.ok(metrics.single.user.triggered.rowsWritten > metrics.single.user.baseline.rowsWritten, "user history trigger must add D1 row writes");
+    assert.ok(metrics.single.x.triggered.rowsWritten > metrics.single.x.baseline.rowsWritten, "X history trigger must add D1 row writes");
+    assert.ok(metrics.bulkX.triggered.rowsWritten > metrics.bulkX.baseline.rowsWritten, "bulk X history trigger must add D1 row writes");
+    assert.equal(metrics.bulkX.count, 8);
+    assert.equal(metrics.concurrent.count, 4);
+    assert.equal(metrics.concurrent.sequenceDelta, 4, "concurrent actor inserts must serialize unique sequence allocations");
+    assert.ok(metrics.concurrent.rowsWritten > 0);
+    assert.ok(metrics.historyPayloadBytes >= metrics.syntheticBackfill.largeImageBytes + metrics.syntheticBackfill.largeIconBytes, "history payload byte estimate must include synthetic large legacy fields");
+    assert.equal(metrics.syntheticBackfill.productionRowsScanned, 0);
+    assert.equal(metrics.syntheticBackfill.source, "synthetic-fixture-only");
     const allocator = body.allocator;
     assert.equal(allocator.fractionalRejected, true);
     assert.equal(allocator.atMaxSeq, Number.MAX_SAFE_INTEGER);
