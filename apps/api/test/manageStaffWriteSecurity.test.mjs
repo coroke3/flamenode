@@ -199,6 +199,54 @@ test("SEC-800: preserve exact trusted owner and confirmation messages, and CSV a
   }
 });
 
+test("SEC-800: SA-031 validates permission input before staff mutation for every preset", async () => {
+  const unknown = "event.not_a_real_permission";
+  const boundedMessage = "不正な権限キーです: " + unknown;
+  const deniedCases = [
+    ["POST", "/", { ...upsert, permission_keys: unknown }, boundedMessage],
+    ["POST", "/", { ...upsert, permission_preset: "custom", permission_keys: "event.members, " + unknown }, boundedMessage],
+    ["PUT", "/s-owner", { ...upsert, staff_id: "s-owner", permission_keys: unknown }, boundedMessage],
+    ["POST", "/", { ...upsert, permission_keys: "x".repeat(100) }, "不正な権限キーです: " + "x".repeat(100)],
+    ["POST", "/", { ...upsert, permission_keys: "x".repeat(101) }, "入力エラー"],
+    ["POST", "/", { ...upsert, permission_keys: "event.members,".repeat(40) + unknown }, "入力エラー"],
+  ];
+  for (const [method, path, body, message] of deniedCases) {
+    const s = setup({ fault: { match: staffRead, error: new Error(CANARY) } });
+    try {
+      await withThrowingDiagnostics(async ({ errors }) => {
+        const result = await s.send(method, path, body);
+        assert.equal(result.status, 400, await result.clone().text());
+        assert.deepEqual(await result.json(), { ok: false, message });
+        assert.equal(result.headers.get("cache-control"), "private, no-store");
+        assert.deepEqual(errors, []);
+      });
+      assert.equal(s.receipt.readFaults, 0);
+      assert.equal(s.stats.batches, 0);
+      assert.deepEqual(s.before(), s.initial);
+    } finally {
+      s.sqlite.close();
+    }
+  }
+  // Valid aliases, duplicates, and valid long lists still reach preparation.
+  // An identical-looking provider exception may not become an input error.
+  for (const keys of ["videos.title, video.basics, videos.title", "event.members,".repeat(40)]) {
+    const s = setup({ fault: { match: staffRead, error: new Error(boundedMessage) } });
+    try {
+      await withThrowingDiagnostics(async ({ errors }) => {
+        const result = await s.send("POST", "/", { ...upsert, permission_keys: keys });
+        assert.equal(result.status, 503, await result.clone().text());
+        assert.deepEqual(await result.json(), { ok: false, message: GENERIC });
+        assert.deepEqual(errors, [["[MIG-0654] staff upsert unavailable"]]);
+      });
+      assert.equal(s.receipt.readFaults, 1);
+      assert.equal(s.stats.batches, 0);
+      assert.deepEqual(s.before(), s.initial);
+    } finally {
+      s.sqlite.close();
+    }
+  }
+});
+
 test("SEC-800: CSV owner conflicts return local row-specific messages, not provider text", async () => {
   const s = setup();
   const existingOwner = { ...csv().rows[0], lineNumber: 3, x_user_id: "owner_x" };

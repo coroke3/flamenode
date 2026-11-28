@@ -72,14 +72,29 @@ async function permitted(c: import("hono").Context<AppEnv>): Promise<StaffContex
   }
 }
 
-function assignment(data: UpsertBody, isSiteAdmin: boolean) {
+function parseStaffPermissionInput(raw: string | null | undefined):
+  { ok: true; keys: string[] } | { ok: false; message: string } {
+  try {
+    return { ok: true, keys: parseEventStaffPermissionKeys(raw) };
+  } catch {
+    // This catch surrounds only the pure domain input parser, never D1.
+    // Build the bounded CURRENT message from the validated request, not
+    // from error.message, and never allow it in the mutation error matcher.
+    const invalid = raw && raw.length <= 512
+      ? raw.split(",").map((key) => key.trim()).find((key) => key && !canonicalizePermissionKey(key))
+      : null;
+    return { ok: false, message: invalid && invalid.length <= 100
+      ? `不正な権限キーです: ${invalid}` : "入力エラー" };
+  }
+}
+
+function assignment(data: UpsertBody, raw: readonly string[], isSiteAdmin: boolean) {
   if (data.permission_preset === "xid_reviewer" && !isSiteAdmin) {
     throw new Error("X ID確認権限は site admin 専用です。");
   }
   if (data.permission_preset !== "custom") {
     return { permission_preset: data.permission_preset, custom_permission_keys_json: null };
   }
-  const raw = parseEventStaffPermissionKeys(data.permission_keys);
   if (!isSiteAdmin && raw.some((key) => {
     const canonical = canonicalizePermissionKey(key);
     return canonical !== null && isAdminOnlyKey(canonical);
@@ -213,9 +228,13 @@ async function upsert(c: import("hono").Context<AppEnv>, targetId: string | null
   if (!xId) return deny(c, "X IDが不正です", 400);
   const access = await permitted(c);
   if (access instanceof Response) return access;
+  // CURRENT validates the supplied key list for every preset, including
+  // non-custom presets whose valid keys will subsequently be ignored.
+  const permissionInput = parseStaffPermissionInput(parsed.data.permission_keys);
+  if (!permissionInput.ok) return deny(c, permissionInput.message, 400);
   try {
     const isAdmin = access.user.role === "admin";
-    const a = assignment(parsed.data, isAdmin);
+    const a = assignment(parsed.data, permissionInput.keys, isAdmin);
     // Authorization is done before any private staff/X-user record is read.
     // Bounded legacy scan prevents two differently formatted rows from creating
     // duplicate canonical X identities. Fail closed when coverage is incomplete.
