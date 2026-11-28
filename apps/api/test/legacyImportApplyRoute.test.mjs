@@ -47,6 +47,21 @@ import {
 } from "@flamenode/server-core/legacyImport/d1Apply";
 import { createAdminD1, seedBase, seedEvent } from "./helpers/sqliteD1.mjs";
 
+// The guards return lazy db.run() SQL wrappers, not prepared D1 queries.
+// Production mutateWithAudit normalizes these wrappers before db.batch().
+// For the isolated assertion-only tests, compile and bind the same SQL
+// directly to the underlying fixture D1 client, without inventing audit rows.
+// Never await the lazy wrapper separately: all statements share one batch.
+async function runBoundTestBatch(serverDb, statements) {
+  const client = serverDb.$client;
+  const bound = statements.map((statement) => {
+    assert.equal(typeof statement.getSQL, "function");
+    const query = serverDb.dialect.sqlToQuery(statement.getSQL());
+    return client.prepare(query.sql).bind(...query.params);
+  });
+  return client.batch(bound);
+}
+
 const SITE = "https://app.flamenode.example";
 // CURRENT RH-002 durable run identity; the bearer preview token itself is never persisted.
 const previewFingerprint = (token) => createHash("sha256").update(token).digest("hex");
@@ -383,15 +398,15 @@ test("MIG-0645 U02ar D1 fence ownership snapshot and same-batch CAS", async () =
       assert.equal(stats.reads - readBefore, 1);
       assert.equal(stats.batches, batchBefore, "snapshot never writes");
 
-      const check = (snapshot) => serverDb.batch([buildLegacyImportFenceAssertion(serverDb, snapshot)]);
-      const checkThenWrite = (snapshot) => serverDb.batch([
+      const check = (snapshot) => runBoundTestBatch(serverDb, [buildLegacyImportFenceAssertion(serverDb, snapshot)]);
+      const checkThenWrite = (snapshot) => runBoundTestBatch(serverDb, [
         buildLegacyImportFenceAssertion(serverDb, snapshot),
         serverDb.run(sql`UPDATE legacy_fence_guard_test SET value = value + 1`),
       ]);
       put(otherType, identity.entityId, "unrelated-token", "blocked");
       await check(absent); // same ID with a different type must not collide.
       put(entityType, identity.entityId, "foreign-token", "blocked");
-      await assert.rejects(checkThenWrite(absent), "fence inserted after read must abort");
+      await assert.rejects(checkThenWrite(absent), /malformed JSON/i, "fence inserted after read must abort");
       assert.equal(sqlite.prepare("SELECT value FROM legacy_fence_guard_test").get().value, 0);
       await assert.rejects(readLegacyImportFenceSnapshot(serverDb, identity), "active foreign token is not import-owned");
 
@@ -413,7 +428,7 @@ test("MIG-0645 U02ar D1 fence ownership snapshot and same-batch CAS", async () =
       ];
       for (const [field, changed, original] of drifts) {
         change(field, changed);
-        await assert.rejects(checkThenWrite(captured), "full-row CAS detects " + field);
+        await assert.rejects(checkThenWrite(captured), /malformed JSON/i, "full-row CAS detects " + field);
         assert.equal(sqlite.prepare("SELECT value FROM legacy_fence_guard_test").get().value, 0);
         change(field, original);
       }
@@ -431,7 +446,7 @@ test("MIG-0645 U02ar D1 fence ownership snapshot and same-batch CAS", async () =
       change("requirements_json", null);
       sqlite.prepare("DELETE FROM public_visibility_fences WHERE entity_type = ? AND entity_id = ?")
         .run(entityType, identity.entityId);
-      await assert.rejects(checkThenWrite(released), "released row deleted after read must abort");
+      await assert.rejects(checkThenWrite(released), /malformed JSON/i, "released row deleted after read must abort");
       await check(absent);
       sqlite.prepare("DELETE FROM public_visibility_fences WHERE entity_type = ? AND entity_id = ?")
         .run(otherType, identity.entityId);
@@ -1683,16 +1698,16 @@ test("MIG-0645 U02al Hono: new video rows, provenance, queue and receipt are ato
     // U02an: build the assertion before the mutation race, execute it
     // through the same D1 batch interface used by the future replacement.
     // A sentinel UPDATE following a rejected assertion must never execute.
-    const assertBatch = async (captured) => serverDb.batch([
+    const assertBatch = async (captured) => runBoundTestBatch(serverDb, [
       buildLegacyVideoReplacementAssertion(serverDb, captured),
     ]);
     await assertBatch(snapshot);
-    const guardedBatch = async (captured) => serverDb.batch([
+    const guardedBatch = async (captured) => runBoundTestBatch(serverDb, [
       buildLegacyVideoReplacementAssertion(serverDb, captured),
       serverDb.run(sql`UPDATE videos SET score = 99 WHERE id = ${video.id}`),
     ]);
     sqlite.prepare("UPDATE videos SET app_like_count = 8 WHERE id = ?").run(video.id);
-    await assert.rejects(guardedBatch(snapshot), "unmanaged column race must abort the D1 batch");
+    await assert.rejects(guardedBatch(snapshot), /malformed JSON/i, "unmanaged column race must abort the D1 batch");
     assert.equal(sqlite.prepare("SELECT score FROM videos WHERE id = ?").get(video.id).score, 0);
     const currentCounterSnapshot = await readLegacyVideoReplacementSnapshot(serverDb, video.id);
     await assertBatch(currentCounterSnapshot);
@@ -1701,23 +1716,23 @@ test("MIG-0645 U02al Hono: new video rows, provenance, queue and receipt are ato
     for (const [table, field, changed, original, key] of drifts) {
       const update = sqlite.prepare("UPDATE " + table + " SET " + field + " = ? WHERE " + key + " = ?");
       update.run(changed, video.id);
-      await assert.rejects(guardedBatch(snapshot), "transaction guard must catch drift in " + table);
+      await assert.rejects(guardedBatch(snapshot), /malformed JSON/i, "transaction guard must catch drift in " + table);
       assert.equal(sqlite.prepare("SELECT score FROM videos WHERE id = ?").get(video.id).score, 0);
       update.run(original, video.id);
     }
     sqlite.prepare("INSERT INTO video_events(video_id, event_id) VALUES (?, ?)").run(video.id, "ev-extra");
-    await assert.rejects(guardedBatch(snapshot), "additional related row must abort");
+    await assert.rejects(guardedBatch(snapshot), /malformed JSON/i, "additional related row must abort");
     sqlite.prepare("DELETE FROM video_events WHERE video_id = ? AND event_id = ?").run(video.id, "ev-extra");
     sqlite.prepare("DELETE FROM video_events WHERE video_id = ?").run(video.id);
-    await assert.rejects(guardedBatch(snapshot), "removed related row must abort");
+    await assert.rejects(guardedBatch(snapshot), /malformed JSON/i, "removed related row must abort");
     sqlite.prepare("INSERT INTO video_events(video_id, event_id) VALUES (?, ?)").run(video.id, "ev-1");
 
     sqlite.prepare("INSERT INTO audit_logs (" + auditColumns.map(quote).join(", ") + ") SELECT " +
       auditColumns.map((column) => column === "id" ? "?" : quote(column)).join(", ") +
       " FROM audit_logs WHERE id = ?").run("competing-video-proof", snapshot.audit.id);
-    await assert.rejects(guardedBatch(snapshot), "ambiguous latest proof must abort");
+    await assert.rejects(guardedBatch(snapshot), /malformed JSON/i, "ambiguous latest proof must abort");
     sqlite.prepare("UPDATE audit_logs SET created_at = created_at + 1 WHERE id = ?").run("competing-video-proof");
-    await assert.rejects(guardedBatch(snapshot), "newer latest proof must abort");
+    await assert.rejects(guardedBatch(snapshot), /malformed JSON/i, "newer latest proof must abort");
     sqlite.prepare("DELETE FROM audit_logs WHERE id = ?").run("competing-video-proof");
     await assertBatch(snapshot);
     assert.equal(sqlite.prepare("SELECT score FROM videos WHERE id = ?").get(video.id).score, 0);
@@ -1758,7 +1773,7 @@ test("MIG-0645 U02al Hono: new video rows, provenance, queue and receipt are ato
     assert.equal(prepared.nextAnswers.length, 2);
     assert.equal(prepared.proofs.length, 1);
     assert.equal(prepared.custom_answers_digest, createHash("sha256").update(JSON.stringify(prepared.nextAnswers)).digest("hex"));
-    await serverDb.batch([buildLegacyAnswerReplacementAssertion(serverDb, prepared)]);
+    await runBoundTestBatch(serverDb, [buildLegacyAnswerReplacementAssertion(serverDb, prepared)]);
 
     const answerProofId = prepared.proofs[0].id;
     const cloneAnswerProof = sqlite.prepare("INSERT INTO audit_logs (" + auditColumns.map(quote).join(", ") + ") SELECT " +
@@ -1766,25 +1781,25 @@ test("MIG-0645 U02al Hono: new video rows, provenance, queue and receipt are ato
       " FROM audit_logs WHERE id = ?");
     cloneAnswerProof.run("competing-answer-proof", answerProofId);
     await assert.rejects(prepareLegacyVideoReplacementAnswers(changedInput), "tied answer proofs are ambiguous");
-    const answerGuardedBatch = async () => serverDb.batch([
+    const answerGuardedBatch = async () => runBoundTestBatch(serverDb, [
       buildLegacyVideoReplacementAssertion(serverDb, snapshot),
       buildLegacyAnswerReplacementAssertion(serverDb, prepared),
       serverDb.run(sql`UPDATE videos SET score = 99 WHERE id = ${video.id}`),
     ]);
-    await assert.rejects(answerGuardedBatch(), "a tied answer audit appearing after read must abort");
+    await assert.rejects(answerGuardedBatch(), /malformed JSON/i, "a tied answer audit appearing after read must abort");
     sqlite.prepare("UPDATE audit_logs SET created_at = created_at + 1, context = ? WHERE id = ?")
       .run("manual-edit", "competing-answer-proof");
     await assert.rejects(prepareLegacyVideoReplacementAnswers(changedInput), "later non-import audit blocks replacement");
-    await assert.rejects(answerGuardedBatch(), "newer non-import audit appearing after read must abort");
+    await assert.rejects(answerGuardedBatch(), /malformed JSON/i, "newer non-import audit appearing after read must abort");
     assert.equal(sqlite.prepare("SELECT score FROM videos WHERE id = ?").get(video.id).score, 0);
     sqlite.prepare("DELETE FROM audit_logs WHERE id = ?").run("competing-answer-proof");
-    await serverDb.batch([buildLegacyAnswerReplacementAssertion(serverDb, prepared)]);
+    await runBoundTestBatch(serverDb, [buildLegacyAnswerReplacementAssertion(serverDb, prepared)]);
 
     const originalAfterJson = prepared.proofs[0].after_json;
     sqlite.prepare("UPDATE audit_logs SET after_json = ? WHERE id = ?")
       .run(JSON.stringify({ ...snapshot.beforeAnswers[0], updated_at: now }), answerProofId);
     await assert.rejects(prepareLegacyVideoReplacementAnswers(changedInput), "mismatched answer snapshot blocks replacement");
-    await assert.rejects(answerGuardedBatch(), "changed proof payload must abort");
+    await assert.rejects(answerGuardedBatch(), /malformed JSON/i, "changed proof payload must abort");
     sqlite.prepare("UPDATE audit_logs SET after_json = ? WHERE id = ?").run(originalAfterJson, answerProofId);
     await assert.rejects(prepareLegacyVideoReplacementAnswers({
       ...changedInput, projection: {
