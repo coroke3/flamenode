@@ -1586,7 +1586,7 @@ test("MIG-0645 U02ak: new video projection matches CURRENT audit key order and r
   ]);
   const digest = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
   assert.deepEqual(projected.snapshotProof, {
-    entity_kind: "video", managed_digest: digest(expectedManaged),
+    entity_kind: "video", digest_order: "sqlite-binary-v1", managed_digest: digest(expectedManaged),
     events_digest: digest(projected.nextEvents), members_digest: digest(projected.nextMembers),
     chapters_digest: digest(projected.nextChapters), softwares_digest: digest(projected.nextSoftwares),
     metadata_digest: digest(projected.nextMetadata), custom_answers_digest: digest(projected.nextAnswers),
@@ -1647,6 +1647,149 @@ function extendLegacyImportVideoCreateSchema(sqlite) {
       PRIMARY KEY(video_id, event_id, question_id));
   `);
 }
+
+test("MIG-0645 U02az: mixed-case and Unicode video proofs use SQLite BINARY; historical proofs match one whole order only", async () => {
+  const { bucket } = previewBucket();
+  let serverDb;
+  const { request, sqlite } = setup({
+    bucket,
+    applyStep: (input) => { serverDb = input.db; return legacyImportD1ApplyStep(input); },
+  });
+  extendLegacyImportUserSchema(sqlite);
+  extendLegacyImportSoftwareSchema(sqlite);
+  extendLegacyImportEventSchema(sqlite);
+  extendLegacyImportQuestionSchema(sqlite);
+  extendLegacyImportVideoCreateSchema(sqlite);
+  seedEvent(sqlite, { id: "ev-1", visibility_status: "private" });
+  seedEvent(sqlite, { id: "EV-1", visibility_status: "private" });
+  const plan = questionPlan(2);
+  const video = {
+    id: "ordering-video", primary_event_id: "ev-1", creator_x_user_id: null,
+    collaboration_type: "individual", source_type: "youtube", creator_display_name: "Creator",
+    creator_display_name_yomi: null, creator_icon_url: null, creator_youtube_channel_url: null,
+    creator_profile_text: null, creator_other_social_links: null, title: "Order fixture",
+    music: null, credit: null, music_reference_url: null, closing_comment: null,
+    youtube_video_id: "abcdefghijk", intro_comment: null, highlights: null, production_story: null,
+    visibility_status: "private", scheduling_type: "manual", scheduled_time: null, created_at: 1700000000,
+  };
+  plan.videos.push(video);
+  for (const event_id of ["ev-1", "EV-1"]) plan.videoEvents.push({ video_id: video.id, event_id });
+  for (const [i, id] of ["member-a", "member-A"].entries()) plan.videoMembers.push({
+    id, video_id: video.id, x_user_id: null, name: id, role: null, order_index: i,
+  });
+  for (const [i, id] of ["\uE000", "\u{1F600}"].entries()) plan.videoChapters.push({
+    id, video_id: video.id, x_user_id: null, chapter_time: i, chapter_label: id, note: null, visibility: "public",
+  });
+  for (const [i, id] of ["question-a", "question-A"].entries()) {
+    plan.eventCustomQuestions[i].id = id;
+    plan.videoCustomAnswers.push({
+      video_id: video.id, event_id: "ev-1", question_id: id,
+      question_key: plan.eventCustomQuestions[i].question_key, answer_text: id, answer_json: null,
+    });
+  }
+  const digest = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+  const byteCompare = (a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b));
+  const by = (rows, keys, compare) => [...rows].sort((left, right) => {
+    for (const key of keys) {
+      const order = compare(left[key], right[key]);
+      if (order) return order;
+    }
+    return 0;
+  });
+  const localeCompare = (a, b) => a.localeCompare(b);
+  try {
+    const credential = await createApplyCredential(bucket, ADMIN.id, plan);
+    await reachQuestionStage(request, credential.form);
+    assert.equal((await request(credential.form())).status, 200);
+    const created = await request(credential.form());
+    assert.equal(created.status, 200, JSON.stringify(await created.clone().json()));
+    assert.equal((await created.json()).result.created.videos, 1);
+    const saved = await readLegacyVideoReplacementSnapshot(serverDb, video.id);
+    const versioned = JSON.parse(saved.audit.after_json);
+    assert.equal(versioned.digest_order, "sqlite-binary-v1");
+    const sets = [
+      ["events_digest", saved.beforeEvents, ["event_id"]],
+      ["members_digest", saved.beforeMembers, ["id"]],
+      ["chapters_digest", saved.beforeChapters, ["id"]],
+      ["softwares_digest", saved.beforeSoftwares, ["software_id"]],
+      ["metadata_digest", saved.beforeMetadata, ["video_id"]],
+      ["custom_answers_digest", saved.beforeAnswers, ["event_id", "question_id"]],
+    ];
+    const historicalBinary = { ...versioned };
+    delete historicalBinary.digest_order;
+    const historicalLocale = { ...historicalBinary };
+    for (const [key, rows, keys] of sets) {
+      assert.deepEqual(rows, by(rows, keys, byteCompare), key + ": persisted SQLite ordering");
+      assert.equal(versioned[key], digest(rows), key + ": exact persisted proof");
+      historicalLocale[key] = digest(by(rows, keys, localeCompare));
+    }
+    assert.notEqual(historicalLocale.events_digest, historicalBinary.events_digest);
+    assert.notEqual(historicalLocale.members_digest, historicalBinary.members_digest);
+    const putProof = (proof) => sqlite.prepare("UPDATE audit_logs SET after_json = ? WHERE id = ?")
+      .run(JSON.stringify(proof), saved.audit.id);
+    putProof(historicalBinary);
+    assert.deepEqual((await readLegacyVideoReplacementSnapshot(serverDb, video.id)).proof, historicalBinary);
+    putProof(historicalLocale);
+    const legacy = await readLegacyVideoReplacementSnapshot(serverDb, video.id);
+    assert.deepEqual(legacy.proof, historicalLocale);
+    await runBoundTestBatch(serverDb, [buildLegacyVideoReplacementAssertion(serverDb, legacy)]);
+    // Raw-row CAS still refuses drift even after a historical proof matches.
+    sqlite.prepare("UPDATE video_members SET name = 'edited' WHERE id = 'member-a'").run();
+    await assert.rejects(runBoundTestBatch(serverDb, [buildLegacyVideoReplacementAssertion(serverDb, legacy)]), /malformed JSON/i);
+    await assert.rejects(readLegacyVideoReplacementSnapshot(serverDb, video.id));
+    sqlite.prepare("UPDATE video_members SET name = 'member-a' WHERE id = 'member-a'").run();
+
+    for (const invalid of [
+      { ...historicalLocale, digest_order: "sqlite-binary-v1" },
+      { ...historicalBinary, digest_order: "unknown-order" },
+      { ...historicalBinary, digest_order: null },
+      { ...historicalBinary, members_digest: historicalLocale.members_digest },
+    ]) {
+      putProof(invalid);
+      await assert.rejects(readLegacyVideoReplacementSnapshot(serverDb, video.id));
+    }
+    // A successful historical replacement emits a new explicit binary proof,
+    // including the digest of retained and updated custom answers.
+    putProof(historicalLocale);
+    sqlite.prepare("UPDATE audit_logs SET created_at = 1 WHERE table_name IN ('legacy_import_entity_snapshots', 'video_custom_answers')").run();
+    const changed = structuredClone(plan);
+    changed.videos[0].title = "Reordered replacement";
+    changed.videoCustomAnswers[0].answer_text = "Changed";
+    const replacement = await createApplyCredential(bucket, ADMIN.id, changed, "replace_imported");
+    await reachQuestionStage(request, replacement.form);
+    assert.equal((await request(replacement.form())).status, 200);
+    const replaced = await request(replacement.form());
+    assert.equal(replaced.status, 200, JSON.stringify(await replaced.clone().json()));
+    assert.equal((await replaced.json()).result.replaced.videos, 1);
+    const current = await readLegacyVideoReplacementSnapshot(serverDb, video.id);
+    assert.equal(current.proof.digest_order, "sqlite-binary-v1");
+    assert.equal(current.proof.custom_answers_digest, digest(current.beforeAnswers));
+    assert.equal(current.video.title, "Reordered replacement");
+    assert.equal(current.beforeAnswers.find((row) => row.question_id === "question-a").answer_text, "Changed");
+
+    // Legacy locale-equivalent IDs have no unique reconstruction. Create a
+    // bounded synthetic historical row set, not an actual product mutation.
+    const first = current.beforeMembers.find((row) => row.id === "member-a");
+    const tiedMembers = [
+      { ...first, id: "\u00e9" }, { ...first, id: "e\u0301" },
+    ];
+    assert.equal(tiedMembers[0].id.localeCompare(tiedMembers[1].id), 0);
+    const insert = sqlite.prepare("INSERT INTO video_members (" + Object.keys(first).join(", ") + ") VALUES (" +
+      Object.keys(first).map(() => "?").join(", ") + ")");
+    for (const row of tiedMembers) insert.run(...Object.keys(first).map((key) => row[key]));
+    const allMembers = [...current.beforeMembers, ...tiedMembers];
+    const ambiguous = { ...current.proof };
+    delete ambiguous.digest_order;
+    ambiguous.members_digest = digest(by(allMembers, ["id"], localeCompare));
+    ambiguous.events_digest = digest(by(current.beforeEvents, ["event_id"], localeCompare));
+    ambiguous.chapters_digest = digest(by(current.beforeChapters, ["id"], localeCompare));
+    ambiguous.custom_answers_digest = digest(by(current.beforeAnswers, ["event_id", "question_id"], localeCompare));
+    sqlite.prepare("UPDATE audit_logs SET after_json = ? WHERE id = ?").run(JSON.stringify(ambiguous), current.audit.id);
+    await assert.rejects(readLegacyVideoReplacementSnapshot(serverDb, video.id), "legacy ties must fail closed");
+  } finally {
+    sqlite.close();
+  }
+});
 
 test("MIG-0645 U02al Hono: new video rows, provenance, queue and receipt are atomic; final R2 replay does not repeat wakes", async () => {
   const { bucket, failNextCompletion } = previewBucket({ failCompleteOnce: true });

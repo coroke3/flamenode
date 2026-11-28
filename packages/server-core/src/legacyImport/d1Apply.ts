@@ -342,6 +342,82 @@ async function snapshotDigest(value: unknown): Promise<string> {
     .join("");
 }
 
+// New Hono proofs use the same byte ordering as SQLite TEXT COLLATE BINARY.
+// Keep projection and mutation iteration order unchanged; only hash copies.
+// Unversioned CURRENT receipts may have used localeCompare. Never accept a
+// per-field mixture of conventions or attempt to guess the original order
+// of distinct keys that compare equal in the legacy runtime.
+const VIDEO_DIGEST_ORDER = "sqlite-binary-v1" as const;
+type VideoDigestMode = "binary" | "legacy";
+
+function orderedVideoDigestRows<T extends Record<string, unknown>>(
+  rows: readonly T[],
+  keys: readonly string[],
+  mode: VideoDigestMode,
+): T[] | null {
+  const encoder = new TextEncoder();
+  const entries = rows.map((row) => ({
+    row, keys: keys.map((key) => row[key]),
+  }));
+  if (entries.some((entry) => entry.keys.some((key) => typeof key !== "string"))) return null;
+  const keyed = entries.map((entry) => ({
+    row: entry.row,
+    text: entry.keys as string[],
+    bytes: mode === "binary" ? (entry.keys as string[]).map((key) => encoder.encode(key)) : [],
+  }));
+  const byteCompare = (left: Uint8Array, right: Uint8Array) => {
+    for (let i = 0; i < Math.min(left.length, right.length); i++) {
+      if (left[i] !== right[i]) return left[i] - right[i];
+    }
+    return left.length - right.length;
+  };
+  const compare = (left: typeof keyed[number], right: typeof keyed[number]) => {
+    for (let i = 0; i < keys.length; i++) {
+      const result = mode === "binary"
+        ? byteCompare(left.bytes[i], right.bytes[i])
+        : left.text[i].localeCompare(right.text[i]);
+      if (result !== 0) return result;
+    }
+    return 0;
+  };
+  keyed.sort(compare);
+  // All sets have unique canonical keys. Equal sort keys are therefore
+  // ambiguous (legacy collation ties or invalid UTF-8 round-trip input).
+  if (keyed.some((entry, i) => i > 0 && compare(keyed[i - 1], entry) === 0)) return null;
+  return keyed.map((entry) => entry.row);
+}
+
+async function videoSnapshotDigests(
+  managed: Record<string, unknown>,
+  rows: {
+    events: readonly Record<string, unknown>[];
+    members: readonly Record<string, unknown>[];
+    chapters: readonly Record<string, unknown>[];
+    softwares: readonly Record<string, unknown>[];
+    metadata: readonly Record<string, unknown>[];
+    answers: readonly Record<string, unknown>[];
+  },
+  mode: VideoDigestMode,
+) {
+  const ordered = [
+    orderedVideoDigestRows(rows.events, ["event_id"], mode),
+    orderedVideoDigestRows(rows.members, ["id"], mode),
+    orderedVideoDigestRows(rows.chapters, ["id"], mode),
+    orderedVideoDigestRows(rows.softwares, ["software_id"], mode),
+    orderedVideoDigestRows(rows.metadata, ["video_id"], mode),
+    orderedVideoDigestRows(rows.answers, ["event_id", "question_id"], mode),
+  ];
+  if (ordered.some((set) => set === null)) return null;
+  const [managed_digest, events_digest, members_digest, chapters_digest,
+    softwares_digest, metadata_digest, custom_answers_digest] = await Promise.all(
+    [managed, ...ordered].map(snapshotDigest),
+  );
+  return {
+    entity_kind: "video" as const, managed_digest, events_digest, members_digest,
+    chapters_digest, softwares_digest, metadata_digest, custom_answers_digest,
+  };
+}
+
 function entitySnapshotTargetId(kind: "event" | "video", id: string): string {
   return `${kind}:${encodeURIComponent(id)}`;
 }
@@ -646,16 +722,14 @@ export async function projectLegacyVideoCreate(input: {
   if (new TextEncoder().encode(JSON.stringify(projected)).byteLength > MAX_LEGACY_IMPORT_STEP_BYTES) {
     return fixedFailure("旧形式インポートの作品書込snapshotが上限超過です。");
   }
-  const [managed_digest, events_digest, members_digest, chapters_digest,
-    softwares_digest, metadata_digest, custom_answers_digest] = await Promise.all([
-    managed, nextEvents, nextMembers, nextChapters, nextSoftwares, nextMetadata, nextAnswers,
-  ].map(snapshotDigest));
+  const digests = await videoSnapshotDigests(managed, {
+    events: nextEvents, members: nextMembers, chapters: nextChapters,
+    softwares: nextSoftwares, metadata: nextMetadata, answers: nextAnswers,
+  }, "binary");
+  if (!digests) return fixedFailure("旧形式インポートの作品監査snapshotの順序が不正です。");
   return {
     ...projected,
-    snapshotProof: {
-      entity_kind: "video" as const, managed_digest, events_digest, members_digest,
-      chapters_digest, softwares_digest, metadata_digest, custom_answers_digest,
-    },
+    snapshotProof: { ...digests, digest_order: VIDEO_DIGEST_ORDER },
     youtubeWakeRequired: !!video.youtube_video_id,
   };
 }
@@ -837,17 +911,23 @@ async function parseLegacyVideoReplacementSnapshot(
     return fixedFailure(error);
   }
   const proof = parseJsonRecord(audit.after_json, error);
-  const [managed_digest, events_digest, members_digest, chapters_digest,
-    softwares_digest, metadata_digest, custom_answers_digest] = await Promise.all([
-    managed, beforeEvents, beforeMembers, beforeChapters, beforeSoftwares, beforeMetadata, beforeAnswers,
-  ].map(snapshotDigest));
-  const expected = {
-    entity_kind: "video", managed_digest, events_digest, members_digest, chapters_digest,
-    softwares_digest, metadata_digest, custom_answers_digest,
+  const rows = {
+    events: beforeEvents, members: beforeMembers, chapters: beforeChapters,
+    softwares: beforeSoftwares, metadata: beforeMetadata, answers: beforeAnswers,
   };
-  if (Object.entries(expected).some(([key, value]) => proof[key] !== value)) {
-    return fixedFailure("旧形式インポートの作品の最新状態が監査snapshotと一致しません。");
-  }
+  const mismatch = "旧形式インポートの作品の最新状態が監査snapshotと一致しません。";
+  const versioned = Object.prototype.hasOwnProperty.call(proof, "digest_order");
+  if (versioned && proof.digest_order !== VIDEO_DIGEST_ORDER) return fixedFailure(mismatch);
+  const matches = (candidate: Awaited<ReturnType<typeof videoSnapshotDigests>>) =>
+    candidate !== null && Object.entries(candidate).every(([key, value]) => proof[key] === value);
+  const binary = await videoSnapshotDigests(managed, rows, "binary");
+  if (!binary) return fixedFailure(mismatch);
+  // The unversioned fallback must match the WHOLE legacy digest vector;
+  // canonical/legacy field mixing and ambiguous collation ties fail closed.
+  const verified = matches(binary) ? binary
+    : versioned ? null : await videoSnapshotDigests(managed, rows, "legacy");
+  if (!verified || !matches(verified)) return fixedFailure(mismatch);
+  const expected = versioned ? { ...verified, digest_order: VIDEO_DIGEST_ORDER } : verified;
   return {
     video, beforeEvents, beforeMembers, beforeChapters, beforeSoftwares, beforeMetadata, beforeAnswers,
     audit, proof: expected,
@@ -1042,7 +1122,9 @@ export async function prepareLegacyVideoReplacementAnswers(input: {
     }
     if (seen.size !== expected.size) return fixedFailure(error);
   }
-  return { replaced, created, nextAnswers, proofs, custom_answers_digest: await snapshotDigest(nextAnswers) };
+  const orderedAnswers = orderedVideoDigestRows(nextAnswers, ["event_id", "question_id"], "binary");
+  if (!orderedAnswers) return fixedFailure(error);
+  return { replaced, created, nextAnswers, proofs, custom_answers_digest: await snapshotDigest(orderedAnswers) };
 }
 
 /** Construct an unexecuted assertion that the separate answer proofs still own the latest state. */
