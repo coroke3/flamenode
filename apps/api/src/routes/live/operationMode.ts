@@ -119,6 +119,8 @@ function scanOversizedKvMirror(raw: string): ParsedOperationModeKvMirror | null 
   // or updated_at. Require complete comma-delimited scalar members; all
   // escaped or longer keys/values and containers use the general scanner.
   const scalarObjectRun = /(?:"[^"\\\u0000-\u001f]{0,32}"[ \t\r\n]{0,16}:[ \t\r\n]{0,16}(?:true|false|null|-?(?:0|[1-9][0-9]{0,15})(?:\.[0-9]{1,16})?(?:[eE][+-]?[0-9]{1,6})?|"[^"\\\u0000-\u001f]{0,32}")[ \t\r\n]{0,16},[ \t\r\n]{0,16}){2,256}/y;
+  // Batch only two-or-more adjacent array openers; single arrays keep the original path.
+  const arrayOpenRun = /\[+/y;
   // One byte per open container; only the root needs a decoded property key.
   // Grow with actual nesting rather than allocating one object per frame.
   const OBJECT_FIRST_KEY = 0, OBJECT_KEY = 1, OBJECT_COLON = 2,
@@ -141,8 +143,29 @@ function scanOversizedKvMirror(raw: string): ParsedOperationModeKvMirror | null 
     whitespace();
     const c = raw[i];
     if (c === "{" || c === "[") {
-      i++;
-      push(c === "{" ? OBJECT_FIRST_KEY : ARRAY_FIRST_VALUE);
+      if (c === "[") {
+        if (raw[i + 1] === "[") {
+          arrayOpenRun.lastIndex = i;
+          arrayOpenRun.test(raw);
+          const count = arrayOpenRun.lastIndex - i;
+          i += count;
+          const needed = depth + count;
+          if (needed > stack.length) {
+            const larger = new Uint8Array(Math.min(n, Math.max(needed, stack.length * 2)));
+            larger.set(stack);
+            stack = larger;
+          }
+          stack.fill(ARRAY_AFTER, depth, needed - 1);
+          stack[needed - 1] = ARRAY_FIRST_VALUE;
+          depth = needed;
+        } else {
+          i++;
+          push(ARRAY_FIRST_VALUE);
+        }
+      } else {
+        i++;
+        push(OBJECT_FIRST_KEY);
+      }
       if (rootKey === "mode") mode = null;
       if (rootKey === "updated_at") updatedAt = NaN;
       return;
@@ -229,7 +252,18 @@ function scanOversizedKvMirror(raw: string): ParsedOperationModeKvMirror | null 
         }
         case ARRAY_AFTER:
           if (raw[i] === ",") { i++; stack[top] = ARRAY_VALUE; break; }
-          if (raw[i] === "]") { i++; depth--; break; }
+          if (raw[i] === "]") {
+            i++;
+            depth--;
+            // Collapse only adjacent array parents; stop at an object frame.
+            if (raw[i] === "]" && depth > 0 && stack[depth - 1] === ARRAY_AFTER) {
+              while (depth > 0 && stack[depth - 1] === ARRAY_AFTER && raw[i] === "]") {
+                i++;
+                depth--;
+              }
+            }
+            break;
+          }
           return null;
         default:
           return null;

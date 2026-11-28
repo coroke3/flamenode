@@ -659,11 +659,13 @@ test("MIG-0661 T09 / #916: compact nesting stack preserves root identity and gra
   const prefix = '{"mode":"normal","updated_at":1,"reason":"' + pad + '"';
   const nested = (depth) => '[{"mode":'.repeat(depth) + '"static_only"' + '}]'.repeat(depth);
   const deep = nested(32768);
-  const deepArray = "[".repeat(65536) + "0" + "]".repeat(65536);
+  const deepArray = "[".repeat(131072) + "0" + "]".repeat(131072);
+  const deepArrayInObject = '{"inside":' + deepArray + '}';
   const cases = [
     ...[15, 16, 17, 31, 32, 33, 63, 64, 65, 32768].map((depth) =>
       [prefix + ',"extra":' + nested(depth) + ',"mode":"maintenance"}', "maintenance", true]),
     [prefix + ',"extra":' + deepArray + ',"mode":"maintenance"}', "maintenance", true],
+    [prefix + ',"extra":' + deepArrayInObject + ',"mode":"maintenance"}', "maintenance", true],
     [prefix + ',"extra":[' + deep + ',' + deepArray + '],"mode":"read_only"}', "read_only", true],
     [prefix + ',"mode":' + deep + ',"mode":"maintenance"}', "maintenance", true],
     [prefix + ',"updated_at":' + deep + ',"updated_at":1,"mode":"maintenance"}', "maintenance", true],
@@ -674,6 +676,7 @@ test("MIG-0661 T09 / #916: compact nesting stack preserves root identity and gra
     [prefix + ',"extra":' + '{"x":'.repeat(32768) + "0," + "}".repeat(32768) + '}', null, false],
     [prefix + ',"extra":' + deep + ',"mode":"maintenance"}x', null, false],
     [prefix + ',"extra":' + deepArray.slice(0, -1) + '}', null, false],
+    [prefix + ',"extra":' + deepArray + '],"mode":"maintenance"}', null, false],
     [prefix + ',"extra":[{},[],{"mode":"economy"}],"mode":"static_only"}', "static_only", true],
   ];
   for (const [raw, mode, syntaxValid] of cases) {
