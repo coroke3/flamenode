@@ -849,8 +849,14 @@ test("SEC-800: shared ownership-core provider reads cannot impersonate allowlist
       diagnostic: "[MIG-0654] owner transfer unavailable",
     },
   ];
-  for (const item of cases) {
-    const s = setup({ user: item.user, fault: { match: item.match, error: item.error } });
+  // Drizzle SELECT with projected fields executes bound raw(), and wraps a
+  // rejected read in DrizzleQueryError. Exercise both that provider path and
+  // synchronous prepare failure without weakening either fault receipt.
+  const faultCases = cases.flatMap((item) => [undefined, "raw"].map((readMethod) => ({
+    ...item, readMethod, name: `${item.name} (${readMethod ?? "prepare"})`,
+  })));
+  for (const item of faultCases) {
+    const s = setup({ user: item.user, fault: { match: item.match, error: item.error, readMethod: item.readMethod } });
     try {
       await withThrowingDiagnostics(async ({ errors }) => {
         const result = await s.send(item.method, item.path, item.body);
@@ -912,8 +918,11 @@ test("SEC-800: shared ownership read wrappers preserve pinned Next control-flow 
       selfConfirmText: "SELF CHANGE ev-1",
     })],
   ];
-  for (const [label, match, invoke] of cases) {
-    const s = setup({ user: MEMBER, fault: { match, error: redirectError } });
+  const faultCases = cases.flatMap(([label, match, invoke]) => [undefined, "raw"].map((readMethod) => ({
+    label: `${label} (${readMethod ?? "prepare"})`, match, invoke, readMethod,
+  })));
+  for (const { label, match, invoke, readMethod } of faultCases) {
+    const s = setup({ user: MEMBER, fault: { match, error: redirectError, readMethod } });
     try {
       let wrapped;
       try {
