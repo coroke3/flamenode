@@ -121,7 +121,7 @@ type StoredStepOutcome =
   | { kind: "softwares"; created: number }
   | { kind: "event"; action: "created" | "replaced" | "skipped" }
   | { kind: "custom_questions"; created: number; reused: number }
-  | { kind: "video"; action: "created" | "skipped" };
+  | { kind: "video"; action: "created" | "replaced" | "skipped" };
 
 type PlannedSoftwareRow = { id: string; name: string; normalized_name: string };
 
@@ -881,7 +881,7 @@ export function buildLegacyAnswerReplacementAssertion(
   `);
 }
 
-/** U02al supports new-video creation and the existing marker-only paths; replacement is disabled. */
+/** New creation, private-to-private proven replacement, and marker-only skip/empty. */
 function nextVideoProgress(
   input: ApplyInput,
   outcome: StoredStepOutcome,
@@ -902,7 +902,9 @@ function nextVideoProgress(
     const shouldSkip = input.strategy === "skip_existing" &&
       input.progress.skipExistingVideoIds.includes(video.id);
     if ((shouldSkip && outcome.action !== "skipped") ||
-        (!shouldSkip && outcome.action !== "created")) {
+        (!shouldSkip && outcome.action !== "created" &&
+          !(outcome.action === "replaced" && input.strategy === "replace_imported" &&
+            video.visibility_status === "private"))) {
       return fixedFailure("旧形式インポートの作品進捗が不正です。");
     }
     next.counts[`${outcome.action}Videos`] += 1;
@@ -999,7 +1001,7 @@ function parseReceipt(value: Record<string, unknown>) {
       reused: outcomeRecord.reused as number,
     };
   } else if (outcomeRecord.kind === "video" &&
-    (outcomeRecord.action === "skipped" || outcomeRecord.action === "created")) {
+    (outcomeRecord.action === "skipped" || outcomeRecord.action === "created" || outcomeRecord.action === "replaced")) {
     outcome = { kind: "video", action: outcomeRecord.action };
   } else if (
     outcomeRecord.kind === "event" &&
@@ -1046,7 +1048,8 @@ function parseReceipt(value: Record<string, unknown>) {
  * system_user, x_users, software catalog, event create/preview-confirmed skip,
  * proven imported-event same-visibility replacement and custom question steps.
  * Empty/preview-confirmed skipped and new-video creation steps are supported.
- * Visibility-changing event replacements and existing-video replacement remain fail closed.
+ * Only proven private-to-private video replacement is enabled. Public video replacement
+ * and visibility-changing replacements remain fail closed.
  */
 export async function legacyImportD1ApplyStep(
   input: ApplyInput,
@@ -2183,12 +2186,19 @@ export async function legacyImportD1ApplyStep(
         return fixedFailure("作品の存在状態がプレビュー時点から変更されたため、再プレビューが必要です。");
       }
       if (!expectedExistingForSkip) {
-        if (videoRows.length !== 0) {
-          return fixedFailure("既存作品の置換はHono側でまだ利用できません。");
-        }
-        // The marker/existence read above remains cheap for skip and replay.
-        // Only a new video needs one additional bounded creator/catalog read.
         const video = plannedVideo;
+        let replacement: Awaited<ReturnType<typeof readLegacyVideoReplacementSnapshot>> | null = null;
+        if (videoRows.length !== 0) {
+          if (input.strategy !== "replace_imported" || video.visibility_status !== "private") {
+            return fixedFailure("既存作品の置換条件を満たしていません。");
+          }
+          replacement = await readLegacyVideoReplacementSnapshot(input.db, video.id);
+          if (replacement.video.visibility_status !== "private") {
+            return fixedFailure("公開状態を変更する作品置換はHono側でまだ利用できません。");
+          }
+        }
+        // The marker/existence read remains cheap for skip and replay.
+        // Creation and proven replacement resolve the same creator/catalog support.
         const softwareNames = [...new Set(input.plan.videoSoftwares
           .filter((row) => row.video_id === video.id)
           .map((row) => normalizeSoftwareName(row.label)))];
@@ -2252,9 +2262,30 @@ export async function legacyImportD1ApplyStep(
           plan: input.plan, videoId: video.id, creator, softwareIds, now,
         });
         const {
-          managed, nextEvents, nextMembers, nextChapters, nextSoftwares, nextMetadata,
-          nextAnswers, plannedQuestions, rebuildTargets, snapshotProof, youtubeWakeRequired,
+          nextEvents, nextMembers, nextChapters, nextSoftwares, nextMetadata,
+          plannedQuestions, rebuildTargets, youtubeWakeRequired,
         } = projection;
+        const answerChanges = replacement
+          ? await prepareLegacyVideoReplacementAnswers({ db: input.db, snapshot: replacement, projection, now })
+          : null;
+        const managed = replacement
+          ? { ...projection.managed, created_at: replacement.video.created_at as number }
+          : projection.managed;
+        const nextAnswers = answerChanges?.nextAnswers ?? projection.nextAnswers;
+        const answersToInsert = answerChanges
+          ? [...answerChanges.replaced.map(({ after }) => after), ...answerChanges.created]
+          : nextAnswers;
+        const snapshotProof = replacement ? {
+          ...projection.snapshotProof,
+          managed_digest: await snapshotDigest(managed),
+          custom_answers_digest: answerChanges!.custom_answers_digest,
+        } : projection.snapshotProof;
+        if (new TextEncoder().encode(JSON.stringify({
+          managed, nextEvents, nextMembers, nextChapters, nextSoftwares, nextMetadata,
+          nextAnswers, plannedQuestions, rebuildTargets,
+        })).byteLength > MAX_LEGACY_IMPORT_STEP_BYTES) {
+          return fixedFailure("旧形式インポートの作品書込snapshotが上限超過です。");
+        }
         const eventIds = [...new Set(
           [video.primary_event_id, ...nextEvents.map((row) => row.event_id)]
             .filter((id): id is string => !!id),
@@ -2271,8 +2302,7 @@ export async function legacyImportD1ApplyStep(
         // Refuse orphan support rows rather than deleting data for an absent video.
         // Assert every consumed relation/definition/fallback again in the same
         // atomic batch; no stale snapshot can authorize insertion or a receipt.
-        const stateAssertion = input.db.run(sql`
-          SELECT CASE WHEN
+        const absenceCondition = replacement ? sql`1 = 1` : sql`
             NOT EXISTS (SELECT 1 FROM videos WHERE id = ${video.id})
             AND NOT EXISTS (SELECT 1 FROM video_events WHERE video_id = ${video.id})
             AND NOT EXISTS (SELECT 1 FROM video_members WHERE video_id = ${video.id})
@@ -2280,6 +2310,10 @@ export async function legacyImportD1ApplyStep(
             AND NOT EXISTS (SELECT 1 FROM video_softwares WHERE video_id = ${video.id})
             AND NOT EXISTS (SELECT 1 FROM video_youtube_metadata WHERE video_id = ${video.id})
             AND NOT EXISTS (SELECT 1 FROM video_custom_answers WHERE video_id = ${video.id})
+        `;
+        const stateAssertion = input.db.run(sql`
+          SELECT CASE WHEN
+            (${absenceCondition})
             AND EXISTS (SELECT 1 FROM "user"
               WHERE id = ${SYSTEM_USER_ID} AND name = 'Legacy import system'
                 AND email IS NULL AND "emailVerified" IS NULL AND image IS NULL
@@ -2291,6 +2325,7 @@ export async function legacyImportD1ApplyStep(
             AND (${video.youtube_video_id} IS NULL OR ${video.youtube_video_id} = ''
               OR NOT EXISTS (SELECT 1 FROM videos
                 WHERE youtube_video_id = ${video.youtube_video_id}
+                  AND id <> ${video.id}
                   AND visibility_status NOT IN ('archived', 'voided')))
             AND NOT EXISTS (
               SELECT 1 FROM json_each(${relationPayload}) AS incoming
@@ -2357,13 +2392,65 @@ export async function legacyImportD1ApplyStep(
           ], rows: nextMetadata },
           { table: "video_custom_answers", columns: [
             "video_id", "event_id", "question_id", "answer_text", "answer_json", "created_at", "updated_at",
-          ], rows: nextAnswers },
-        ].filter((entry) => entry.rows.length > 0);
-        const mutations = inserts.map(({ table, columns, rows }) => input.db.run(sql`
-          INSERT INTO ${sql.raw(table)} (${sql.raw(columns.join(", "))})
-          SELECT ${sql.raw(columns.map((column) => "json_extract(value, '$." + column + "')").join(", "))}
-          FROM json_each(${JSON.stringify(rows)})
-        `));
+          ], rows: answersToInsert },
+        ].filter((entry) => entry.rows.length > 0 && (!replacement || entry.table !== "videos"));
+        const mutationPlan: Array<{ statement: ReturnType<ServerCoreDb["run"]>; count: number }> = [];
+        if (replacement) {
+          // The full-row CAS is evaluated before this UPDATE in the same batch.
+          // created_at, app_like_count, score, score_updated_at and id are never updated.
+          const updatePayload = JSON.stringify({ ...managed, updated_at: now });
+          const managedColumns = Object.keys(managed)
+            .filter((key) => key !== "id" && key !== "created_at").concat("updated_at");
+          // managed was constructed from the explicit static projection above.
+          // Bind JSON once in a scalar CTE. Keys originate only from the static managed projection.
+          const updateAssignments = managedColumns.map((column) =>
+            sql.raw(column + " = (SELECT json_extract(payload, '$." + column + "') FROM incoming)"));
+          mutationPlan.push({
+            statement: input.db.run(sql`
+              WITH incoming AS (SELECT ${updatePayload} AS payload)
+              UPDATE videos SET ${sql.join(updateAssignments, sql`, `)}
+              WHERE videos.id = ${video.id}
+            `),
+            count: 1,
+          });
+          const relatedDeletes = [
+            { table: "video_events", count: replacement.beforeEvents.length },
+            { table: "video_members", count: replacement.beforeMembers.length },
+            { table: "video_chapters", count: replacement.beforeChapters.length },
+            { table: "video_softwares", count: replacement.beforeSoftwares.length },
+            { table: "video_youtube_metadata", count: replacement.beforeMetadata.length },
+          ];
+          for (const entry of relatedDeletes) {
+            if (entry.count > 0) mutationPlan.push({
+              statement: input.db.run(sql`DELETE FROM ${sql.raw(entry.table)} WHERE video_id = ${video.id}`),
+              count: entry.count,
+            });
+          }
+          if (answerChanges && answerChanges.replaced.length > 0) {
+            const changedKeys = JSON.stringify(answerChanges.replaced.map(({ before }) => ({
+              event_id: before.event_id, question_id: before.question_id,
+            })));
+            mutationPlan.push({
+              statement: input.db.run(sql`
+                DELETE FROM video_custom_answers WHERE video_id = ${video.id}
+                  AND (event_id, question_id) IN (
+                    SELECT json_extract(value, '$.event_id'), json_extract(value, '$.question_id')
+                    FROM json_each(${changedKeys})
+                  )
+              `),
+              count: answerChanges.replaced.length,
+            });
+          }
+        }
+        for (const { table, columns, rows } of inserts) mutationPlan.push({
+          statement: input.db.run(sql`
+            INSERT INTO ${sql.raw(table)} (${sql.raw(columns.join(", "))})
+            SELECT ${sql.raw(columns.map((column) => "json_extract(value, '$." + column + "')").join(", "))}
+            FROM json_each(${JSON.stringify(rows)})
+          `),
+          count: rows.length,
+        });
+        // Preserve CURRENT's rebuild target set for this non-public slice.
         const queueRows = rebuildTargets.map((row, index) => ({
           id: legacyImportRebuildQueueId(identity.targetId, index), ...row,
         }));
@@ -2398,19 +2485,22 @@ export async function legacyImportD1ApplyStep(
             requested_by_user_id = excluded.requested_by_user_id,
             updated_at = MAX(static_rebuild_queue.updated_at + 1, excluded.updated_at)
         `);
-        const outcome = { kind: "video", action: "created" } as const;
+        const outcome = { kind: "video", action: replacement ? "replaced" : "created" } as const;
         const nextProgress = nextVideoProgress(input, outcome);
-        const answerTarget = (row: typeof nextAnswers[number]) =>
-          [row.video_id, row.event_id, row.question_id].map(encodeURIComponent).join(":");
+        const answerTarget = answerAuditTarget;
         const sentKinds = new Set<QueueWakeKind>();
         await mutateWithAudit(input.db, {
-          preMutationAssertions: [markerAbsenceAssertion, stateAssertion],
-          mutationStatements: [...mutations, queueMutation],
-          expectedMutationChanges: [...inserts.map((entry) => entry.rows.length), queueRows.length],
+          preMutationAssertions: [
+            markerAbsenceAssertion, stateAssertion,
+            ...(replacement ? [buildLegacyVideoReplacementAssertion(input.db, replacement)] : []),
+            ...(answerChanges?.proofs.length ? [buildLegacyAnswerReplacementAssertion(input.db, answerChanges)] : []),
+          ],
+          mutationStatements: [...mutationPlan.map((entry) => entry.statement), queueMutation],
+          expectedMutationChanges: [...mutationPlan.map((entry) => entry.count), queueRows.length],
           audits: [
             {
-              table_name: "videos", target_id: video.id, operation: "CREATE" as const,
-              before: null,
+              table_name: "videos", target_id: video.id, operation: replacement ? "UPDATE" as const : "CREATE" as const,
+              before: replacement?.video ?? null,
               after: {
                 ...video, created_at: managed.created_at,
                 event_ids: nextEvents.map((row) => row.event_id),
@@ -2421,7 +2511,7 @@ export async function legacyImportD1ApplyStep(
               },
               actor_user_id: input.actorAuthUserId,
               reason: "旧形式作品を新正本へ変換", context: "legacy_import",
-              retention_class: "long_audit" as const, restore_strategy: "delete_created" as const,
+              retention_class: "long_audit" as const, restore_strategy: replacement ? "none" as const : "delete_created" as const,
               strict: true,
             },
             {
@@ -2433,7 +2523,15 @@ export async function legacyImportD1ApplyStep(
               retention_class: "long_audit" as const, restore_strategy: "none" as const,
               strict: true,
             },
-            ...nextAnswers.map((row) => ({
+            ...(answerChanges?.replaced ?? []).map(({ before, after }) => ({
+              table_name: "video_custom_answers", target_id: answerTarget(before),
+              operation: "UPDATE" as const, before, after,
+              actor_user_id: input.actorAuthUserId,
+              reason: "旧形式動画のカスタム質問回答を置換", context: CUSTOM_ANSWER_AUDIT_CONTEXT,
+              retention_class: "long_audit" as const, restore_strategy: "update_before" as const,
+              strict: true,
+            })),
+            ...(answerChanges?.created ?? nextAnswers).map((row) => ({
               table_name: "video_custom_answers", target_id: answerTarget(row),
               operation: "CREATE" as const, before: null, after: row,
               actor_user_id: input.actorAuthUserId,
@@ -2443,7 +2541,7 @@ export async function legacyImportD1ApplyStep(
             })),
             buildMarkerAudit(nextProgress, outcome),
           ],
-          callerQueryCount: 4,
+          callerQueryCount: 4 + (replacement ? 1 : 0) + (answerChanges?.proofs.length ? 1 : 0),
           preloaded: input.preloaded,
           staticRebuildWakeSource: "import",
           wakeSentKinds: sentKinds,

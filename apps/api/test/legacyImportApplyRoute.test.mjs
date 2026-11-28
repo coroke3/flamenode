@@ -1346,6 +1346,7 @@ test("MIG-0645 U02al Hono: new video rows, provenance, queue and receipt are ato
   const { bucket } = previewBucket({ failCompleteOnce: true });
   const wakes = [];
   let race = false;
+  let replacementRace = false;
   let serverDb;
   const { request, sqlite, stats } = setup({
     bucket, applyStep: (input) => {
@@ -1358,6 +1359,10 @@ test("MIG-0645 U02al Hono: new video rows, provenance, queue and receipt are ato
       YOUTUBE_SYNC_WAKE_QUEUE: { send: async (message) => { wakes.push(message); } },
     },
     beforeBatch: (db) => {
+      if (replacementRace) {
+        replacementRace = false;
+        db.prepare("UPDATE videos SET app_like_count = 11 WHERE id = ?").run("created-video");
+      }
       if (!race) return;
       race = false;
       db.prepare("UPDATE event_custom_questions SET label = ? WHERE id = ?").run("Concurrent edit", "question-0");
@@ -1622,13 +1627,62 @@ test("MIG-0645 U02al Hono: new video rows, provenance, queue and receipt are ato
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM video_custom_answers").get().n, 1);
     assert.equal(wakes.length, wakesBefore + 2);
 
-    const replacement = await createApplyCredential(bucket, ADMIN.id, plan, "replace_imported");
+    // U02ap: private-to-private replacement, only for proven imported rows.
+    // Make previous proofs unambiguously older than the new proof.
+    sqlite.prepare("UPDATE audit_logs SET created_at = 1 WHERE table_name IN ('legacy_import_entity_snapshots', 'video_custom_answers')").run();
+    sqlite.prepare("UPDATE videos SET app_like_count = 7, score = 3, score_updated_at = 42 WHERE id = ?").run(video.id);
+    const replacementPlan = structuredClone(plan);
+    replacementPlan.videos[0].title = "Replaced video";
+    replacementPlan.videos[0].created_at = 1900000000; // must NOT overwrite original created_at.
+    replacementPlan.videoCustomAnswers[0].answer_text = "Replacement answer";
+    replacementPlan.videoChapters[0].chapter_label = "Replacement chapter";
+    const publicPlan = structuredClone(replacementPlan);
+    publicPlan.videos[0].visibility_status = "public";
+    const publicRequest = await createApplyCredential(bucket, ADMIN.id, publicPlan, "replace_imported");
+    await reachQuestionStage(request, publicRequest.form);
+    assert.equal((await request(publicRequest.form())).status, 200);
+    const beforePublic = stats.batches;
+    assert.equal((await request(publicRequest.form())).status, 409, "visibility-changing replacement remains disabled");
+    assert.equal(stats.batches, beforePublic);
+
+    const replacement = await createApplyCredential(bucket, ADMIN.id, replacementPlan, "replace_imported");
     await reachQuestionStage(request, replacement.form);
     const ready = await request(replacement.form());
     assert.equal(ready.status, 200, JSON.stringify(await ready.clone().json()));
+    const beforeReplaceWakes = wakes.length;
+    replacementRace = true;
+    const refused = await request(replacement.form());
+    assert.equal(refused.status, 409, "concurrent unmanaged edit must refuse replacement");
+    assert.equal(sqlite.prepare("SELECT title FROM videos WHERE id = ?").get(video.id).title, "New video");
+    assert.equal(sqlite.prepare("SELECT answer_text FROM video_custom_answers WHERE video_id = ?").get(video.id).answer_text, "Answer");
+    assert.equal(wakes.length, beforeReplaceWakes);
     const beforeReplace = stats.batches;
-    assert.equal((await request(replacement.form())).status, 409, "existing-video replacement remains disabled");
-    assert.equal(stats.batches, beforeReplace);
+    const beforeReplaceReads = stats.reads;
+    const accepted = await request(replacement.form());
+    assert.equal(accepted.status, 200, JSON.stringify(await accepted.clone().json()));
+    const result = await accepted.json();
+    assert.equal(result.result.replaced.videos, 1);
+    assert.equal(result.result.complete, true);
+    assert.equal(stats.batches - beforeReplace, 1);
+    assert.equal(stats.reads - beforeReplaceReads, 6);
+    const replacedVideo = sqlite.prepare("SELECT * FROM videos WHERE id = ?").get(video.id);
+    assert.equal(replacedVideo.title, "Replaced video");
+    assert.equal(replacedVideo.created_at, saved.created_at);
+    assert.equal(replacedVideo.app_like_count, 11);
+    assert.equal(replacedVideo.score, 3);
+    assert.equal(replacedVideo.score_updated_at, 42);
+    assert.equal(replacedVideo.visibility_status, "private");
+    assert.equal(sqlite.prepare("SELECT chapter_label FROM video_chapters WHERE video_id = ?").get(video.id).chapter_label, "Replacement chapter");
+    const replacedAnswer = sqlite.prepare("SELECT * FROM video_custom_answers WHERE video_id = ?").get(video.id);
+    assert.equal(replacedAnswer.answer_text, "Replacement answer");
+    assert.equal(replacedAnswer.created_at, snapshot.beforeAnswers[0].created_at);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE table_name = 'videos' AND operation = 'UPDATE'").get().n, 1);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE table_name = 'video_custom_answers' AND operation = 'UPDATE'").get().n, 1);
+    assert.equal((await readLegacyVideoReplacementSnapshot(serverDb, video.id)).beforeAnswers[0].answer_text, "Replacement answer");
+    assert.deepEqual(wakes.slice(beforeReplaceWakes).map((message) => message.kind), ["static_rebuild_available", "youtube_sync_pending"]);
+    assert.equal((await request(replacement.form())).status, 200);
+    assert.equal(stats.batches - beforeReplace, 1, "completed replacement must not repeat");
+    assert.equal(wakes.length, beforeReplaceWakes + 2);
   } finally {
     sqlite.close();
   }
