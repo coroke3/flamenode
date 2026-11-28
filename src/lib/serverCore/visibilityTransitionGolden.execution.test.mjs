@@ -1471,4 +1471,32 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(serialized, expected);
     assert.equal(Object.keys(actual).length, scenarios.length);
   });
+  test("Issue #679: event compensation preserves any active foreign D1 fence", async () => {
+    for (const state of ["blocked", "release_pending"]) {
+      const [, result] = await runScenario(
+        `event_compensate_foreign_${state}_d1_fence`,
+        ({ db }) => done(compensateEvent(db, "evt-1")),
+        {
+          setup: (sqlite) => seedFence(sqlite, {
+            entity_type: "event",
+            entity_id: "evt-1",
+            fence_token: "ef_foreign_owner",
+            state,
+          }),
+          bucket: seededManifest([entity("event", "evt-1", "ef_tok")]),
+        },
+      );
+      assert.deepEqual(result.outcome, { returned: "done" }, state);
+      assert.equal(result.public_visibility_fences.length, 1, state);
+      assert.equal(result.public_visibility_fences[0].fence_token, "ef_foreign_owner", state);
+      assert.equal(result.public_visibility_fences[0].state, state);
+      assert.equal(result.manifest_after.entities[0].fence_token, "ef_tok", state);
+      assert.equal(
+        result.log.some((entry) => entry.op === "r2.get" || entry.op === "r2.put"),
+        false,
+        "an active D1 fence prevents reading or rewriting the R2 manifest",
+      );
+    }
+  });
+
 }

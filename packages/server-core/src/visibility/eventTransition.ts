@@ -606,10 +606,14 @@ export async function compensateEventVisibilityFenceOnD1Failure(
       .limit(1)
   )[0];
   const fence = await getPublicVisibilityFence(db, "event", input.eventId);
+  // A different writer may own an active D1 fence while this failed
+  // precommit still has its own R2 token. Never remove that R2 block while
+  // ANY authoritative D1 owner requires the entity to remain blocked.
+  // Preserve the same-token guard for released/legacy rows as well.
   if (
-    fence &&
-    (fence.state === "blocked" || fence.state === "release_pending") &&
-    fence.fence_token === input.fenceToken
+    fence?.fence_token === input.fenceToken ||
+    fence?.state === "blocked" ||
+    fence?.state === "release_pending"
   ) {
     return;
   }
