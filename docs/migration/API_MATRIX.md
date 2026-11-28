@@ -85,7 +85,7 @@ Domain stage only; Hono endpoints are MIG-0603. Full mapping with adapter-side e
 | SA-087 | `nextVideoAppLikeCount` (Auth-User keyed as CURRENT; D-03 fan-out is MIG-0605 U05); MIG-0640 Hono `POST /api/videos/:videoId/interaction` via `apps/api/src/routes/videos/interaction.ts`. `kind=like|bookmark`; response `{ok, active?, videoId?, message?}`, 2 guard + 1 snapshot D1 reads, atomic interaction/count/queue/audit; D-0603-1 queue wake omitted. Caller: `apps/site/src/components/VideoInteractionIsland.ts` via `lib/videoInteraction.ts` (MIG-0513, PR #452). |
 | SA-089 | `requiredFields.ts`, `assertAllowedVideoFieldChanges`, `buildVideoAuditSnapshot`, `VIDEO_EDIT_SECTION_PERMISSION_KEYS`, `resolveAllowedVideoEditSections` |
 
-MIG-0651 U01 (#479): The existing UNIQUE-error classifier is now exported via `@flamenode/server-core/video/youtubeDuplicate` and re-exported by the Next legacy module. Target `POST /api/videos/free`, `POST /api/slots/:slotId/video`, and `PATCH /api/videos/:videoId` are **NOT MOUNTED**; multipart 8 MiB enforcement, auth, D1 atomic audit/Queue parity and HTTP regression tests remain U02–U04. This line does not certify API parity.
+MIG-0651 U01 (#479): The existing UNIQUE-error classifier is now exported via `@flamenode/server-core/video/youtubeDuplicate` and re-exported by the Next legacy module. U02 (`POST /api/videos/free`, SA-086 `createFreeVideo` parity + 8 MiB multipart + R2 custom icon upload/compensation delete + `NOOP_SA086_WAKE_HOST` `wake=0` per D-0603-1) is **MOUNTED** in `apps/api/src/routes/videos/index.ts` (PR #511); U03 (`POST /api/slots/:slotId/video`, SA-088) and U04 (`PATCH /api/videos/:videoId`, SA-089) remain **NOT MOUNTED** and pending.
 
 ### Hono endpoints (MIG-0602 U02, PR #331)
 
@@ -646,3 +646,17 @@ Differential parity: `apps/api/test/adminEventGroups.current.parity.test.mjs` (T
 - `DOCUMENTED DIFFERENCE D-0603-1`: CURRENT sends `1` static-rebuild Queue wake per write; Hono sends `0` wakes (D1 `static_rebuild_queue` row is identical).
 - `DOCUMENTED DIFFERENCE MIG-0653-DD1`: Hono rejects >64 KiB JSON bodies (413), invalid schema/IDs (>128 chars on URL params) before the 3rd D1 CostGuard/snapshot read (preserving `ZERO_1102.md` S3), and omits Next `revalidatePath`.
 - CPU: not measured in Linux `workerd` (`ZERO_1102.md` S2 < 7ms / S3 < 8ms pending quiet Linux `workerd` run + independent review + Lead approval).
+
+## MIG-0651 — Free video submission API (SA-086 U02; SA-088/089 pending)
+
+Mounted write route on `apps/api/src/routes/videos/index.ts` via `apps/api/src/routes/videos/submit.ts` (`createFreeVideoSubmitRoutes`), contracts `packages/contracts/src/videoSubmit.ts` (`VideoSubmitResultSchema`, `SA_086_VIDEO_SUBMIT_MAX_BODY_BYTES`). Code landing only; no production traffic cutover. All responses set `Cache-Control: private, no-store`.
+
+| SA | CURRENT | Target (Hono) | Body Limit | Guard / D1 / Side Effects | State |
+| --- | --- | --- | --- | --- | --- |
+| SA-086 | `src/lib/actions/video/createFreeVideo.ts` (`createFreeVideo`) | `POST /api/videos/free` | 8 MiB (`limitVideoActionBody("SA-086")`, 413 `body_too_large`) | `originGuardMiddleware` -> `session` -> `writeGuardMiddleware({ requiredRole: null, activeX: { requireApprovedActiveXId: true, feature: "post_video_unslotted" } })` -> `dbMiddleware` -> `limitVideoActionBody("SA-086")`. Base submission: 3 pre-batch D1 reads + 1 atomic `mutateWithAudit` batch (`videos`, `video_youtube_metadata`, `video_events`, `video_members`, `video_chapters`, `video_softwares`, `video_custom_answers`, `x_users`, `notification_outbox` DM + ops channel, `static_rebuild_queue`, strict audits). R2 icon upload before batch + `bucket.delete` compensation on D1 failure (`icon_mode="existing"` validates `/api/media/...` candidates). | MOUNTED (U02 parity verified locally in `apps/api/test/videoSubmit.parity.test.mjs`; workerd CPU & Lead gates remain) |
+| SA-088 | `submitSlotVideo.ts` | `POST /api/slots/:slotId/video` | 8 MiB (`SA-088`) | Slot reservation & submission migration | NOT_MOUNTED (U03 pending) |
+| SA-089 | `updateVideo.ts` | `PATCH /api/videos/:videoId` | 8 MiB (`SA-089`) | Editable section policy & update migration | NOT_MOUNTED (U04 pending) |
+
+- `DOCUMENTED DIFFERENCE D-0603-1`: CURRENT `createFreeVideo` sends post-commit Queue wakes; Hono `POST /api/videos/free` uses `NOOP_SA086_WAKE_HOST` (`wake = 0`; durable `notification_outbox` / `static_rebuild_queue` / pending `video_youtube_metadata` D1 rows are written atomically).
+- `DOCUMENTED DIFFERENCE MIG-0651-DD1`: Hono enforces `limitVideoActionBody("SA-086")` (8 MiB, 413) and `writeGuardMiddleware` before multipart parsing, returns `409` on `active_x_snapshot` / YouTube duplicate / atomic CAS conflicts and `400`/`503` by failure class, and omits Next `revalidatePath`.
+- Parity & tests: `apps/api/test/videoSubmit.parity.test.mjs` (`T01`–`T05`, `6/6 PASS` against real CURRENT `createFreeVideo`), `apps/api/test/bodyLimit.test.mjs`, `apps/api/test/freeVideoMultipartPreflight.test.mjs`, `apps/api/test/freeVideoCustomAnswerPreflight.test.mjs`, `apps/api/test/freeVideoCustomAnswers.currentParity.test.mjs`. CPU measurement in Linux `workerd` (`S3 < 8ms`) and Lead approval remain open.

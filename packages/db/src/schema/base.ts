@@ -133,7 +133,11 @@ export const xUserAliases = sqliteTable(
     x_user_id: text("x_user_id").notNull(),
     alias_x_id: text("alias_x_id").notNull(),
   },
-  (t) => ({ pk: primaryKey({ columns: [t.x_user_id, t.alias_x_id] }) }),
+  (t) => ({
+    pk: primaryKey({ columns: [t.x_user_id, t.alias_x_id] }),
+    canonicalNormAliasIdx: index("x_user_aliases_canonical_norm_alias_idx")
+      .on(sql`lower(trim(ltrim(trim(${t.alias_x_id}), '@')))`),
+  }),
 );
 
 export const xAccountLinkRequests = sqliteTable("x_account_link_requests", {

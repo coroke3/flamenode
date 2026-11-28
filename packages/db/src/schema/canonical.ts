@@ -28,6 +28,7 @@ export const xUsers = sqliteTable("x_users", {
 },
 (t) => ({
   lowerIdIdx: index("x_users_lower_id_idx").on(sql`lower(${t.id})`),
+  canonicalNormIdIdx: index("x_users_canonical_norm_id_idx").on(sql`lower(trim(ltrim(trim(${t.id}), '@')))`),
 }),
 );
 

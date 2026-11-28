@@ -16,11 +16,12 @@ import { createChapterRoutes } from "./chapters.ts";
 import { createVideoInteractionRoutes } from "./interaction.ts";
 import { videoDetailRoutes } from "./detail.ts";
 import { videoListRoutes } from "./list.ts";
+import { createFreeVideoSubmitRoutes } from "./submit.ts";
 import { createVideoViewerOverlayRoutes, videoViewerOverlayRoutes } from "./viewerOverlay.ts";
 
 function videoWriteStack(
   session?: MiddlewareHandler<AppEnv>,
-  feature: "chapter_comment" | "like_or_bookmark" = "chapter_comment",
+  feature: "chapter_comment" | "like_or_bookmark" | "post_video_unslotted" = "chapter_comment",
 ): MiddlewareHandler<AppEnv> {
   const originOptions = (c: Context<AppEnv>) => ({
     loadSiteUrl: () => c.env.NEXT_PUBLIC_SITE_URL ?? null,
@@ -38,9 +39,10 @@ function videoWriteStack(
         // activeX object. writeGuardMiddleware({activeX}) assumes a non-null
         // active_x snapshot; supplying false/false would incorrectly return 503
         // for every SA-087 request. CostGuard runs separately below instead.
-        activeX: feature === "chapter_comment"
-          ? { requireApprovedActiveXId: true, feature: "chapter_comment" }
-          : undefined,
+        activeX:
+          feature === "like_or_bookmark"
+            ? undefined
+            : { requireApprovedActiveXId: true, feature },
       })(c, next),
     ...(feature === "like_or_bookmark"
       ? [costGuardMiddleware("like_or_bookmark") as MiddlewareHandler<AppEnv>]
@@ -71,6 +73,7 @@ export function createVideosRoutes(
   videos.route("/", videoDetailRoutes);
   videos.route("/", createChapterRoutes(videoWriteStack(options.session)));
   videos.route("/", createVideoInteractionRoutes(videoWriteStack(options.session, "like_or_bookmark")));
+  videos.route("/", createFreeVideoSubmitRoutes(videoWriteStack(options.session, "post_video_unslotted")));
   return videos;
 }
 

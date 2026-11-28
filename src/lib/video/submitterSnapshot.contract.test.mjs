@@ -16,8 +16,21 @@ test("ensureSubmissionXUser は削除され作品保存から呼ばれない", (
   ]) {
     const source = read(file);
     assert.doesNotMatch(source, /buildSubmissionXUserPlan|ensureSubmissionXUser/);
-    assert.match(source, /creator_profile_text/);
-    assert.match(source, /creator_other_social_links/);
+    // SA-086 now creates the canonical 30-column snapshot in server-core.
+    // Verify the Next action passes the required profile and social-link
+    // values and that the shared builder persists both columns.
+    if (file === "src/lib/actions/video/createFreeVideo.ts") {
+      const rowBuilder = read("packages/server-core/src/video/freeVideoRow.ts");
+      assert.match(source, /buildFreeVideoRow\(\{/);
+      assert.match(source, /data: parsed\.data/);
+      assert.match(source, /creatorOtherSocialLinks: normalizeSocialLinksForStorage\(/);
+      assert.match(rowBuilder, /creator_profile_text:\s*data\.profile_text\s*\?\?\s*null/);
+      assert.match(rowBuilder, /creator_other_social_links:\s*creatorOtherSocialLinks/);
+      assert.doesNotMatch(rowBuilder, /buildSubmissionXUserPlan|ensureSubmissionXUser/);
+    } else {
+      assert.match(source, /creator_profile_text/);
+      assert.match(source, /creator_other_social_links/);
+    }
   }
 });
 

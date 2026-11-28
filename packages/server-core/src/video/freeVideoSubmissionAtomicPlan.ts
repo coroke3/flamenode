@@ -1,0 +1,336 @@
+import { sql } from "drizzle-orm";
+import { users, videos, xUserAccountLinks, xUsers } from "@flamenode/db/schema";
+import type { SubmissionCustomAnswerDraft, ValidatedMemberSubmission } from "@flamenode/domain/video";
+import type { ServerCoreDb } from "../db.ts";
+import { planD1AuditMutationBudget, type D1AuditMutationBudget } from "../audit/mutateBudget.ts";
+import type { UnslottedVideoAtomicPlan } from "./unslottedEventPlans.ts";
+import {
+  buildUnslottedEventEligibilityAssertionPlan,
+  buildUnslottedVideoEventPlan,
+} from "./unslottedEventPlans.ts";
+import { buildFreeVideoInsertPlan, buildFreeVideoYoutubeMetadataInsertPlan } from "./freeVideoInsertPlan.ts";
+import { buildFreeVideoCustomAnswerInsertPlan } from "./freeVideoCustomAnswerInsertPlan.ts";
+import { buildStaticRebuildQueueBatch } from "../staticRebuild/enqueue.ts";
+import { buildFreeVideoRebuildTargets } from "./freeVideoRebuildTargets.ts";
+import { buildFreeVideoSoftwareInsertPlan } from "./freeVideoSoftwareInsertPlan.ts";
+import { buildFreeVideoSubmittedNotificationPlan } from "./freeVideoSubmittedNotificationPlan.ts";
+import { buildFreeVideoRegisteredChannelPlan } from "./freeVideoRegisteredChannelPlan.ts";
+import { buildFreeVideoNewMemberPlan } from "./freeVideoNewMemberPlan.ts";
+import type { LoadedGeneralCustomQuestion } from "./freeVideoCustomQuestionRead.ts";
+
+/**
+ * SA-086 U02 UNMOUNTED candidate: compose the first slice of an atomic D1
+ * submission. These are PREPARED statements, not executed transactions.
+ *
+ * All policy/CAS assertions MUST precede all mutations. The eventual caller
+ * must append member/derived/notification/static-rebuild statements and strict
+ * audit metadata, then execute the whole set via mutateWithAudit, with exact
+ * per-statement changes(), bounded D1 query count and post-commit wake.
+ * Never use this function alone to authorize a write or mount a route.
+ */
+export function buildFreeVideoSubmissionAtomicPlan(
+  db: ServerCoreDb,
+  args: {
+    videoAfter: typeof videos.$inferSelect;
+    actorUserId: string;
+    /** Trusted Active X from the authenticated write guard, never request data. */
+    trustedActiveXId: string;
+    eventId: string | null;
+    /** Exact D1 JSON snapshot from the trusted SA-086 event read, not a form value. */
+    requiredFieldsSnapshot?: string | null;
+    now: number;
+    /** Trusted, D1-loaded full question set; not submitted FormData. */
+    questions: readonly LoadedGeneralCustomQuestion[];
+    /** Parsed against the same question set. */
+    customAnswerDrafts: readonly SubmissionCustomAnswerDraft[];
+  },
+): UnslottedVideoAtomicPlan {
+  const { videoAfter, actorUserId, trustedActiveXId, eventId, now, questions, customAnswerDrafts } = args;
+  if (!actorUserId || !trustedActiveXId?.trim() || !videoAfter.id ||
+      videoAfter.submitted_by_user_id !== actorUserId ||
+      videoAfter.primary_event_id !== eventId ||
+      videoAfter.creator_x_user_id !== trustedActiveXId ||
+      videoAfter.source_type !== "youtube" ||
+      !videoAfter.youtube_video_id ||
+      !/^[A-Za-z0-9_-]{11}$/.test(videoAfter.youtube_video_id) ||
+      videoAfter.visibility_status !== "public" ||
+      videoAfter.scheduling_type !== "manual" ||
+      (typeof videoAfter.scheduled_time !== "number" ||
+        !Number.isSafeInteger(videoAfter.scheduled_time) ||
+        videoAfter.scheduled_time < 0) ||
+      videoAfter.app_like_count !== 0 ||
+      videoAfter.score !== 0 ||
+      videoAfter.score_updated_at !== null ||
+      !videoAfter.creator_display_name.trim() ||
+      !videoAfter.title.trim() ||
+      videoAfter.created_at !== now || videoAfter.updated_at !== now ||
+      !Number.isSafeInteger(now) || now < 0) {
+    throw new Error("free_video_submission_plan_identity_invalid");
+  }
+
+  // An event-linked video must carry the actual D1 policy observed before
+  // input validation. Missing snapshots are not evidence that no fields
+  // were required. A changed policy must fail within the atomic batch.
+  if (eventId && args.requiredFieldsSnapshot === undefined) {
+    throw new Error("free_video_required_fields_snapshot_missing");
+  }
+
+  // Recheck the authenticated Active X on the SAME D1 batch as creation.
+  // This prevents a concurrent ban, active-X switch, link revocation or
+  // approval downgrade from committing with a stale request-time guard.
+  // This batch-time assertion also mirrors CURRENT's TOS gate; a request
+  // that passed an earlier guard must fail if consent is revoked or the user
+  // is required to re-accept a newer terms version before commit.
+  const activeXAssertion = db.run(sql`
+    SELECT CASE WHEN EXISTS (
+      SELECT 1 FROM ${users}
+      JOIN ${xUserAccountLinks}
+        ON ${xUserAccountLinks.auth_user_id} = ${users.id}
+       AND ${xUserAccountLinks.x_user_id} = ${trustedActiveXId}
+      JOIN ${xUsers}
+        ON ${xUsers.id} = ${xUserAccountLinks.x_user_id}
+      WHERE ${users.id} = ${actorUserId}
+        AND ${users.active_x_user_id} = ${trustedActiveXId}
+        AND COALESCE(${users.is_banned}, 0) = 0
+        AND ${users.is_tos_accepted} = 1
+        AND COALESCE(${users.terms_reaccept_required}, 0) <> 1
+        AND ${xUsers.approval_status} = 'approved'
+    )
+    -- CURRENT rejects a YouTube ID used by any non-voided video.
+    -- Check in the atomic batch: the active-only UNIQUE index excludes archived.
+    AND NOT EXISTS (
+      SELECT 1 FROM ${videos}
+      WHERE ${videos.youtube_video_id} = ${videoAfter.youtube_video_id}
+        AND ${videos.visibility_status} <> 'voided'
+    ) THEN 1 ELSE json_extract('not-valid-json', '$') END
+  `);
+  // Pure plan construction can still fail closed. Nothing has been written.
+  const eventAssertion = buildUnslottedEventEligibilityAssertionPlan(
+    db, eventId, now, args.requiredFieldsSnapshot,
+  );
+  const answerPlan = buildFreeVideoCustomAnswerInsertPlan(db, {
+    videoId: videoAfter.id,
+    eventId,
+    drafts: customAnswerDrafts,
+    questions,
+    actorUserId,
+    now,
+  });
+  if (eventId && (
+    eventAssertion.statements.length !== 1 ||
+    answerPlan.statements.length < 1 ||
+    eventAssertion.expectedChanges[0] !== null ||
+    answerPlan.expectedChanges[0] !== null
+  )) {
+    throw new Error("free_video_submission_assertion_plan_invalid");
+  }
+  const videoInsert = buildFreeVideoInsertPlan(db, videoAfter, actorUserId);
+  const youtubeMetadata = buildFreeVideoYoutubeMetadataInsertPlan(db, {
+    videoId: videoAfter.id, actorUserId, now,
+  });
+  const eventLink = buildUnslottedVideoEventPlan(db, {
+    videoId: videoAfter.id, eventId, actorUserId,
+  });
+  // The answer plan includes one assertion followed by zero/one INSERT.
+  const [questionAssertion, ...answerMutations] = eventId
+    ? answerPlan.statements
+    : [];
+  const answerMutationChanges = eventId
+    ? answerPlan.expectedChanges.slice(1)
+    : [];
+  const statements = [
+    activeXAssertion,
+    ...eventAssertion.statements,
+    ...(questionAssertion ? [questionAssertion] : []),
+    ...videoInsert.statements,
+    ...youtubeMetadata.statements,
+    ...eventLink.statements,
+    ...answerMutations,
+  ];
+  const expectedChanges = [
+    null,
+    ...eventAssertion.expectedChanges,
+    ...(questionAssertion ? [null] : []),
+    ...videoInsert.expectedChanges,
+    ...youtubeMetadata.expectedChanges,
+    ...eventLink.expectedChanges,
+    ...answerMutationChanges,
+  ];
+  if (statements.length !== expectedChanges.length) {
+    throw new Error("free_video_submission_plan_length_invalid");
+  }
+  return {
+    statements,
+    expectedChanges,
+    audits: [...videoInsert.audits, ...youtubeMetadata.audits, ...eventLink.audits, ...answerPlan.audits],
+  };
+}
+
+/**
+ * UNMOUNTED SA-086 proposal. Appends the canonical rebuild targets to the
+ * same prepared D1 batch as the video INSERT; no DB writes or wake occur.
+ * The authenticated caller must still provide the remaining CURRENT atomic
+ * authenticated route and icon integration. Member/chapters, software and
+ * CURRENT-style DM/ops notifications are included with trusted host inputs.
+ */
+export async function buildFreeVideoSubmissionWithRebuildPlan(
+  db: ServerCoreDb,
+  args: Parameters<typeof buildFreeVideoSubmissionAtomicPlan>[1] & {
+    /** Canonical parsed videoForm.used_software; omit only for legacy tests. */
+    usedSoftware?: string | null;
+    /** Parsed via shared validateVideoMemberSubmission, not client JSON. */
+    memberSubmission?: ValidatedMemberSubmission;
+    /** Trusted, CURRENT-formatted notification payload. Legacy tests omit it. */
+    submittedNotificationPayload?: Record<string, unknown>;
+    /** Trusted CURRENT ops channel payload + resolved thread name. */
+    registeredChannelNotification?: { payload: Record<string, unknown>; threadName: string };
+  },
+): Promise<UnslottedVideoAtomicPlan> {
+  if (args.videoAfter.collaboration_type === "collab" && !args.memberSubmission) {
+    throw new Error("free_video_collab_members_required");
+  }
+  if (args.videoAfter.collaboration_type !== "collab" &&
+      args.memberSubmission?.members.length) {
+    throw new Error("free_video_noncollab_members_forbidden");
+  }
+  const base = buildFreeVideoSubmissionAtomicPlan(db, args);
+  const member = args.memberSubmission
+    ? await buildFreeVideoNewMemberPlan(db, {
+      videoId: args.videoAfter.id,
+      actorUserId: args.actorUserId,
+      now: args.now,
+      submission: args.memberSubmission,
+    })
+    : { statements: [], expectedChanges: [], audits: [] };
+  const software = await buildFreeVideoSoftwareInsertPlan(db, {
+    videoId: args.videoAfter.id,
+    actorUserId: args.actorUserId,
+    raw: args.usedSoftware ?? null,
+    now: args.now,
+  });
+  const notification = args.submittedNotificationPayload
+    ? await buildFreeVideoSubmittedNotificationPlan(db, {
+      videoId: args.videoAfter.id,
+      actorUserId: args.actorUserId,
+      eventId: args.eventId,
+      payload: args.submittedNotificationPayload,
+      now: args.now,
+    })
+    : { statements: [], expectedChanges: [], audits: [] };
+  const channelNotification = args.registeredChannelNotification
+    ? await buildFreeVideoRegisteredChannelPlan(db, {
+      videoId: args.videoAfter.id,
+      actorUserId: args.actorUserId,
+      eventId: args.eventId,
+      payload: args.registeredChannelNotification.payload,
+      threadName: args.registeredChannelNotification.threadName,
+      now: args.now,
+    })
+    : { statements: [], expectedChanges: [], audits: [] };
+  const targets = buildFreeVideoRebuildTargets({
+    videoId: args.videoAfter.id,
+    userId: args.actorUserId,
+    activeXId: args.trustedActiveXId,
+    eventId: args.eventId,
+  });
+  const queue = await buildStaticRebuildQueueBatch(db, targets);
+  if (queue.acceptedTargetCount !== targets.length ||
+      queue.statements.length === 0 ||
+      queue.statements.length !== queue.expectedChanges.length) {
+    throw new Error("free_video_submission_rebuild_plan_incomplete");
+  }
+  // Both member canonical-X and software alias/name CAS predicates are
+  // pre-commit invariants, NOT mutations. Standalone plans place guards ahead
+  // of their own writes; the full composer must hoist every one of them in
+  // front of the *first* base video INSERT or a stale resolution could be
+  // detected too late. Keep auth/event/question assertions first.
+  const firstBaseWrite = base.expectedChanges.findIndex((changes) => changes !== null);
+  if (firstBaseWrite < 1) {
+    throw new Error("free_video_submission_assertion_order_invalid");
+  }
+  const memberGuardCount = member.expectedChanges[0] === null ? 1 : 0;
+  const softwareGuardCount = software.expectedChanges[0] === null ? 1 : 0;
+  return {
+    statements: [
+      ...base.statements.slice(0, firstBaseWrite),
+      ...member.statements.slice(0, memberGuardCount),
+      ...software.statements.slice(0, softwareGuardCount),
+      ...base.statements.slice(firstBaseWrite),
+      ...member.statements.slice(memberGuardCount),
+      ...software.statements.slice(softwareGuardCount), ...notification.statements,
+      ...channelNotification.statements, ...queue.statements,
+    ],
+    expectedChanges: [
+      ...base.expectedChanges.slice(0, firstBaseWrite),
+      ...member.expectedChanges.slice(0, memberGuardCount),
+      ...software.expectedChanges.slice(0, softwareGuardCount),
+      ...base.expectedChanges.slice(firstBaseWrite),
+      ...member.expectedChanges.slice(memberGuardCount),
+      ...software.expectedChanges.slice(softwareGuardCount), ...notification.expectedChanges,
+      ...channelNotification.expectedChanges, ...queue.expectedChanges,
+    ],
+    audits: [...base.audits, ...member.audits, ...software.audits],
+  };
+}
+
+/**
+ * U02 unmounted S3 gate: estimate the *same* logical D1 query budget as
+ * CURRENT's inspectVideoAtomicWritePlanBudget. The eventual Hono caller must
+ * pass its actual number of pre-mutation read queries; silently using the
+ * deprecated generic 18-query allowance is not a substitute for measurement.
+ *
+ * This is intentionally PURE. It neither runs statements nor grants permission
+ * to commit. A production caller MUST reject !withinLimit before invoking the
+ * guarded mutateWithAudit transaction.
+ */
+/** ZERO_1102 S3: all pre-batch reads, including audit preparation, fit 3. */
+export const FREE_VIDEO_S3_MAX_PREBATCH_READS = 3;
+
+export type FreeVideoSubmissionAtomicPlanBudget = D1AuditMutationBudget & {
+  /** D1's 50-query limit and S3's 3-pre-read limit are independent gates. */
+  d1WithinLimit: boolean;
+  s3PreBatchReadCount: number;
+  s3PreBatchReadLimit: number;
+  s3WithinLimit: boolean;
+};
+
+export function inspectFreeVideoSubmissionAtomicPlanBudget(
+  plan: UnslottedVideoAtomicPlan,
+  callerQueryCount: number,
+): FreeVideoSubmissionAtomicPlanBudget {
+  if (!Number.isSafeInteger(callerQueryCount) || callerQueryCount < 0 ||
+      plan.statements.length === 0 ||
+      plan.statements.length !== plan.expectedChanges.length ||
+      plan.audits.length === 0 ||
+      plan.audits.some((audit) => !audit.strict || !audit.actor_user_id)) {
+    throw new Error("free_video_submission_budget_arguments_invalid");
+  }
+  const budget = planD1AuditMutationBudget({
+    mutationStatementCount: plan.statements.length,
+    mutationAssertionCount: plan.expectedChanges.filter((value) => value !== null).length,
+    auditEntryCount: plan.audits.length,
+    distinctActorCount: new Set(plan.audits.map((audit) => audit.actor_user_id)).size,
+    actorXValidationQueryCount: plan.audits.some(
+      (audit) => Boolean(audit.actor_x_user_id?.trim()),
+    ) ? 1 : 0,
+    // No claims about authentication/audit-setting preloading in unmounted U02.
+    preloadedSettings: false,
+    preloadedActorCount: 0,
+    callerQueryCount,
+  });
+  // S3 is NOT satisfied merely because totalQueryCount <= 50. The auth
+  // session, write guard, candidate read preflights, and audit preparation
+  // happen BEFORE the one atomic batch, and must total at most three D1 reads.
+  // In this unmounted candidate audit settings/actor snapshots are not
+  // credited as preloaded; a future caller must prove any preload credits.
+  const s3PreBatchReadCount = budget.callerQueryCount + budget.preparationQueryCount;
+  const s3WithinLimit = s3PreBatchReadCount <= FREE_VIDEO_S3_MAX_PREBATCH_READS;
+  return {
+    ...budget,
+    d1WithinLimit: budget.withinLimit,
+    s3PreBatchReadCount,
+    s3PreBatchReadLimit: FREE_VIDEO_S3_MAX_PREBATCH_READS,
+    s3WithinLimit,
+    withinLimit: budget.withinLimit && s3WithinLimit,
+  };
+}

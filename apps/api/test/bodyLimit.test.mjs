@@ -6,6 +6,9 @@ import {
   XID_ACTION_BODY_LIMITS,
   XID_ICON_UPLOAD_LIMIT_BYTES,
   limitXIdActionBody,
+  VIDEO_ACTION_BODY_LIMITS,
+  VIDEO_SUBMISSION_BODY_LIMIT_BYTES,
+  limitVideoActionBody,
 } from "../src/middleware/bodyLimit.ts";
 
 function testApp(action) {
@@ -106,4 +109,95 @@ test("used request body cannot bypass or crash the preflight clone", async () =>
   assert.equal(response.status, 400);
   assert.equal(response.headers.get("cache-control"), "private, no-store");
   assert.deepEqual(await response.json(), { ok: false, reason: "body_unreadable" });
+});
+
+
+function videoBudgetTestApp(action) {
+  const app = new Hono();
+  app.use("/video", limitVideoActionBody(action));
+  app.post("/video", async (c) =>
+    c.json({ ok: true, bytes: (await c.req.arrayBuffer()).byteLength }),
+  );
+  return app;
+}
+
+function sendVideoBudget(app, length, headers = {}) {
+  return app.request("http://localhost/video", {
+    method: "POST", headers, body: new Uint8Array(length),
+  });
+}
+
+test("MIG-0651 D-15-3: all three video mutation actions use the CURRENT 8 MiB byte cap", async () => {
+  assert.deepEqual(Object.keys(VIDEO_ACTION_BODY_LIMITS), ["SA-086", "SA-088", "SA-089"]);
+  assert.equal(VIDEO_SUBMISSION_BODY_LIMIT_BYTES, 8 * 1024 * 1024);
+  for (const action of Object.keys(VIDEO_ACTION_BODY_LIMITS)) {
+    assert.equal(VIDEO_ACTION_BODY_LIMITS[action], VIDEO_SUBMISSION_BODY_LIMIT_BYTES);
+    const app = videoBudgetTestApp(action);
+    const accepted = await sendVideoBudget(app, VIDEO_SUBMISSION_BODY_LIMIT_BYTES);
+    assert.equal(accepted.status, 200, action + ": exactly 8 MiB must pass");
+    assert.deepEqual(await accepted.json(), {
+      ok: true, bytes: VIDEO_SUBMISSION_BODY_LIMIT_BYTES,
+    });
+    const denied = await sendVideoBudget(app, VIDEO_SUBMISSION_BODY_LIMIT_BYTES + 1);
+    assert.equal(denied.status, 413, action + ": exactly 8 MiB +1 must reject");
+    assert.equal(denied.headers.get("cache-control"), "private, no-store");
+    assert.deepEqual(await denied.json(), { ok: false, reason: "body_too_large" });
+  }
+});
+
+test("MIG-0651 D-15-3: declared oversized video request and forged zero length fail closed", async () => {
+  const app = videoBudgetTestApp("SA-086");
+  const declared = await sendVideoBudget(app, 1, {
+    "Content-Length": String(VIDEO_SUBMISSION_BODY_LIMIT_BYTES + 1),
+  });
+  assert.equal(declared.status, 413);
+  assert.deepEqual(await declared.json(), { ok: false, reason: "body_too_large" });
+  const forged = await sendVideoBudget(app, VIDEO_SUBMISSION_BODY_LIMIT_BYTES + 1, {
+    "Content-Length": "0",
+  });
+  assert.equal(forged.status, 413);
+  assert.deepEqual(await forged.json(), { ok: false, reason: "body_too_large" });
+  const malformed = await sendVideoBudget(app, 1, { "Content-Length": "0001" });
+  assert.equal(malformed.status, 400);
+  assert.deepEqual(await malformed.json(), { ok: false, reason: "invalid_body_length" });
+});
+
+
+test("MIG-0651 T05: multipart envelope bytes, not only uploaded file bytes, count toward 8 MiB", async () => {
+  const boundary = "fn-mig0651-test-boundary";
+  const encode = new TextEncoder();
+  const prefix = encode.encode(
+    `--${boundary}\r\nContent-Disposition: form-data; name="icon_file"; filename="icon.png"\r\nContent-Type: image/png\r\n\r\n`,
+  );
+  const suffix = encode.encode(`\r\n--${boundary}--\r\n`);
+  const multipartBody = (totalBytes) => {
+    const body = new Uint8Array(totalBytes);
+    assert.ok(totalBytes > prefix.byteLength + suffix.byteLength);
+    body.set(prefix);
+    body.fill(65, prefix.byteLength, totalBytes - suffix.byteLength);
+    body.set(suffix, totalBytes - suffix.byteLength);
+    return body;
+  };
+  const app = new Hono();
+  app.use("/video", limitVideoActionBody("SA-086"));
+  app.post("/video", async (c) => {
+    const data = await c.req.formData();
+    const file = data.get("icon_file");
+    return c.json({ ok: true, fileBytes: file instanceof File ? file.size : null });
+  });
+  const sendMultipart = (totalBytes) => app.request("http://localhost/video", {
+    method: "POST",
+    headers: { "Content-Type": `multipart/form-data; boundary=${boundary}` },
+    body: multipartBody(totalBytes),
+  });
+  const exact = await sendMultipart(VIDEO_SUBMISSION_BODY_LIMIT_BYTES);
+  assert.equal(exact.status, 200);
+  assert.deepEqual(await exact.json(), {
+    ok: true,
+    fileBytes: VIDEO_SUBMISSION_BODY_LIMIT_BYTES - prefix.byteLength - suffix.byteLength,
+  });
+  const tooLarge = await sendMultipart(VIDEO_SUBMISSION_BODY_LIMIT_BYTES + 1);
+  assert.equal(tooLarge.status, 413);
+  assert.equal(tooLarge.headers.get("cache-control"), "private, no-store");
+  assert.deepEqual(await tooLarge.json(), { ok: false, reason: "body_too_large" });
 });

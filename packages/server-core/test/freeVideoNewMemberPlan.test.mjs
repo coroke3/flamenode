@@ -1,0 +1,343 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { drizzle } from "drizzle-orm/sqlite-proxy";
+import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
+import * as schema from "@flamenode/db/schema";
+import { validateVideoMemberSubmission } from "@flamenode/domain/video";
+import { MAX_VIDEO_MEMBERS } from "@flamenode/domain/video/atomicLimits";
+import { createSqlite, insert } from "../../../apps/api/test/support/personalHarness.mjs";
+import { buildFreeVideoNewMemberPlan } from "../src/video/freeVideoNewMemberPlan.ts";
+import { buildFreeVideoNewMemberPlan as publicBuilder } from "@flamenode/server-core/video/unslottedEventPlans";
+import { D1_MAX_BIND_PARAMETERS } from "../src/audit/mutateBudget.ts";
+
+const NOW = 1770000000;
+function dbFor(sqlite, stats) {
+  const proxy = drizzle(async (query, params, method) => {
+    stats.reads++;
+    if (/UNION ALL/i.test(query)) {
+      assert.equal(params.length, 2,
+        "both alias and direct identity scans must reuse JSON1, not 2*N bound IDs");
+      assert.match(query, /json_each/i);
+      assert.ok(params.every(p => typeof p === "string" && p.length < 32_000));
+      // The real migration 0067 expression indexes are required to make
+      // this single D1 read bounded on a populated resort's member history.
+      // Check the actual SQLite optimizer, not just a source SQL substring.
+      const details = sqlite.prepare("EXPLAIN QUERY PLAN " + query)
+        .all(...params).map(row => String(row.detail));
+      assert.ok(details.some(d => d.includes("x_user_aliases_canonical_norm_alias_idx")),
+        "alias candidate lookup must use migration 0067's normalized index");
+      assert.ok(details.some(d => d.includes("x_users_canonical_norm_id_idx")),
+        "direct X and alias-target lookup must use migration 0067's normalized index");
+      assert.ok(!details.some(d => /SCAN (?:x_user_aliases|x_users)\b/i.test(d)),
+        "one-query canonical X resolution must not full-scan either base table");
+    }
+    const rows = sqlite.prepare(query).all(...params);
+    return { rows: method === "all" || method === "values"
+      ? rows.map(row => Object.values(row)) : rows };
+  }, { schema });
+  return { select: (...args) => proxy.select(...args),
+    insert: (...args) => proxy.insert(...args),
+    run(expr) { return { sqlExpr: expr }; } };
+}
+function parsedMemberSubmission(items, isCollab = true) {
+  const f = new FormData();
+  f.set("members_json", JSON.stringify(items));
+  const result = validateVideoMemberSubmission(f, isCollab);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  return result.value;
+}
+function args(submission, overrides = {}) {
+  return { videoId: "v-member", actorUserId: "user-1",
+    now: NOW, submission, ...overrides };
+}
+function executePrepared(sqlite, plan) {
+  const dialect = new SQLiteSyncDialect();
+  sqlite.exec("BEGIN");
+  try {
+    for (const [index, statement] of plan.statements.entries()) {
+      const q = "sqlExpr" in statement
+        ? dialect.sqlToQuery(statement.sqlExpr) : statement.toSQL();
+      assert.ok(q.params.length <= D1_MAX_BIND_PARAMETERS);
+      for (const v of q.params) {
+        if (typeof v === "string") {
+          assert.ok(new TextEncoder().encode(v).byteLength < 2_000_000);
+        }
+      }
+      // Canonical-X CAS is a read assertion; executing it with run() can
+      // skip stepping the SELECT and silently miss an identity race.
+      if (index === 0 && plan.expectedChanges[index] === null) {
+        const predicate = sqlite.prepare(q.sql).get(...q.params);
+        assert.equal(Object.values(predicate)[0], 1, "canonical-X CAS must return true");
+      } else {
+        const result = sqlite.prepare(q.sql).run(...q.params);
+        if (plan.expectedChanges[index] !== null) {
+          assert.equal(result.changes, plan.expectedChanges[index],
+            "statement " + index + " should have exact changes");
+        }
+      }
+    }
+    sqlite.exec("COMMIT");
+  } catch (err) { sqlite.exec("ROLLBACK"); throw err; }
+}
+
+test("MIG-0651 new members: public core entry is the implementation", () => {
+  assert.strictEqual(publicBuilder, buildFreeVideoNewMemberPlan);
+});
+
+test("MIG-0651 new members: empty noncollab has no read/write/audit", async () => {
+  const db = { select() { throw Error("no read"); }, run() { throw Error("no write"); } };
+  const plan = await buildFreeVideoNewMemberPlan(db, args(parsedMemberSubmission([], false)));
+  assert.deepEqual(plan, { statements: [], expectedChanges: [], audits: [] });
+});
+
+test("MIG-0651 new members: name-only member saves with zero reads, but cannot create orphaned chapters", async () => {
+  const sqlite = createSqlite();
+  try {
+    const plain = parsedMemberSubmission([
+      { name: "Name only", x_user_id: "", chapters: [] },
+    ]);
+    const stats = { reads: 0 };
+    const plan = await buildFreeVideoNewMemberPlan(dbFor(sqlite, stats), args(plain));
+    assert.equal(stats.reads, 0, "a member without an X ID needs no resolver query");
+    assert.deepEqual(plan.expectedChanges, [1], "only the member INSERT is prepared");
+    executePrepared(sqlite, plan);
+    const member = sqlite.prepare("SELECT x_user_id, name FROM video_members").get();
+    assert.equal(member.x_user_id, null);
+    assert.equal(member.name, "Name only");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM video_chapters").get().n, 0);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM x_users").get().n, 0);
+
+    // Defense-in-depth: even a caller forging already-validated member
+    // metadata must be refused before any SELECT or incomplete D1 write plan.
+    const forged = {
+      ...plain,
+      chaptersByIndex: new Map([[0, [{ time_seconds: 12, label: "Chapter", note: "", order_index: 0 }]]]),
+    };
+    const noDb = {
+      select() { throw new Error("unexpected D1 read"); },
+      run() { throw new Error("unexpected D1 statement"); },
+    };
+    await assert.rejects(
+      () => buildFreeVideoNewMemberPlan(noDb, args(forged)),
+      /free_video_new_member_chapter_xid_required/,
+    );
+  } finally { sqlite.close(); }
+});
+
+test("MIG-0651 new members: canonical X alias, pending placeholder, public members and chapters share one SQLite transaction", async () => {
+  const sqlite = createSqlite();
+  try {
+    insert(sqlite, "x_users", { id: "realcreator", x_name: "Creator", approval_status: "approved" });
+    insert(sqlite, "x_user_aliases", { x_user_id: "realcreator", alias_x_id: "oldcreator" });
+    const submission = parsedMemberSubmission([
+      { name: "Creator", x_user_id: "oldcreator", role: "映像", comment: "intro",
+        chapters: [{ time: "00:12", label: "オープニング", note: "part A" }] },
+      { name: "New Artist", x_user_id: "brandnew", role: "音楽", comment: "",
+        chapters: [] },
+    ]);
+    const stats = { reads: 0 };
+    const plan = await buildFreeVideoNewMemberPlan(dbFor(sqlite, stats), args(submission));
+    assert.equal(stats.reads, 1, "alias and direct X resolutions share one indexed UNION ALL read");
+    assert.deepEqual(plan.expectedChanges, [null, 1, 2, 1]);
+    assert.deepEqual(plan.audits.map(a => [a.table_name,a.operation,a.strict]), [
+      ["x_users_member_batch", "MERGE", true],
+      ["video_members_set", "MERGE", true],
+      ["video_chapters_member_set", "MERGE", true],
+    ]);
+    assert.equal(plan.audits[1].before.rows.length, 0);
+    assert.equal(plan.audits[1].after.rows.length, 2);
+    assert.equal(plan.audits[2].after.row_count, 1);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM video_members").get().n, 0);
+    executePrepared(sqlite, plan);
+    const rows = sqlite.prepare("SELECT x_user_id,name,can_edit,is_public_member FROM video_members ORDER BY order_index").all();
+    assert.deepEqual(rows.map(r => r.x_user_id), ["realcreator", "brandnew"]);
+    assert.ok(rows.every(r => r.can_edit === 0 && r.is_public_member === 1));
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM video_chapters").get().n, 1);
+    const ch = sqlite.prepare("SELECT x_user_id,chapter_time,chapter_label FROM video_chapters").get();
+    assert.equal(ch.x_user_id, "realcreator");
+    assert.equal(ch.chapter_time, 12);
+    assert.equal(ch.chapter_label, "オープニング");
+    assert.equal(sqlite.prepare("SELECT approval_status FROM x_users WHERE id='brandnew'").get().approval_status, "pending");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM x_users").get().n, 2);
+  } finally { sqlite.close(); }
+});
+
+test("MIG-0651 new members: rejected alias and duplicate canonical IDs fail before any mutation", async () => {
+  const sqlite = createSqlite();
+  try {
+    insert(sqlite, "x_users", { id: "legacytarget", x_name: "Legacy", approval_status: "rejected" });
+    insert(sqlite, "x_user_aliases", { x_user_id: "legacytarget", alias_x_id: "oldalias" });
+    const stats = { reads: 0 };
+    await assert.rejects(
+      () => buildFreeVideoNewMemberPlan(dbFor(sqlite, stats), args(parsedMemberSubmission([
+        { name: "Invalid", x_user_id: "oldalias", chapters: [] },
+      ]))),
+      /free_video_new_member_identity_unresolvable/,
+    );
+    sqlite.prepare("UPDATE x_users SET approval_status='approved' WHERE id='legacytarget'").run();
+    insert(sqlite, "x_user_aliases", { x_user_id: "legacytarget", alias_x_id: "otheralias" });
+    await assert.rejects(
+      () => buildFreeVideoNewMemberPlan(dbFor(sqlite, stats), args(parsedMemberSubmission([
+        { name: "First", x_user_id: "oldalias", chapters: [] },
+        { name: "Second", x_user_id: "otheralias", chapters: [] },
+      ]))),
+      /free_video_new_member_duplicate_canonical_id/,
+    );
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM video_members").get().n, 0);
+  } finally { sqlite.close(); }
+});
+
+test("MIG-0651 new members: direct approved + conflicting alias rejects, rejected merged direct can follow valid alias", async () => {
+  const sqlite = createSqlite();
+  try {
+    insert(sqlite, "x_users", { id: "canonical", x_name: "Canonical", approval_status: "approved" });
+    insert(sqlite, "x_users", { id: "oldhandle", x_name: "Old", approval_status: "approved" });
+    insert(sqlite, "x_user_aliases", { x_user_id: "canonical", alias_x_id: "oldhandle" });
+    const submission = parsedMemberSubmission([
+      { name: "Member", x_user_id: "oldhandle", chapters: [] },
+    ]);
+    const stats = { reads: 0 };
+    await assert.rejects(
+      () => buildFreeVideoNewMemberPlan(dbFor(sqlite, stats), args(submission)),
+      /free_video_new_member_identity_unresolvable/,
+      "live direct X identity must not silently transfer to a different alias target",
+    );
+    assert.equal(stats.reads, 1, "even collision detection uses only one D1 read");
+    sqlite.prepare("UPDATE x_users SET approval_status='rejected' WHERE id='oldhandle'").run();
+    const plan = await buildFreeVideoNewMemberPlan(dbFor(sqlite, stats), args(submission));
+    assert.equal(stats.reads, 2, "one additional D1 read on the second attempt");
+    assert.deepEqual(plan.expectedChanges, [null, 1]);
+    assert.equal(plan.audits[0].after.rows[0].x_user_id, "canonical");
+    executePrepared(sqlite, plan);
+    assert.equal(sqlite.prepare("SELECT x_user_id FROM video_members").get().x_user_id, "canonical");
+  } finally { sqlite.close(); }
+});
+
+test("MIG-0651 new members: exact-PK race aborts instead of creating false pending-profile audit", async () => {
+  const sqlite = createSqlite();
+  try {
+    const plan = await buildFreeVideoNewMemberPlan(dbFor(sqlite, {reads:0}), args(parsedMemberSubmission([
+      { name: "Member", x_user_id: "racingx", chapters: [] },
+    ])));
+    assert.deepEqual(plan.expectedChanges, [null,1,1]);
+    assert.equal(plan.audits[0].after.rows[0].approval_status, "pending",
+      "this is an assertion of a newly created pending profile, not an UPSERT");
+    insert(sqlite, "x_users", { id: "racingx", x_name: "Current Name", approval_status: "approved" });
+    assert.throws(() => executePrepared(sqlite, plan), /malformed JSON/,
+      "otherwise strict audit would falsely claim a pending profile was created");
+    const row = sqlite.prepare("SELECT x_name,approval_status FROM x_users WHERE id='racingx'").get();
+    assert.equal(row.x_name, "Current Name");
+    assert.equal(row.approval_status, "approved");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM video_members").get().n, 0);
+  } finally { sqlite.close(); }
+});
+
+test("MIG-0651 new members: normalized existing X blocks duplicate placeholder PK after pre-read", async () => {
+  const sqlite = createSqlite();
+  try {
+    const plan = await buildFreeVideoNewMemberPlan(dbFor(sqlite, {reads:0}), args(
+      parsedMemberSubmission([{name:"Member",x_user_id:"racingx",chapters:[]}])
+    ));
+    assert.deepEqual(plan.expectedChanges, [null,1,1]);
+    insert(sqlite, "x_users", {id:"RACINGX", x_name:"Original", approval_status:"approved"});
+    assert.throws(() => executePrepared(sqlite,plan), /malformed JSON/,
+      "a normalized but different existing PK must fail before placeholder INSERT");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM video_members").get().n,0);
+    assert.deepEqual(sqlite.prepare("SELECT id,x_name FROM x_users").all().map(row => ({id:row.id,x_name:row.x_name})),
+      [{id:"RACINGX",x_name:"Original"}], "neither duplicate X row nor member row may persist");
+  } finally { sqlite.close(); }
+});
+
+test("MIG-0651 new members: 80, 81 and 100 canonical candidates use one bounded JSON1 SELECT", async () => {
+  assert.equal(MAX_VIDEO_MEMBERS, 100);
+  // Crossing the old 80-person chunk edge must not spend a second D1 read.
+  for (const count of [80, 81, MAX_VIDEO_MEMBERS]) {
+    const sqlite = createSqlite();
+    try {
+      const many = Array.from({ length: count }, (_, i) => ({
+        name: "Member " + i, x_user_id: "newid" + i, chapters: [],
+      }));
+      const stats = { reads: 0 };
+      const plan = await buildFreeVideoNewMemberPlan(
+        dbFor(sqlite, stats), args(parsedMemberSubmission(many)),
+      );
+      assert.equal(stats.reads, 1, count + " members must resolve in one D1 SELECT");
+      assert.deepEqual(plan.expectedChanges, [null, count, count]);
+      assert.equal(plan.statements.length, 3);
+      const dialect = new SQLiteSyncDialect();
+      for (const statement of plan.statements) {
+        const q = dialect.sqlToQuery(statement.sqlExpr);
+        assert.ok(q.params.length <= D1_MAX_BIND_PARAMETERS);
+        assert.ok(new TextEncoder().encode(q.params.at(-1)).byteLength < 1_000_000);
+      }
+      executePrepared(sqlite, plan);
+      assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM x_users").get().n, count);
+      assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM video_members").get().n, count);
+    } finally { sqlite.close(); }
+  }
+});
+
+test("MIG-0651 new members: invalid chapter index, blank row and too-many members fail before D1 reads", async () => {
+  const noDb = { select() { throw Error("unexpected D1 read"); } };
+  const empty = parsedMemberSubmission([]);
+  await assert.rejects(() => buildFreeVideoNewMemberPlan(noDb, args(empty, { now: -1 })),
+    /free_video_new_member_arguments_invalid/);
+  const badIndex = parsedMemberSubmission([]);
+  badIndex.chaptersByIndex.set(0, []);
+  await assert.rejects(() => buildFreeVideoNewMemberPlan(noDb, args(badIndex)),
+    /free_video_new_member_chapter_index_invalid/);
+  const blank = { members:[{name:"",x_user_id:"",role:"",comment:""}], chaptersByIndex:new Map() };
+  await assert.rejects(() => buildFreeVideoNewMemberPlan(noDb, args(blank)),
+    /free_video_new_member_empty/);
+  const large = {members:Array.from({length:101},()=>({name:"Member",x_user_id:"",role:"",comment:""})),chaptersByIndex:new Map()};
+  await assert.rejects(() => buildFreeVideoNewMemberPlan(noDb,args(large)),
+    /free_video_new_member_arguments_invalid/);
+});
+
+test("MIG-0651 new members: in-batch identity CAS rejects stale alias retarget before writing", async () => {
+  const sqlite = createSqlite();
+  try {
+    const stats = { reads: 0 };
+    const submission = parsedMemberSubmission([
+      {name:"Candidate",x_user_id:"futurealias",chapters:[]},
+    ]);
+    const plan = await buildFreeVideoNewMemberPlan(dbFor(sqlite,stats),args(submission));
+    assert.equal(stats.reads,1);
+    assert.deepEqual(plan.expectedChanges,[null,1,1]);
+    insert(sqlite,"x_users",{id:"otherowner",x_name:"Other",approval_status:"approved"});
+    insert(sqlite,"x_user_aliases",{alias_x_id:"futurealias",x_user_id:"otherowner"});
+    assert.throws(() => executePrepared(sqlite,plan),/malformed JSON/);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM video_members").get().n,0);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM x_users WHERE id='futurealias'").get().n,0);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM x_users WHERE id='otherowner'").get().n,1);
+  } finally { sqlite.close(); }
+});
+
+test("MIG-0651 new members: in-batch identity CAS rejects post-read X approval revocation", async () => {
+  const sqlite = createSqlite();
+  try {
+    insert(sqlite,"x_users",{id:"creator",x_name:"Creator",approval_status:"approved"});
+    const plan = await buildFreeVideoNewMemberPlan(dbFor(sqlite,{reads:0}),args(
+      parsedMemberSubmission([{name:"Creator",x_user_id:"creator",chapters:[]}])
+    ));
+    assert.deepEqual(plan.expectedChanges,[null,1]);
+    sqlite.prepare("UPDATE x_users SET approval_status='rejected' WHERE id='creator'").run();
+    assert.throws(() => executePrepared(sqlite,plan),/malformed JSON/);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM video_members").get().n,0);
+  } finally { sqlite.close(); }
+});
+
+test("MIG-0651 new members: already-resolved X deletion after pre-read aborts before member writes", async () => {
+  const sqlite = createSqlite();
+  try {
+    insert(sqlite,"x_users",{id:"exists",x_name:"Existing",approval_status:"approved"});
+    const plan = await buildFreeVideoNewMemberPlan(dbFor(sqlite,{reads:0}),args(
+      parsedMemberSubmission([{name:"Existing",x_user_id:"exists",chapters:[]}])
+    ));
+    assert.deepEqual(plan.expectedChanges,[null,1]);
+    sqlite.prepare("DELETE FROM x_users WHERE id='exists'").run();
+    assert.throws(() => executePrepared(sqlite,plan), /malformed JSON/);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM video_members").get().n,0);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM x_users WHERE id='exists'").get().n,0);
+  } finally { sqlite.close(); }
+});

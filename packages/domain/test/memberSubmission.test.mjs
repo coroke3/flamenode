@@ -1,0 +1,60 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { validateVideoMemberSubmission } from "@flamenode/domain/video";
+import { readFileSync } from "node:fs";
+
+function form(json) {
+  const f = new FormData();
+  if (json !== undefined) f.set("members_json", json);
+  return f;
+}
+test("MIG-0651: CURRENT delegates to canonical domain validation", () => {
+  const bridge = readFileSync(new URL("../../../src/lib/video/submissionValidation.ts", import.meta.url), "utf8");
+  assert.match(bridge, /validateVideoMemberSubmission,/);
+  assert.match(bridge, /from "@flamenode\/domain\/video"/);
+  assert.doesNotMatch(bridge, /function validateVideoMemberSubmission\(/);
+});
+test("MIG-0651: no cooperation does not parse malicious member JSON", () => {
+  const value = validateVideoMemberSubmission(form("{broken"), false);
+  assert.deepEqual(value, {ok:true, value:{members:[],chaptersByIndex:new Map()}});
+  assert.equal(validateVideoMemberSubmission(form("{broken"), true).ok,false);
+});
+test("MIG-0651: collab rejects duplicated multipart members_json even if first parses", () => {
+  const good = JSON.stringify([{ name: "Alice", x_user_id: "@alice" }]);
+  const other = JSON.stringify([{ name: "Bob", x_user_id: "@bob" }]);
+  for (const values of [[good, other], [good, good], ["", good], [good, ""]]) {
+    const f = new FormData();
+    for (const value of values) f.append("members_json", value);
+    const result = validateVideoMemberSubmission(f, true);
+    assert.deepEqual(result, { ok: false, message: "合作メンバーの入力が不正です。" });
+    assert.deepEqual(validateVideoMemberSubmission(f, false), {
+      ok: true, value: { members: [], chaptersByIndex: new Map() },
+    }, "non-collab must continue ignoring member payloads");
+  }
+  const f = form(good);
+  f.set("unrelated", "ignore me");
+  assert.equal(validateVideoMemberSubmission(f, true).ok, true);
+});
+
+test("MIG-0651: member chapters stay indexed with fallback role and zero member chapter maps", () => {
+  const members = [
+    { name:"Alice",x_user_id:"@Alice",role:"Editor",chapters:[{time:"1:01",label:"",note:" notes "}] },
+    { name:"Bob",x_user_id:"",chapters:[] },
+  ];
+  const res = validateVideoMemberSubmission(form(JSON.stringify(members)),true);
+  assert.equal(res.ok,true);
+  if(!res.ok)return;
+  assert.deepEqual(res.value.members.map(x=>x.x_user_id),["alice",""]);
+  assert.deepEqual([...res.value.chaptersByIndex.entries()],[
+    [0,[{time_seconds:61,label:"Editor",note:"notes",order_index:0}]],
+    [1,[]],
+  ]);
+});
+test("MIG-0651: invalid chapters and duplicate X IDs fail before D1 work", () => {
+  const badTime = validateVideoMemberSubmission(form(JSON.stringify([{name:"Bad",x_user_id:"x",chapters:[{time:"1:99"}]}])),true);
+  assert.equal(badTime.ok,false);
+  assert.match(badTime.message,/時刻/);
+  const duplicate = validateVideoMemberSubmission(form(JSON.stringify([{name:"a",x_user_id:"@A"},{name:"b",x_user_id:"a"}])),true);
+  assert.equal(duplicate.ok,false);
+  assert.match(duplicate.message,/同じ X ID/);
+});
