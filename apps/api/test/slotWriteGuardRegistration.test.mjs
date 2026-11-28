@@ -77,7 +77,7 @@ test("MIG-0656 U02c-1b: all 9 slot write handlers are mounted with scoped guards
   for (const suffix of ["/events/:id/slots/batch-delete","/events/:id/slots/batch-release","/events/:id/slots/labels","/events/:id/slots/:slotId/release","/events/:id/slots/generate-chunk","/events/:id/slots/delete-available-chunk"]) {
     assert.ok(content.includes(suffix));
   }
-  for (const suffix of ["/events/:id/slots/:slotId/force-release-submitted", "/events/:id/slots/:slotId/release-submitted-video"]) {
+  for (const suffix of ["/events/:id/slots/:slotId/force-release-submitted", "/events/:id/slots/:slotId/release-video-keep-reservation"]) {
     assert.ok(content.includes(suffix));
   }
   for (const router of [

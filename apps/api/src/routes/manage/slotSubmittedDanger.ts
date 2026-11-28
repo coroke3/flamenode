@@ -174,5 +174,5 @@ async function submittedDanger(c: Context<AppEnv>, kind: SubmittedDangerKind) {
 /** Explicit paths, both POST-only; they do not overlap existing SA-060. */
 slotSubmittedDangerRoutes.post("/:slotId/force-release-submitted", costGuardMiddleware("manage_slot_update"), (c) =>
   submittedDanger(c, "force-release"));
-slotSubmittedDangerRoutes.post("/:slotId/release-submitted-video", costGuardMiddleware("manage_slot_update"), (c) =>
+slotSubmittedDangerRoutes.post("/:slotId/release-video-keep-reservation", costGuardMiddleware("manage_slot_update"), (c) =>
   submittedDanger(c, "keep-reservation"));

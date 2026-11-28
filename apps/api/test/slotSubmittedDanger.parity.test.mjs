@@ -109,7 +109,7 @@ function setup({kind="force-release",count=2,actor=ADMIN,staff=false,
   app.route("/api/manage/events/:id/slots",slotSubmittedDangerRoutes);
   const post=(slotId="s0",eventId="ev-1",op=kind)=>app.request(
     ORIGIN+"/api/manage/events/"+eventId+"/slots/"+slotId+"/"+
-      (op==="force-release"?"force-release-submitted":"release-submitted-video"),
+      (op==="force-release"?"force-release-submitted":"release-video-keep-reservation"),
     {method:"POST",headers:{Origin:ORIGIN,Cookie:cookieToken?"__Secure-authjs.session-token="+cookieToken:""}},
     {DB:db,NEXT_PUBLIC_SITE_URL:ORIGIN},
   );

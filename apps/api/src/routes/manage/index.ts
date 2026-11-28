@@ -53,7 +53,7 @@ const slotWritePaths = [
 ];
 const submittedDangerWritePaths = [
   "/events/:id/slots/:slotId/force-release-submitted",
-  "/events/:id/slots/:slotId/release-submitted-video",
+  "/events/:id/slots/:slotId/release-video-keep-reservation",
 ];
 const scopedWritePaths = [...playlistWritePaths, ...slotWritePaths, ...submittedDangerWritePaths];
 // Dynamic :slotId path overlaps /batch-delete etc. Apply ONLY to DELETE.
