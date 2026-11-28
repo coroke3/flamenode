@@ -1660,6 +1660,13 @@ test("MIG-0645 U02az: mixed-case and Unicode video proofs use SQLite BINARY; his
   extendLegacyImportEventSchema(sqlite);
   extendLegacyImportQuestionSchema(sqlite);
   extendLegacyImportVideoCreateSchema(sqlite);
+  // Existing catalog IDs can be mixed-case even though new legacy-generated
+  // IDs are lowercase hashes; cover the actual BINARY/locale ordering edge.
+  const seedSoftware = sqlite.prepare(
+    "INSERT INTO software_catalog (id, name, normalized_name, category, usage_count, is_active, is_verified, created_at, updated_at) VALUES (?, ?, ?, NULL, 0, 1, 0, 1, 1)",
+  );
+  seedSoftware.run("software_A", "Software A", "software a");
+  seedSoftware.run("software_a", "Software B", "software b");
   seedEvent(sqlite, { id: "ev-1", visibility_status: "private" });
   seedEvent(sqlite, { id: "EV-1", visibility_status: "private" });
   const plan = questionPlan(2);
@@ -1673,6 +1680,10 @@ test("MIG-0645 U02az: mixed-case and Unicode video proofs use SQLite BINARY; his
     visibility_status: "private", scheduling_type: "manual", scheduled_time: null, created_at: 1700000000,
   };
   plan.videos.push(video);
+  plan.videoSoftwares.push(
+    { video_id: video.id, label: "Software A" },
+    { video_id: video.id, label: "Software B" },
+  );
   for (const event_id of ["ev-1", "EV-1"]) plan.videoEvents.push({ video_id: video.id, event_id });
   for (const [i, id] of ["member-a", "member-A"].entries()) plan.videoMembers.push({
     id, video_id: video.id, x_user_id: null, name: id, role: null, order_index: i,
@@ -1723,8 +1734,14 @@ test("MIG-0645 U02az: mixed-case and Unicode video proofs use SQLite BINARY; his
       assert.equal(versioned[key], digest(rows), key + ": exact persisted proof");
       historicalLocale[key] = digest(by(rows, keys, localeCompare));
     }
-    assert.notEqual(historicalLocale.events_digest, historicalBinary.events_digest);
-    assert.notEqual(historicalLocale.members_digest, historicalBinary.members_digest);
+    for (const key of [
+      "events_digest", "members_digest", "chapters_digest",
+      "softwares_digest", "custom_answers_digest",
+    ]) {
+      assert.notEqual(historicalLocale[key], historicalBinary[key], key + ": legacy locale and SQLite BINARY order differ");
+    }
+    assert.equal(historicalLocale.metadata_digest, historicalBinary.metadata_digest,
+      "single-row metadata has no ordering ambiguity");
     const putProof = (proof) => sqlite.prepare("UPDATE audit_logs SET after_json = ? WHERE id = ?")
       .run(JSON.stringify(proof), saved.audit.id);
     putProof(historicalBinary);
