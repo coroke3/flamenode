@@ -9,7 +9,7 @@ import { DatabaseSync } from "node:sqlite";
 import { spawnSync } from "node:child_process";
 import { materializeD1CompatibleMigrations } from "./d1-migration-compat.mjs";
 import {
-  operationModeMirrorFixtureCases, buildOperationModeMirrorFixture, operationModeBannerReceiptMismatch, createOperationModeKvProbe, operationModeKvEvidenceMismatch, operationModeScannerBlobSha, assertOperationModeScannerSource, EXPECTED_OPERATION_MODE_SCANNER_BLOB_SHA, collectOperationModeKvSamples, operationModeKvBaseline, summarizeOperationModeKvDiagnostic,
+  operationModeMirrorFixtureCases, buildOperationModeMirrorFixture, operationModeBannerReceiptMismatch, createOperationModeKvProbe, operationModeKvEvidenceMismatch, benchmarkControlProvenance, operationModeScannerBlobSha, assertOperationModeScannerSource, EXPECTED_OPERATION_MODE_SCANNER_BLOB_SHA, collectOperationModeKvSamples, operationModeKvBaseline, summarizeOperationModeKvDiagnostic,
   BUDGETS_MS, KINDS, MIN_SAMPLES, QUIET_BASELINE_MAX_MS, ROUTE_INVENTORY, SEED, WARM_KINDS, aggregate, applyBudgetVerdicts, benchmarkRequestHeaders, benchmarkRequestEnv, enforceCpuMeasurementEnvironment, buildPendingScenarios, buildScenarios, createInprocTarget, createReplayTarget, createReplayInputScope, runCold, runScenario, validateCpuProfilerCalibration, requireInspectorResult, summarizeCpuProfile, createInspectorSession, waitForInspectorOpen, fetchWithDeadline, waitForChildExit, eventExportCacheRequestUrls, judge, parseArgs, percentile, playlistResponseMismatch, templateResponseMismatch, renderMarkdown, returnedRows, replayIdentity, replayEvidenceMismatch, requireBenchmarkControl, snapshotReplayResult, snapshotReplayScript, summarize, workerSource,
 } from "./benchmark-api-cpu.mjs";
 
@@ -68,6 +68,31 @@ test("MIG-0639 / #918: lazy operation-mode KV workload catalog has exact UTF-8 s
   assert.throws(() => buildOperationModeMirrorFixture("plain-reason:999999999"), /unknown/);
 });
 
+test("MIG-0639: benchmark control provenance requires canonical Worker build and request ordinal", () => {
+  const good = new Response("ok", { headers: { "x-bench-build": "b7", "x-bench-request": "7" } });
+  assert.deepEqual(benchmarkControlProvenance(good, "seed"), { workerBuild: "b7", requestOrdinal: 7 });
+  const invalid = [
+    { "x-bench-request": "1" },
+    { "x-bench-build": "", "x-bench-request": "1" },
+    { "x-bench-build": "b7", "x-bench-request": "0" },
+    { "x-bench-build": "b7", "x-bench-request": "01" },
+    { "x-bench-build": "b7", "x-bench-request": "1e2" },
+    { "x-bench-build": "b7", "x-bench-request": "1.0" },
+    { "x-bench-build": "b7", "x-bench-request": "9007199254740992" },
+    { "x-bench-build": "b 7", "x-bench-request": "1" },
+  ];
+  for (const headers of invalid) {
+    assert.throws(() => benchmarkControlProvenance(new Response("ok", { headers }), "seed"), /canonical worker provenance/);
+  }
+});
+
+test("MIG-0639: Worker stamps control responses with monotonically increasing provenance", async () => {
+  const worker = await loadReplayWorker("control-provenance", null, 'return new Response("unused");');
+  const first = await worker.fetch(new Request("http://bench.local/__bench/ping"), {}, {});
+  assert.deepEqual(benchmarkControlProvenance(first, "ping"), { workerBuild: "control-provenance", requestOrdinal: 1 });
+  const second = await worker.fetch(new Request("http://bench.local/__bench/noop"), {}, {});
+  assert.deepEqual(benchmarkControlProvenance(second, "noop"), { workerBuild: "control-provenance", requestOrdinal: 2 });
+});
 test("MIG-0639 / #918 native KV diagnostic transport: seed, exact read receipt, cache hit, failure and isolation", async () => {
   const sha256 = async raw => createHash("sha256").update(raw, "utf8").digest("hex");
   const fixture = buildOperationModeMirrorFixture("malformed-tail:65537");
@@ -88,7 +113,7 @@ test("MIG-0639 / #918 native KV diagnostic transport: seed, exact read receipt, 
   };
   assert.equal(await probe(request("/unrelated"), env, 1, dispatch), null);
   const seedResponse = await probe(request("/__bench/operation-mode-kv-seed?reset=1", "PUT", fixture.raw), env, 2, dispatch);
-  const seed = await seedResponse.json();
+  const seed = { ...(await seedResponse.json()), workerBuild: "transport", requestOrdinal: 2 };
   assert.deepEqual(seed, { bytes: fixture.bytes, sha256: await sha256(fixture.raw), reset: true });
   assert.equal(actualPuts, 1);
   assert.equal(stored, fixture.raw);
@@ -99,15 +124,15 @@ test("MIG-0639 / #918 native KV diagnostic transport: seed, exact read receipt, 
     const body = await response.text();
     const result = await probe(request(receiptPath + ordinal), env, ordinal + 1, dispatch);
     assert.equal(result.status, 200);
-    const evidence = await result.json();
+    const evidence = { ...(await result.json()), workerBuild: "transport", requestOrdinal: ordinal, receiptWorkerBuild: "transport", receiptRequestOrdinal: ordinal + 1 };
     const receipt = { ...evidence, status: response.status, body, bytes: Buffer.byteLength(body), cacheControl: response.headers.get("cache-control"), contentType: response.headers.get("content-type") };
     return { evidence, mismatch: operationModeBannerReceiptMismatch(fixture, receipt, phase) || operationModeKvEvidenceMismatch(fixture, seed, evidence, ordinal, phase) };
   };
   assert.equal((await measure(3, "miss")).mismatch, false);
   assert.equal(actualGets, 1);
-  assert.equal((await probe(request(receiptPath + 3), env, 5, dispatch)).status, 409, "receipt is one-use");
-  assert.equal((await measure(6, "hit")).mismatch, false);
+  assert.equal((await measure(5, "hit")).mismatch, false);
   assert.equal(actualGets, 1);
+  assert.equal((await probe(request(receiptPath + 3), env, 7, dispatch)).status, 409, "receipt is one-use");
   cached = false; failGet = true;
   const failed = await measure(8, "miss");
   assert.equal(failed.evidence.kvGetFailures, 1);
@@ -156,15 +181,20 @@ test("MIG-0639 native KV runner separates reset miss, warm hit, elapsed expiry a
   function fake({ early = false, bad = null, discontinuity = null, atRound = 2 } = {}) {
     let t = 0, build = 0, ordinal = 0, phase = 0, seeds = 0, round = 0;
     const make = kind => {
-      ordinal++;
+      ordinal += 1;
       const n = ordinal;
-      ordinal++;
+      const workerBuild = "b" + build;
+      ordinal += 1; // receipt GET immediately follows the measured banner request
       t++;
       const gets = kind === "hit" ? 0 : 1;
-      return { cpuMs: 1, status: 200, bytes: Buffer.byteLength(body), workerBuild: "b" + build, requestOrdinal: n,
-        nativeKv: { ordinal: n, d1: 0, kvGets: gets, kvPuts: 0, kvDeletes: 0, kvOther: 0, kvGetFailures: 0,
-          readBytes: gets ? fixture.bytes : null, readSha256: gets ? sha : null, body,
-          cacheControl: "no-store", contentType: "application/json" } };
+      const nativeKv = { ordinal: n, workerBuild, requestOrdinal: n, receiptWorkerBuild: workerBuild, receiptRequestOrdinal: n + 1,
+        d1: 0, kvGets: gets, kvPuts: 0, kvDeletes: 0, kvOther: 0, kvGetFailures: 0,
+        readBytes: gets ? fixture.bytes : null, readSha256: gets ? sha : null, body,
+        cacheControl: "no-store", contentType: "application/json" };
+      if (bad === "receipt-build") nativeKv.receiptWorkerBuild = "other";
+      if (bad === "receipt-ordinal") nativeKv.receiptRequestOrdinal = n + 2;
+      if (bad === kind) nativeKv.readSha256 = "b".repeat(64);
+      return { cpuMs: 1, status: 200, bytes: Buffer.byteLength(body), workerBuild, requestOrdinal: n, nativeKv };
     };
     const target = {
       seedOperationModeKv: async (_fixture, { reset }) => {
@@ -178,19 +208,19 @@ test("MIG-0639 native KV runner separates reset miss, warm hit, elapsed expiry a
           }
         }
         ordinal++; seeds++;
-        return { bytes: fixture.bytes, sha256: sha, reset };
+        const seed = { bytes: fixture.bytes, sha256: sha, reset, workerBuild: "b" + build, requestOrdinal: ordinal };
+        if (bad === "seed-build" || (!reset && bad === "cold-seed-build")) seed.workerBuild = "";
+        if (bad === "seed-ordinal" || (!reset && bad === "cold-seed-ordinal")) seed.requestOrdinal = 0;
+        return seed;
       },
       run: async () => {
         const kind = ["miss", "hit", "expiry"][phase++];
-        const result = make(kind);
-        if (bad === kind) result.nativeKv.readSha256 = "b".repeat(64);
-        return result;
+        return make(kind);
       },
       runFirstRequest: async () => {
         build++; ordinal = 0;
         const result = make("miss");
-        return { ...result, coldGeneration: result.workerBuild, coldProcessId: build,
-          isFirstIsolateRequest: bad !== "cold" };
+        return { ...result, coldGeneration: result.workerBuild, coldProcessId: build, isFirstIsolateRequest: bad !== "cold" };
       },
     };
     return { target, clock: () => t, pause: async ms => { t += early ? 100 : ms; }, seeds: () => seeds };
@@ -203,7 +233,7 @@ test("MIG-0639 native KV runner separates reset miss, warm hit, elapsed expiry a
   assert.equal(m.seeds(), 5);
   assert.ok(out.samples.filter(r => r.kind === "expiry").every(r => r.elapsedMs >= 30000));
   assert.ok(out.samples.filter(r => r.kind === "cold").every(r => r.isFirstIsolateRequest && r.requestOrdinal === 1));
-  for (const input of [{ bad: "miss" }, { bad: "hit" }, { bad: "expiry" }, { early: true }]) {
+  for (const input of [{ bad: "miss" }, { bad: "hit" }, { bad: "expiry" }, { bad: "seed-build" }, { bad: "seed-ordinal" }, { bad: "receipt-build" }, { bad: "receipt-ordinal" }, { early: true }]) {
     const f = fake(input), r = await collectOperationModeKvSamples(f.target, fixture, opts, f);
     assert.equal(r.stopReason, "STOP_RECEIPT");
     assert.equal(r.warmupFailures.length, 1);
@@ -211,6 +241,10 @@ test("MIG-0639 native KV runner separates reset miss, warm hit, elapsed expiry a
   }
   const f = fake({ bad: "cold" });
   assert.equal((await collectOperationModeKvSamples(f.target, fixture, opts, f)).stopReason, "STOP_COLD");
+  const coldSeed = fake({ bad: "cold-seed-build" });
+  assert.equal((await collectOperationModeKvSamples(coldSeed.target, fixture, opts, coldSeed)).stopReason, "STOP_COLD");
+  const coldSeedOrdinal = fake({ bad: "cold-seed-ordinal" });
+  assert.equal((await collectOperationModeKvSamples(coldSeedOrdinal.target, fixture, opts, coldSeedOrdinal)).stopReason, "STOP_COLD");
   // A discontinuity between rounds is just as invalid as one inside a round.
   // Cover both warmup-to-warmup and warmup-to-measurement/measurement-to-measurement.
   for (const warmup of [1, 2]) {

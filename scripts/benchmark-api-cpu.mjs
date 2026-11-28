@@ -197,11 +197,39 @@ export function assertOperationModeScannerSource(content, expectedSha = EXPECTED
 }
 
 
+export function benchmarkControlProvenance(response, operation) {
+  const headers = response?.headers;
+  const workerBuild = headers?.get?.("x-bench-build");
+  const ordinalText = headers?.get?.("x-bench-request");
+  if (typeof workerBuild !== "string" || !/^[A-Za-z0-9._-]{1,128}$/.test(workerBuild)
+    || typeof ordinalText !== "string" || !/^[1-9][0-9]*$/.test(ordinalText)) {
+    throw new Error("benchmark " + operation + " missing canonical worker provenance");
+  }
+  const requestOrdinal = Number(ordinalText);
+  if (!Number.isSafeInteger(requestOrdinal) || requestOrdinal < 1 || String(requestOrdinal) !== ordinalText) {
+    throw new Error("benchmark " + operation + " missing canonical worker provenance");
+  }
+  return { workerBuild, requestOrdinal };
+}
 export function operationModeKvEvidenceMismatch(fixture, seed, evidence, ordinal, phase) {
-  if (!["miss", "hit", "expiry"].includes(phase)) return true;
+  if (!["miss", "hit", "expiry", "cold"].includes(phase)) return true;
   const gets = phase === "hit" ? 0 : 1;
+  const seedReset = phase !== "cold";
+  const seedOffset = phase === "miss" ? 1 : phase === "hit" ? 3 : phase === "expiry" ? 5 : null;
+  const validBuild = value => typeof value === "string" && /^[A-Za-z0-9._-]{1,128}$/.test(value);
+  const validOrdinal = value => Number.isSafeInteger(value) && value >= 1;
+  const seedProvenanceInvalid = !validBuild(seed?.workerBuild) || !validOrdinal(seed?.requestOrdinal)
+    || seed.reset !== seedReset;
+  const requestProvenanceInvalid = !validBuild(evidence?.workerBuild) || !validOrdinal(evidence?.requestOrdinal)
+    || !validBuild(evidence?.receiptWorkerBuild) || !validOrdinal(evidence?.receiptRequestOrdinal)
+    || evidence.workerBuild !== evidence.receiptWorkerBuild
+    || evidence.requestOrdinal !== ordinal || evidence.receiptRequestOrdinal !== ordinal + 1;
+  const seedContinuityInvalid = phase === "cold"
+    ? seed?.workerBuild === evidence?.workerBuild || ordinal !== 1 || evidence?.receiptRequestOrdinal !== 2
+    : seed?.workerBuild !== evidence?.workerBuild || ordinal !== seed?.requestOrdinal + seedOffset;
   return seed?.bytes !== fixture.bytes || typeof seed?.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(seed.sha256)
     || !Number.isSafeInteger(ordinal) || ordinal < 1 || evidence?.ordinal !== ordinal
+    || seedProvenanceInvalid || requestProvenanceInvalid || seedContinuityInvalid
     || evidence.kvGets !== gets || evidence.kvPuts !== 0 || evidence.kvDeletes !== 0 || evidence.kvOther !== 0
     || evidence.kvGetFailures !== 0 || evidence.d1 !== 0
     || evidence.readBytes !== (gets ? fixture.bytes : null)
@@ -2888,6 +2916,7 @@ async function createWranglerTarget(plan, opts) {
     }, {
       timeoutMs: BENCHMARK_REQUEST_TIMEOUT_MS, label: "measured benchmark request",
     });
+    const requestProvenance = benchmarkControlProvenance(res, "measured benchmark request");
     const buf = await res.arrayBuffer();
     const stopResult = requireInspectorResult(await call("Profiler.stop"), "Profiler.stop");
     const profileSummary = summarizeCpuProfile(stopResult.profile);
@@ -2896,19 +2925,25 @@ async function createWranglerTarget(plan, opts) {
     // Receipt retrieval and large raw-value hashing are deliberately AFTER Profiler.stop.
     let nativeKv = null;
     if (spec.operationModeKv === true) {
-      const ordinal = Number(res.headers.get("x-bench-request"));
-      if (!Number.isSafeInteger(ordinal) || ordinal < 1) throw new Error("bench native KV request missing ordinal");
+      const ordinal = requestProvenance.requestOrdinal;
       const response = await post("/__bench/operation-mode-kv-receipt?request=" + ordinal, undefined, "GET");
       requireBenchmarkControl(response, "operation-mode-kv-receipt");
+      const receiptProvenance = benchmarkControlProvenance(response, "operation-mode-kv-receipt");
+      if (receiptProvenance.workerBuild !== requestProvenance.workerBuild
+        || receiptProvenance.requestOrdinal !== ordinal + 1) {
+        throw new Error("bench native KV receipt worker provenance mismatch");
+      }
       const evidence = await response.json();
-      nativeKv = { ...evidence, body: Buffer.from(buf).toString("utf8"),
+      nativeKv = { ...evidence, workerBuild: requestProvenance.workerBuild, requestOrdinal: ordinal,
+        receiptWorkerBuild: receiptProvenance.workerBuild, receiptRequestOrdinal: receiptProvenance.requestOrdinal,
+        body: Buffer.from(buf).toString("utf8"),
         cacheControl: res.headers.get("cache-control"), contentType: res.headers.get("content-type") };
     }
     const d1 = nativeKv ? nativeKv.d1 : res.headers.has("x-bench-d1") ? Number(res.headers.get("x-bench-d1")) : rec ? null : 0;
     const rows = (res.headers.get("x-bench-query-rows") || "").split(",").filter(Boolean).map(Number);
     return {
       status: res.status, bytes: buf.byteLength,
-      ...(nativeKv ? { nativeKv, workerBuild: res.headers.get("x-bench-build") } : {}),
+      ...(nativeKv ? { nativeKv, workerBuild: requestProvenance.workerBuild } : {}),
       d1,
       d1RowsReturned: res.headers.has("x-bench-returned-rows")
         ? Number(res.headers.get("x-bench-returned-rows")) : null,
@@ -2923,7 +2958,7 @@ async function createWranglerTarget(plan, opts) {
         && res.headers.get("x-bench-build") === firstBuild
         && res.headers.get("x-bench-request") === "1",
       coldGeneration: firstBuild,
-      requestOrdinal: Number(res.headers.get("x-bench-request")),
+      requestOrdinal: requestProvenance.requestOrdinal,
     };
   };
 
@@ -2965,12 +3000,13 @@ async function createWranglerTarget(plan, opts) {
       seedOperationModeKv: async (fixture, { reset = true } = {}) => {
         const response = await post("/__bench/operation-mode-kv-seed?reset=" + (reset ? "1" : "0"), fixture.raw, "PUT");
         requireBenchmarkControl(response, "operation-mode-kv-seed");
+        const provenance = benchmarkControlProvenance(response, "operation-mode-kv-seed");
         const receipt = await response.json();
         const expectedSha = createHash("sha256").update(fixture.raw, "utf8").digest("hex");
         if (receipt.bytes !== fixture.bytes || receipt.sha256 !== expectedSha || receipt.reset !== reset) {
           throw new Error("bench KV seed receipt mismatch");
         }
-        return receipt;
+        return { ...receipt, ...provenance };
       },
     } : {}),
     setR2: async (body, key = STATS_KEY) => {
@@ -3150,10 +3186,10 @@ export async function collectOperationModeKvSamples(target, fixture, opts, { clo
   const samples = [], warmupFailures = [], generations = new Set();
   const makeSample = (kind, result, seed, provenance, elapsedMs = null) => {
     const e = result?.nativeKv;
-    const phase = kind === "cold" ? "miss" : kind;
+    const bannerPhase = kind === "cold" ? "miss" : kind;
     const unexpected = !provenance || !Number.isFinite(result?.cpuMs) || result.cpuMs < 0
-      || operationModeBannerReceiptMismatch(fixture, { ...e, status: result?.status, bytes: result?.bytes }, phase)
-      || operationModeKvEvidenceMismatch(fixture, seed, e, result?.requestOrdinal, phase);
+      || operationModeBannerReceiptMismatch(fixture, { ...e, status: result?.status, bytes: result?.bytes }, bannerPhase)
+      || operationModeKvEvidenceMismatch(fixture, seed, e, result?.requestOrdinal, kind);
     return { kind, cpuMs: result?.cpuMs ?? null, status: result?.status ?? null, bytes: result?.bytes ?? null,
       d1: e?.d1 ?? null, kvGets: e?.kvGets ?? null, kvPuts: e?.kvPuts ?? null, kvDeletes: e?.kvDeletes ?? null,
       kvOther: e?.kvOther ?? null, kvGetFailures: e?.kvGetFailures ?? null,
@@ -3162,7 +3198,7 @@ export async function collectOperationModeKvSamples(target, fixture, opts, { clo
       coldProcessId: result?.coldProcessId ?? null, isFirstIsolateRequest: kind === "cold" && provenance,
       elapsedMs, unexpected };
   };
-  const buildValid = r => typeof r?.workerBuild === "string" && r.workerBuild.length > 0;
+  const buildValid = r => typeof r?.workerBuild === "string" && /^[A-Za-z0-9._-]{1,128}$/.test(r.workerBuild);
   const follows = (prev, next) => buildValid(prev) && next?.workerBuild === prev.workerBuild
     && next.requestOrdinal === prev.requestOrdinal + 2;
   const finish = stopReason => ({ samples, warmupFailures, stopReason });
@@ -3172,7 +3208,7 @@ export async function collectOperationModeKvSamples(target, fixture, opts, { clo
     return !sample.unexpected;
   };
   let lastWarmBuild = null;
-  let previousExpiry = null;
+  let previousAnchor = null;
   for (let i = 0; i < opts.warmup + opts.samples; i++) {
     const warmup = i < opts.warmup;
     const seed = await target.seedOperationModeKv(fixture, { reset: true });
@@ -3181,9 +3217,13 @@ export async function collectOperationModeKvSamples(target, fixture, opts, { clo
     const missComplete = clock();
     // Between rounds: previous expiry receipt GET, seed PUT, then miss GET.
     // A reset of the ordinal or a build change must not pass as warm evidence.
-    const continuous = buildValid(miss) && (previousExpiry === null ||
-      (miss.workerBuild === previousExpiry.workerBuild &&
-       miss.requestOrdinal === previousExpiry.requestOrdinal + 3));
+    const seedValid = seed?.reset === true && buildValid(seed)
+      && Number.isSafeInteger(seed.requestOrdinal) && seed.requestOrdinal > 0;
+    const continuous = seedValid && buildValid(miss)
+      && miss.workerBuild === seed.workerBuild
+      && miss.requestOrdinal === seed.requestOrdinal + 1
+      && (previousAnchor === null || (seed.workerBuild === previousAnchor.workerBuild
+        && seed.requestOrdinal === previousAnchor.requestOrdinal + 2));
     if (!accept(makeSample("miss", miss, seed, continuous), warmup)) return finish("STOP_RECEIPT");
     lastWarmBuild = miss.workerBuild;
     const hit = await target.run(spec);
@@ -3195,18 +3235,24 @@ export async function collectOperationModeKvSamples(target, fixture, opts, { clo
     const elapsed = clock() - missComplete;
     const expired = await target.run(spec);
     if (!accept(makeSample("expiry", expired, seed, follows(hit, expired) && Number.isFinite(elapsed) && elapsed >= 30_000, elapsed), warmup)) return finish("STOP_RECEIPT");
-    previousExpiry = expired;
+    previousAnchor = expired;
   }
   if (!opts.skipCold) {
     for (let i = 0; i < opts.coldSamples; i++) {
       const seed = await target.seedOperationModeKv(fixture, { reset: false });
+      const seedContinuous = seed?.reset === false && buildValid(seed)
+        && Number.isSafeInteger(seed.requestOrdinal) && seed.requestOrdinal > 0
+        && previousAnchor !== null && seed.workerBuild === previousAnchor.workerBuild
+        && seed.requestOrdinal === previousAnchor.requestOrdinal + 2;
       const result = await target.runFirstRequest(spec, null);
-      const fresh = buildValid(result) && result.workerBuild !== lastWarmBuild
+      const fresh = seedContinuous && buildValid(result) && result.workerBuild !== seed.workerBuild
+        && result.workerBuild !== lastWarmBuild
         && result.coldGeneration === result.workerBuild && !generations.has(result.workerBuild)
         && result.isFirstIsolateRequest === true && result.requestOrdinal === 1
         && Number.isSafeInteger(result.coldProcessId) && result.coldProcessId > 0;
       if (fresh) generations.add(result.workerBuild);
       if (!accept(makeSample("cold", result, seed, fresh), false)) return finish("STOP_COLD");
+      previousAnchor = result;
     }
   }
   return finish(null);

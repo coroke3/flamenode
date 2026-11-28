@@ -649,6 +649,8 @@ Differential parity: `apps/api/test/adminEventGroups.current.parity.test.mjs` (T
 
 ## MIG-0639 per-method LOCAL CPU (Linux, 2026-11-01)
 
+2026-11-28 native-KV harness-integrity follow-up (PR #456): seed PUT and receipt GET now require canonical Worker-generation/request-ordinal provenance; warm seed-to-miss/hit/expiry offsets, cross-round continuity, and repeated cold-process seed continuity are checked. This is not a new measurement or S2/S3/S4 verdict. Exact-head tests/CI, native Workerd/KV expiry, eligible-host 50-sample campaign, and official Worker/tail CPU remain separate gates.
+
 2026-11-28 profiler lifecycle hardening candidate (PR #456 source/test `1eb045ab04ea3711865a4e7d6375f7bcc1be4b91`): per-WebSocket CDP command correlation, bounded command/open/discovery deadlines, malformed/unmatched response fail-closed handling, abortable benchmark fetch plus full-body deadlines, and bounded child-exit cleanup. This is harness-integrity work only; exact-head tests/CI and native Workerd compatibility are pending. No new CPU measurements or S2/S3/S4 verdict.
 
 
