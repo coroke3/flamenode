@@ -293,7 +293,8 @@ async function upsert(c: import("hono").Context<AppEnv>, targetId: string | null
       permission_preset: a.permission_preset,
       custom_permission_keys_json: a.custom_permission_keys_json,
       is_public: parsed.data.is_public,
-      public_role_label: parsed.data.public_role_label ?? null,
+      // CURRENT converts empty form labels to null before constructing the write snapshot.
+      public_role_label: parsed.data.public_role_label || null,
     };
     const now = Math.floor(Date.now() / 1000);
     if (existing) {

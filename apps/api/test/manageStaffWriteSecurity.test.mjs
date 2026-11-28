@@ -666,3 +666,77 @@ test("SEC-800: CSV stored duplicate and atomic-budget denials preserve CURRENT m
     }
   }
 });
+
+test("SEC-800: SA-031 blank public role labels preserve CURRENT storage and audit snapshots", async () => {
+  const cases = [
+    [undefined, null],
+    [null, null],
+    ["", null],
+    [" \t\r\n", null],
+    ["\u3000\u00a0\ufeff", null],
+    ["  Reviewer  ", "Reviewer"],
+    [" 運営スタッフ ", "運営スタッフ"],
+    ["\u200b", "\u200b"],
+    ["x".repeat(40), "x".repeat(40)],
+  ];
+  for (const [input, expected] of cases) {
+    for (const isPublic of [0, 1]) {
+      const s = setup();
+      try {
+        s.sqlite.exec(`
+          INSERT INTO x_users (id, x_name, approval_status) VALUES
+            ('added_user', 'Added', 'approved'), ('update_user', 'Update', 'approved');
+          INSERT INTO event_staff (id, event_id, x_user_id, display_name, permission_preset, is_public, public_role_label, created_at, updated_at)
+          VALUES ('s-label', 'ev-1', 'update_user', 'Original', 'public_staff', 0, 'Before', 1, 1);
+        `);
+        const label = input === undefined ? {} : { public_role_label: input };
+        const payload = { ...upsert, ...label, is_public: isPublic };
+        const created = await s.send("POST", "/", payload);
+        assert.equal(created.status, 200, await created.clone().text());
+        assert.equal(created.headers.get("cache-control"), "private, no-store");
+        assert.deepEqual(await created.json(), { ok: true, pendingPublicReflection: true });
+        const row = s.sqlite.prepare("SELECT * FROM event_staff WHERE x_user_id='added_user'").get();
+        assert.equal(row.public_role_label, expected);
+        assert.equal(row.is_public, isPublic);
+        const createAudit = s.sqlite.prepare("SELECT * FROM audit_logs WHERE table_name='event_staff' AND target_id=? AND operation='CREATE'").get(row.id);
+        assert.ok(createAudit, "strict create audit is present");
+        assert.equal(createAudit.before_json, null);
+        assert.equal(JSON.parse(createAudit.after_json).public_role_label, expected);
+        assert.equal(JSON.parse(createAudit.after_json).is_public, isPublic);
+        const updated = await s.send("PUT", "/s-label", { ...payload, staff_id: "s-label", x_user_id: "update_user" });
+        assert.equal(updated.status, 200, await updated.clone().text());
+        assert.equal(updated.headers.get("cache-control"), "private, no-store");
+        assert.deepEqual(await updated.json(), { ok: true, pendingPublicReflection: true });
+        const after = s.sqlite.prepare("SELECT * FROM event_staff WHERE id='s-label'").get();
+        assert.equal(after.public_role_label, expected);
+        assert.equal(after.is_public, isPublic);
+        const updateAudit = s.sqlite.prepare("SELECT * FROM audit_logs WHERE table_name='event_staff' AND target_id='s-label' AND operation='UPDATE'").get();
+        assert.ok(updateAudit, "strict update audit is present");
+        assert.equal(JSON.parse(updateAudit.before_json).public_role_label, "Before");
+        assert.equal(JSON.parse(updateAudit.after_json).public_role_label, expected);
+        assert.equal(JSON.parse(updateAudit.after_json).is_public, isPublic);
+        assert.equal(s.count("audit_logs"), 2, "only the two staff writes are audited");
+        assert.equal(s.count("x_users"), 3, "existing X identities are reused");
+        assert.equal(s.sqlite.prepare("SELECT permission_preset FROM event_staff WHERE id='s-owner'").get().permission_preset, "owner");
+      } finally {
+        s.sqlite.close();
+      }
+    }
+  }
+  const s = setup({ fault: { match: staffRead, error: new Error(CANARY) } });
+  try {
+    for (const [method, path, body] of [
+      ["POST", "/", upsert],
+      ["PUT", "/s-owner", { ...upsert, staff_id: "s-owner" }],
+    ]) {
+      const res = await s.send(method, path, { ...body, public_role_label: "x".repeat(41) });
+      assert.equal(res.status, 400, await res.clone().text());
+      assert.equal(res.headers.get("cache-control"), "private, no-store");
+    }
+    assert.equal(s.receipt.readFaults, 0);
+    assert.equal(s.stats.batches, 0);
+    assert.deepEqual(s.before(), s.initial);
+  } finally {
+    s.sqlite.close();
+  }
+});
