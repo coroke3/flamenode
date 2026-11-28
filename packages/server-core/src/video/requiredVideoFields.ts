@@ -19,6 +19,7 @@ import type { ServerCoreDb } from "../db.ts";
 import { unslottedEventEligibilityWhere } from "./unslottedEventEligibility.ts";
 import {
   decodeGeneralCustomQuestionPolicyForEvents,
+  GENERAL_QUESTION_EVENT_CHUNK_SIZE,
   MAX_VIDEO_CUSTOM_QUESTIONS_READ,
   stagePermissionQuestionKeyCondition,
   type LoadedGeneralCustomQuestion,
@@ -583,35 +584,35 @@ export function buildSlotSubmissionPartAndEventAssertions(
   }
 
   const partScope = receipt.partResolution.kind === "bounded"
-    ? sql\`AND typeof(start_time) IN ('integer', 'real')
-        AND start_time <= (SELECT start_time FROM slots WHERE id = \${receipt.anchor.id})\`
-    : sql\`\`;
-  const actualPartSnapshot = sql\`(
+    ? sql`AND typeof(start_time) IN ('integer', 'real')
+        AND start_time <= (SELECT start_time FROM slots WHERE id = ${receipt.anchor.id})`
+    : sql``;
+  const actualPartSnapshot = sql`(
     SELECT json_group_array(json_array(id, start_time, sort_order))
     FROM (
       SELECT id, start_time, sort_order
       FROM slots
-      WHERE event_id = (SELECT event_id FROM slots WHERE id = \${receipt.anchor.id})
-      \${partScope}
+      WHERE event_id = (SELECT event_id FROM slots WHERE id = ${receipt.anchor.id})
+      ${partScope}
       ORDER BY id COLLATE BINARY ASC
     )
-  )\`;
+  )`;
   const eventIdsJson = JSON.stringify(videoEventReceipt.targetEventIds);
-  const actualEventSnapshot = sql\`(
+  const actualEventSnapshot = sql`(
     SELECT json_group_array(json_array(id, title, parts_json, slot_part_gap_minutes, required_video_fields_json))
     FROM (
       SELECT events.id, events.title, events.parts_json,
              events.slot_part_gap_minutes, events.required_video_fields_json
       FROM events
-      INNER JOIN json_each(\${eventIdsJson}) requested
+      INNER JOIN json_each(${eventIdsJson}) requested
         ON events.id = CAST(requested.value AS TEXT)
       ORDER BY CAST(requested.key AS INTEGER)
     )
-  )\`;
+  )`;
 
   return [
-    assertCondition(sql\`\${actualPartSnapshot} = \${receipt.partSnapshotJson}\`),
-    assertCondition(sql\`\${actualEventSnapshot} = \${videoEventReceipt.eventPolicyJson}\`),
+    assertCondition(sql`${actualPartSnapshot} = ${receipt.partSnapshotJson}`),
+    assertCondition(sql`${actualEventSnapshot} = ${videoEventReceipt.eventPolicyJson}`),
   ];
 }
 
@@ -628,25 +629,31 @@ export function buildSlotSubmissionQuestionPolicyAssertions(
     throw new Error("slot_submission_question_policy_receipt_invalid");
   }
   const eventIdsJson = JSON.stringify(receipt.targetEventIds);
-  const actualGeneral = sql\`(
+  const actualGeneral = sql`(
     SELECT json_group_array(json_array(
       id, event_id, question_key, label, type, required, options_json,
       max_length, sort_order, visibility, updated_at
     ))
     FROM (
-      SELECT id, event_id, question_key, label, type, required, options_json,
-             max_length, sort_order, visibility, updated_at
+      SELECT event_custom_questions.id, event_custom_questions.event_id,
+             event_custom_questions.question_key, event_custom_questions.label,
+             event_custom_questions.type, event_custom_questions.required,
+             event_custom_questions.options_json, event_custom_questions.max_length,
+             event_custom_questions.sort_order, event_custom_questions.visibility,
+             event_custom_questions.updated_at
       FROM event_custom_questions
-      WHERE event_id IN (
-        SELECT CAST(value AS TEXT) FROM json_each(\${eventIdsJson})
-      )
-        AND is_active = 1
-        AND NOT (\${stagePermissionQuestionKeyCondition()})
-      ORDER BY event_id ASC, sort_order ASC, id ASC
-      LIMIT \${receipt.targetEventIds.length * MAX_VIDEO_CUSTOM_QUESTIONS_READ + 1}
+      INNER JOIN json_each(${eventIdsJson}) event_order
+        ON event_custom_questions.event_id = CAST(event_order.value AS TEXT)
+      WHERE event_custom_questions.is_active = 1
+        AND NOT (${stagePermissionQuestionKeyCondition()})
+      ORDER BY CAST(event_order.key AS INTEGER) / ${GENERAL_QUESTION_EVENT_CHUNK_SIZE},
+               event_custom_questions.event_id ASC,
+               event_custom_questions.sort_order ASC,
+               event_custom_questions.id ASC
+      LIMIT ${receipt.targetEventIds.length * MAX_VIDEO_CUSTOM_QUESTIONS_READ + 1}
     )
-  )\`;
-  const actualStage = sql\`(
+  )`;
+  const actualStage = sql`(
     SELECT json_group_array(json_array(
       id, event_id, question_key, label, description, placeholder,
       required, is_active, sort_order, updated_at
@@ -656,15 +663,15 @@ export function buildSlotSubmissionQuestionPolicyAssertions(
              required, is_active, sort_order, updated_at
       FROM event_custom_questions
       WHERE event_id IN (
-        SELECT CAST(value AS TEXT) FROM json_each(\${eventIdsJson})
+        SELECT CAST(value AS TEXT) FROM json_each(${eventIdsJson})
       )
-        AND \${stagePermissionQuestionKeyCondition()}
+        AND ${stagePermissionQuestionKeyCondition()}
       ORDER BY event_id ASC, sort_order ASC
     )
-  )\`;
+  )`;
   return [
-    assertCondition(sql\`\${actualGeneral} = \${receipt.generalQuestionPolicyJson}\`),
-    assertCondition(sql\`\${actualStage} = \${receipt.stageQuestionPolicyJson}\`),
+    assertCondition(sql`${actualGeneral} = ${receipt.generalQuestionPolicyJson}`),
+    assertCondition(sql`${actualStage} = ${receipt.stageQuestionPolicyJson}`),
   ];
 }
 
@@ -742,16 +749,16 @@ export async function readSlotSubmissionVideoEventReceipt(
   const ids = Array.from(new Set([anchor.event_id, ...targetEventIds].filter(Boolean)));
   const eventIdsJson = JSON.stringify(ids);
   const videoColumns = sql.join(
-    Object.values(getTableColumns(videos)).map((column) => sql\`v.\${sql.identifier(column.name)}\`),
-    sql\`, \`,
+    Object.values(getTableColumns(videos)).map((column) => sql`v.${sql.identifier(column.name)}`),
+    sql`, `,
   );
-  const rows = await db.all<SlotSubmissionVideoEventProjection>(sql\`WITH submission_input AS (
-    SELECT \${anchor.event_id} AS event_id,
-      \${anchor.video_id || null} AS video_id,
-      \${submittedYoutubeId || null} AS youtube_id,
-      \${eventIdsJson} AS event_ids_json
+  const rows = await db.all<SlotSubmissionVideoEventProjection>(sql`WITH submission_input AS (
+    SELECT ${anchor.event_id} AS event_id,
+      ${anchor.video_id || null} AS video_id,
+      ${submittedYoutubeId || null} AS youtube_id,
+      ${eventIdsJson} AS event_ids_json
   )
-  SELECT \${videoColumns},
+  SELECT ${videoColumns},
     (SELECT json_group_array(json_array(
       id, title, parts_json, slot_part_gap_minutes, required_video_fields_json
     ))
@@ -768,16 +775,22 @@ export async function readSlotSubmissionVideoEventReceipt(
       max_length, sort_order, visibility, updated_at
     ))
     FROM (
-      SELECT id, event_id, question_key, label, type, required, options_json,
-             max_length, sort_order, visibility, updated_at
+      SELECT event_custom_questions.id, event_custom_questions.event_id,
+             event_custom_questions.question_key, event_custom_questions.label,
+             event_custom_questions.type, event_custom_questions.required,
+             event_custom_questions.options_json, event_custom_questions.max_length,
+             event_custom_questions.sort_order, event_custom_questions.visibility,
+             event_custom_questions.updated_at
       FROM event_custom_questions
-      WHERE event_id IN (
-        SELECT CAST(value AS TEXT) FROM json_each(input.event_ids_json)
-      )
-        AND is_active = 1
-        AND NOT (\${stagePermissionQuestionKeyCondition()})
-      ORDER BY event_id ASC, sort_order ASC, id ASC
-      LIMIT (json_array_length(input.event_ids_json) * \${MAX_VIDEO_CUSTOM_QUESTIONS_READ} + 1)
+      INNER JOIN json_each(input.event_ids_json) event_order
+        ON event_custom_questions.event_id = CAST(event_order.value AS TEXT)
+      WHERE event_custom_questions.is_active = 1
+        AND NOT (${stagePermissionQuestionKeyCondition()})
+      ORDER BY CAST(event_order.key AS INTEGER) / ${GENERAL_QUESTION_EVENT_CHUNK_SIZE},
+               event_custom_questions.event_id ASC,
+               event_custom_questions.sort_order ASC,
+               event_custom_questions.id ASC
+      LIMIT (json_array_length(input.event_ids_json) * ${MAX_VIDEO_CUSTOM_QUESTIONS_READ} + 1)
     )) AS receipt_general_questions_json,
     (SELECT json_group_array(json_array(
       id, event_id, question_key, label, description, placeholder,
@@ -790,7 +803,7 @@ export async function readSlotSubmissionVideoEventReceipt(
       WHERE event_id IN (
         SELECT CAST(value AS TEXT) FROM json_each(input.event_ids_json)
       )
-        AND \${stagePermissionQuestionKeyCondition()}
+        AND ${stagePermissionQuestionKeyCondition()}
       ORDER BY event_id ASC, sort_order ASC
     )) AS receipt_stage_questions_json,
     CASE WHEN input.youtube_id IS NULL THEN 0 ELSE EXISTS (
@@ -801,7 +814,7 @@ export async function readSlotSubmissionVideoEventReceipt(
     ) END AS receipt_youtube_duplicate
   FROM submission_input input
   LEFT JOIN videos v ON v.id = input.video_id
-  LIMIT 1\`);
+  LIMIT 1`);
   if (rows.length !== 1) throw new Error("slot_submission_video_event_receipt_invalid");
   const {
     receipt_events_json, receipt_general_questions_json,

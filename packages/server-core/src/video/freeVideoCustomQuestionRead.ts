@@ -213,7 +213,7 @@ function normalizeGeneralQuestionRows(rows: readonly GeneralQuestionRow[]): Load
  * chunk order and do not silently truncate or reject it here.
  * Unmounted: the final S3 path needs a fused receipt and same-batch CAS.
  */
-const GENERAL_QUESTION_EVENT_CHUNK_SIZE = 80;
+export const GENERAL_QUESTION_EVENT_CHUNK_SIZE = 80;
 
 export async function loadGeneralCustomQuestionsForSlotSubmission(
   db: ServerCoreDb,

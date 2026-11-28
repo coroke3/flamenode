@@ -1613,7 +1613,7 @@ test("U03a SA-088: multi-event stage/general policy receipt is one read and matc
         const video = { ...w.sqlite.prepare("SELECT * FROM videos WHERE id='v_policy'").get() };
         const write = () => mutateWithAudit(db, {
           preMutationAssertions: assertions.map((condition) => db.run(condition)),
-          mutationStatements: [db.run(sql\`UPDATE videos SET title='After' WHERE id='v_policy'\`)],
+          mutationStatements: [db.run(sql`UPDATE videos SET title='After' WHERE id='v_policy'`)],
           expectedMutationChanges: [1],
           audits: [{
             table_name: "videos", target_id: "v_policy", operation: "UPDATE",
