@@ -4,6 +4,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Hono } from "hono";
+import { EventStaffCsvBodySchema } from "@flamenode/contracts";
 import { drizzle } from "drizzle-orm/d1";
 import * as schema from "@flamenode/db/schema";
 import { registerStaffWriteRoutes } from "../src/routes/manage/staffWrite.ts";
@@ -337,6 +338,49 @@ test("SEC-800: SA-031 validates permission input before staff mutation for every
     } finally {
       s.sqlite.close();
     }
+  }
+});
+
+test("SEC-800: CSV wire X-ID validation preserves CURRENT line-specific error", async () => {
+  const s = setup({ fault: { match: staffRead, error: new Error(CANARY) } });
+  try {
+    const valid = csv().rows[0];
+    const invalidIds = [undefined, null, 42, {}, "", "   ", CANARY.repeat(3)];
+    const marker = s.sqlite.prepare("SELECT * FROM public_build_state WHERE id=1").get();
+    await withThrowingDiagnostics(async ({ errors, warnings }) => {
+      for (const x_user_id of invalidIds) {
+        const body = { reason: "CSV validation", rows: [valid, { ...valid, lineNumber: 19, x_user_id }] };
+        const result = await s.send("POST", "/csv", body);
+        assert.equal(result.status, 400, await result.clone().text());
+        assert.deepEqual(await result.json(), { ok: false, message: "19行目: X IDが不正です" });
+        assert.equal(result.headers.get("cache-control"), "private, no-store");
+      }
+      // A different first schema issue retains its existing message. Do not
+      // replace all validation failures just because an invalid X ID is present.
+      const mixed = { reason: "CSV validation", rows: [{ ...valid, display_name: "", x_user_id: "" }] };
+      const parsed = EventStaffCsvBodySchema.safeParse(mixed);
+      assert.equal(parsed.success, false);
+      assert.deepEqual(parsed.error.issues[0].path, ["rows", 0, "display_name"]);
+      const result = await s.send("POST", "/csv", mixed);
+      assert.equal(result.status, 400, await result.clone().text());
+      assert.deepEqual(await result.json(), { ok: false, message: parsed.error.issues[0].message });
+      assert.equal(result.headers.get("cache-control"), "private, no-store");
+      // The pre-existing canonical parser path still provides the same message.
+      const canonical = await s.send("POST", "/csv", {
+        reason: "CSV validation", rows: [{ ...valid, lineNumber: 23, x_user_id: "@@" }],
+      });
+      assert.equal(canonical.status, 400, await canonical.clone().text());
+      assert.deepEqual(await canonical.json(), { ok: false, message: "23行目: X IDが不正です" });
+      assert.equal(canonical.headers.get("cache-control"), "private, no-store");
+      assert.deepEqual(errors, []);
+      assert.equal(warnings(), 0);
+    });
+    assert.equal(s.receipt.readFaults, 0);
+    assert.equal(s.stats.batches, 0);
+    assert.deepEqual(s.before(), s.initial);
+    assert.deepEqual(s.sqlite.prepare("SELECT * FROM public_build_state WHERE id=1").get(), marker);
+  } finally {
+    s.sqlite.close();
   }
 });
 

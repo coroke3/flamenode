@@ -373,7 +373,20 @@ export function registerStaffWriteRoutes(app: Hono<AppEnv>): void {
     if (request.kind === "too_large") return deny(c, BODY_TOO_LARGE_MESSAGE, 413);
     if (request.kind !== "ok") return deny(c, "入力エラー", 400);
     const parsed = EventStaffCsvBodySchema.safeParse(request.value);
-    if (!parsed.success) return deny(c, parsed.error.issues[0]?.message ?? "CSV入力エラー", 400);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      const path = issue?.path ?? [];
+      // CURRENT identifies the CSV line for an invalid X ID even when the
+      // wire schema rejects it before canonical X-ID normalization.
+      if (path[0] === "rows" && typeof path[1] === "number" && path[2] === "x_user_id") {
+        const rows = request.value.rows;
+        const rawRow = Array.isArray(rows) ? rows[path[1]] : null;
+        const lineNumber = rawRow && typeof rawRow === "object" && typeof rawRow.lineNumber === "number"
+          ? rawRow.lineNumber : path[1] + 1;
+        return deny(c, `${lineNumber}行目: X IDが不正です`, 400);
+      }
+      return deny(c, issue?.message ?? "CSV入力エラー", 400);
+    }
     const access = await permitted(c);
     if (access instanceof Response) return access;
     const isAdmin = access.user.role === "admin";
