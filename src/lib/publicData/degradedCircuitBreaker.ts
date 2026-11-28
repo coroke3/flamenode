@@ -300,16 +300,27 @@ async function flushMissCount(
   nowMs: number,
   acknowledge: () => void,
 ): Promise<void> {
+  const readRevision = circuitRevision;
+  const priorHitStreak = localCircuitState.hitStreak;
+  const wasOpen = localCircuitState.open && nowMs < localCircuitState.openUntil;
   const remoteOpen = (await kv.get(degradedCircuitOpenKey())) === "1";
   if (currentDegradedCircuitMinuteBucket(Date.now()) !== bucket) return;
-  // A concurrent local threshold crossing owns OPEN repair immediately, even
-  // while this counter flush awaits KV. Never reset or replace that receipt.
-  if (remoteOpen && !openRepair) {
-    markCircuitOpen(nowMs);
-  } else if (!openRepair && localCircuitState.open && nowMs < localCircuitState.openUntil) {
-    await putOpenMarkerIfNeeded(kv, nowMs);
-  } else if (!openRepair) {
-    markCircuitClosed(nowMs);
+  // A stale marker receipt cannot reset a newer local transition. A concurrent
+  // threshold crossing owns OPEN repair even while the counter flush awaits KV.
+  if (readRevision === circuitRevision && !openRepair) {
+    if (remoteOpen) {
+      // The miss resets hits from before this read, but not hits earned
+      // against the same unexpired OPEN while its marker read was pending.
+      const earnedHits = wasOpen && Date.now() < localCircuitState.openUntil
+        ? Math.max(0, localCircuitState.hitStreak - priorHitStreak)
+        : 0;
+      markCircuitOpen(nowMs);
+      localCircuitState.hitStreak = earnedHits;
+    } else if (localCircuitState.open && nowMs < localCircuitState.openUntil) {
+      await putOpenMarkerIfNeeded(kv, nowMs);
+    } else {
+      markCircuitClosed(nowMs);
+    }
   }
 
   const nextCount = await persistMissCounter(kv, bucket, pending);
