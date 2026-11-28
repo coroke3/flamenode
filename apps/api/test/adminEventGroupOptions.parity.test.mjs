@@ -7,6 +7,8 @@ import { originGuardMiddleware, writeGuardMiddleware } from "../src/middleware/w
 import { EventGroupMutationBodySchema } from "@flamenode/contracts";
 import { planD1AuditMutationBudget } from "@flamenode/server-core/audit/mutateBudget";
 import { planAtomicAuditMutationBudget } from "@flamenode/server-core/audit/mutate";
+import { actorSnapshotFromRow } from "@flamenode/server-core/audit/logger";
+import { mapAuditSettings } from "@flamenode/server-core/audit/settings";
 import { buildEventGroupChangeQueueBatch } from "@flamenode/server-core/staticRebuild/hooks";
 import { createAdminRoutes } from "../src/routes/admin/index.ts";
 import { createAdminD1, seedBase, seedEvent } from "./helpers/sqliteD1.mjs";
@@ -107,20 +109,17 @@ function setup({
   return { get, calls, guardCalls };
 }
 
-test("SA-029 U04: 80件一括追加とMIG-0516 build markerのD1予算競合を検出する", async () => {
-  // Use the same queue builder and the same query-budget formula as the staged handler.
-  // This is a merger STOP test: #436 appends one DML + one changes() assertion.
+test("SA-029 U04: build markerを含む80件監査がD1 Free 50-query予算を守る", async () => {
+  // MIG-0516's queue builder writes one JSON1 UPSERT and one atomic
+  // public_build_state UPDATE; each DML retains its strict changes() check.
   const queue = await buildEventGroupChangeQueueBatch(
     { run: (statement) => statement },
     { reason: "event_group_member_add", requestedByUserId: "admin-1" },
   );
   assert.equal(queue.acceptedTargetCount, 1);
-  assert.equal(queue.statements.length, 1, "current queue projection must remain one SQL statement");
-  assert.equal(queue.expectedChanges.length, 1);
+  assert.equal(queue.statements.length, 2, "Queue UPSERT and build marker are both required");
+  assert.deepEqual(queue.expectedChanges, [1, 1]);
 
-  // The route uses this concrete atomic-input planner for preflight and
-  // execute. It cannot accidentally ignore newly appended queue statements
-  // or changed audit actors as the queue builder evolves.
   const audits = Array.from({ length: EVENT_GROUP_ADD_MAX }, (_, i) => ({
     table_name: "event_group_events",
     target_id: `grp-1:event-${i}`,
@@ -128,46 +127,45 @@ test("SA-029 U04: 80件一括追加とMIG-0516 build markerのD1予算競合を�
     actor_user_id: "admin-1",
     after: { event_id: `event-${i}` },
   }));
+  // The real joined snapshot and write guard provide these canonical values.
+  // Test the canonical planner, not a hand-counted replacement or an
+  // invalid placeholder that would force two extra D1 SELECTs.
+  const preloaded = {
+    settings: mapAuditSettings(null),
+    actorSnapshotJsonById: {
+      "admin-1": JSON.stringify(actorSnapshotFromRow(null)),
+    },
+  };
   const atomic = {
     mutationStatements: [{}, ...queue.statements],
     expectedMutationChanges: [EVENT_GROUP_ADD_MAX, ...queue.expectedChanges],
     audits,
     callerQueryCount: 3,
-    preloaded: {
-      settings: { max_payload_bytes: 90000 },
-      actorSnapshotJsonById: { "admin-1": "{}" },
-    },
+    preloaded,
   };
-  const realPlan = planAtomicAuditMutationBudget(atomic);
-  assert.equal(realPlan.mutationStatementCount, atomic.mutationStatements.length);
-  assert.equal(realPlan.mutationAssertionCount, atomic.expectedMutationChanges.length);
-  assert.equal(realPlan.auditChunkCount, 20);
-  const projectedMarkerPlan = planAtomicAuditMutationBudget({
+  const planned = planAtomicAuditMutationBudget(atomic);
+  assert.equal(planned.mutationStatementCount, 3);
+  assert.equal(planned.mutationAssertionCount, 3);
+  assert.equal(planned.auditChunkCount, 20);
+  assert.equal(planned.preparationQueryCount, 0);
+  assert.equal(planned.totalQueryCount, 49);
+  assert.equal(planned.withinLimit, true);
+
+  const withoutPreload = planAtomicAuditMutationBudget({
+    ...atomic, preloaded: undefined,
+  });
+  assert.equal(withoutPreload.preparationQueryCount, 2);
+  assert.equal(withoutPreload.totalQueryCount, 51);
+  assert.equal(withoutPreload.withinLimit, false,
+    "missing authoritative preload must reject before mutation");
+
+  const withoutMarker = planAtomicAuditMutationBudget({
     ...atomic,
-    mutationStatements: [...atomic.mutationStatements, {}],
-    expectedMutationChanges: [...atomic.expectedMutationChanges, 1],
+    mutationStatements: atomic.mutationStatements.slice(0, -1),
+    expectedMutationChanges: atomic.expectedMutationChanges.slice(0, -1),
   });
-  assert.equal(projectedMarkerPlan.totalQueryCount, realPlan.totalQueryCount + 2);
-
-  const baselineInput = {
-    mutationStatementCount: 1 + queue.statements.length, // JSON1 INSERT + queue
-    mutationAssertionCount: 1 + queue.expectedChanges.length,
-    auditEntryCount: EVENT_GROUP_ADD_MAX,
-    distinctActorCount: 1,
-    callerQueryCount: 3, // S4, identity/ToS, joined membership read
-  };
-  const baseline = planD1AuditMutationBudget(baselineInput);
-  assert.equal(baseline.totalQueryCount, 49);
-  assert.equal(baseline.withinLimit, true);
-
-  const withBuildMarker = planD1AuditMutationBudget({
-    ...baselineInput,
-    mutationStatementCount: baselineInput.mutationStatementCount + 1,
-    mutationAssertionCount: baselineInput.mutationAssertionCount + 1,
-  });
-  assert.equal(withBuildMarker.totalQueryCount, 51);
-  assert.equal(withBuildMarker.withinLimit, false,
-    "MIG-0516 cannot be merged until the actual 80-member planner saves two queries");
+  assert.equal(planned.totalQueryCount, withoutMarker.totalQueryCount + 2,
+    "build marker DML and strict changes() assertion must both be charged");
 });
 
 test("SA-030 U04: canonical audited D1 delete budget respects Free 50-query cap", () => {
@@ -1247,6 +1245,11 @@ test("SA-029 U04 staged: failed membership INSERT rolls back relation, audits an
     assert.equal(h.count("event_group_events"), 1);
     assert.equal(h.count("audit_logs"), 0);
     assert.equal(h.count("static_rebuild_queue"), 0);
+    assert.equal(
+      h.sqlite.prepare("SELECT requested_at FROM public_build_state WHERE id=1").get().requested_at,
+      0,
+      "rejected atomic mutation must not commit MIG-0516 build marker",
+    );
     assert.equal(h.stats.batches, 1);
   } finally {
     h.sqlite.close();
@@ -1308,6 +1311,14 @@ test("SA-029 U04 staged: 80 distinct IDs fit one atomic 49/50-query plan", async
     assert.equal(h.count("audit_logs"), 80);
     assert.equal(h.count("static_rebuild_queue"), 1);
     assert.equal(h.stats.batches, 1);
+    // The staged test injects an admin session, so add one real production S4
+    // SELECT to the two recorded D1 reads. Count each executed batch SQL,
+    // including audit chunk assertions and MIG-0516's build marker, not
+    // merely the number of batch() calls.
+    assert.equal(h.stats.reads, 2);
+    assert.equal(h.stats.batchStatements, 46);
+    assert.equal(h.stats.reads + 1 + h.stats.batchStatements, 49);
+    assert.ok(h.sqlite.prepare("SELECT requested_at FROM public_build_state WHERE id=1").get().requested_at > 0);
   } finally {
     h.sqlite.close();
   }
@@ -2112,10 +2123,27 @@ test("SA-028 U03: throwing R2 getter denies public delete before D1 mutation; pr
 
 test("SA-028 U03: exact D1 Free 50-query group DELETE boundaries (private/public)", async () => {
   for (const { publicGroup, max } of [{ publicGroup: false, max: 75 }, { publicGroup: true, max: 71 }]) {
-    const nStatements = publicGroup ? 4 : 3;
-    const budget = (n) => planD1AuditMutationBudget({ mutationStatementCount: nStatements,
-      mutationAssertionCount: nStatements, preMutationAssertionCount: 1,
-      auditEntryCount: n + 1, distinctActorCount: 1, callerQueryCount: 3 });
+    // Group + relation DELETE, optional visibility fence, Queue UPSERT,
+    // and MIG-0516's public build marker each retain strict changes() checks.
+    // Reuse only the authoritative settings and actor snapshot from the guard.
+    const statementCount = (publicGroup ? 4 : 3) + 1;
+    const preloaded = {
+      settings: mapAuditSettings(null),
+      actorSnapshotJsonById: {
+        "admin-1": JSON.stringify(actorSnapshotFromRow(null)),
+      },
+    };
+    const budget = (n) => planAtomicAuditMutationBudget({
+      mutationStatements: Array.from({ length: statementCount }, () => ({})),
+      expectedMutationChanges: [n, ...Array(statementCount - 1).fill(1)],
+      preMutationAssertions: [{}],
+      audits: Array.from({ length: n + 1 }, (_, i) => ({
+        table_name: "event_group_events", target_id: `row-${i}`,
+        operation: "DELETE", actor_user_id: "admin-1",
+      })),
+      callerQueryCount: 3,
+      preloaded,
+    });
     assert.equal(budget(max).totalQueryCount, 50);
     assert.equal(budget(max + 1).totalQueryCount, 52);
     for (const n of [max, max + 1]) {
@@ -2134,6 +2162,19 @@ test("SA-028 U03: exact D1 Free 50-query group DELETE boundaries (private/public
         assert.equal(h.count("static_rebuild_queue"), accepted ? 1 : 0);
         assert.equal(h.count("event_groups"), accepted ? 0 : 1);
         assert.equal(h.count("event_group_events"), accepted ? 0 : n);
+        // Count the real executed SQL instead of trusting only a budget formula.
+        // S4 is the one production read deliberately substituted by this test.
+        assert.equal(h.stats.reads, 2, `guard/preflight D1 SELECTs for ${publicGroup ? "public" : "private"}/${n}`);
+        assert.equal(h.stats.batchStatements, accepted ? 47 : 0);
+        if (accepted) {
+          assert.equal(h.stats.reads + 1 + h.stats.batchStatements, 50,
+            "real atomic SQL statements + production S4 read must fit D1 Free");
+        }
+        const markedAt = h.sqlite.prepare(
+          "SELECT requested_at FROM public_build_state WHERE id=1",
+        ).get().requested_at;
+        assert.equal(markedAt > 0, accepted,
+          "successful group deletion marks rebuild; rejected budget leaves marker untouched");
         if (bucket) assert.equal(bucket.puts > 0, accepted);
       } finally { h.sqlite.close(); }
     }
@@ -2180,6 +2221,11 @@ test("SA-028 U03 staged: D1 failure compensates only the precommitted public DEL
     assert.equal(h.count("public_visibility_fences"), 0);
     assert.equal(h.count("audit_logs"), 0);
     assert.equal(h.count("static_rebuild_queue"), 0);
+    assert.equal(
+      h.sqlite.prepare("SELECT requested_at FROM public_build_state WHERE id=1").get().requested_at,
+      0,
+      "rejected atomic mutation must not commit MIG-0516 build marker",
+    );
     assert.equal(bucket.readManifest()?.entities.length, 0);
     assert.ok(bucket.puts >= 2, "precommit and compensation must both write");
   } finally {
@@ -2218,6 +2264,11 @@ test("SA-028 U03 staged: stale group CAS rolls back relations, audits and rebuil
     assert.equal(h.count("event_group_events"), 2);
     assert.equal(h.count("audit_logs"), 0);
     assert.equal(h.count("static_rebuild_queue"), 0);
+    assert.equal(
+      h.sqlite.prepare("SELECT requested_at FROM public_build_state WHERE id=1").get().requested_at,
+      0,
+      "rejected atomic mutation must not commit MIG-0516 build marker",
+    );
     assert.equal(h.stats.batches, 1);
   } finally {
     h.sqlite.close();
