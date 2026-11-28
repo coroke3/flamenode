@@ -1166,6 +1166,65 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+  test("S3 #725: real HTTPS-cookie concurrent X-ID cap race records the post-batch count read", async () => {
+    const w = world();
+    const token = "s3-xid-cap-race";
+    insert(w.sqlite, "session", {
+      sessionToken: token, userId: "u_owner", expires: NOW_SEC * 1000 + 60000,
+    });
+    const readsBefore = w.d1.stats.reads;
+    const batchesBefore = w.d1.stats.batches;
+    const sqlOffset = w.d1.stats.readSql.length;
+    let afterConcurrent = null;
+    const fired = afterFirstRead(
+      w,
+      (sql) => /FROM "slots" WHERE "id" = \\? AND "event_id" = \\? LIMIT 1/i.test(sql),
+      (sqlite) => {
+        sqlite
+          .prepare(
+            `UPDATE slots SET status = 'reserved', reserved_by_user_id = 'u_owner',
+             x_user_id = 'x_owner', reserved_x_id_snapshot = 'x_owner',
+             display_name = 'Race1', version = version + 1, updated_at = ?
+             WHERE id = 'lim_1'`,
+          )
+          .run(NOW_SEC);
+        afterConcurrent = state(w);
+      },
+    );
+    const thaw = freeze();
+    try {
+      const response = await app.request(SITE + "/api/events/ev_limit/slots/lim_3/reserve", {
+        method: "POST",
+        headers: {
+          Origin: SITE, cookie: "__Secure-authjs.session-token=" + token,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ display_name: "Race2", consecutive_count: 1 }),
+      }, { DB: w.d1, NEXT_PUBLIC_SITE_URL: SITE });
+      const result = await response.json();
+      assert.equal(response.status, 409);
+      assert.equal(result.ok, false);
+      assert.match(result.message, /最大1件まで枠を確保できます/);
+      assert.equal(response.headers.get("cache-control"), "private, no-store");
+      assert.equal(fired(), true, "the competing reservation must occur after the first slot snapshot");
+      const readCount = w.d1.stats.reads - readsBefore;
+      const statements = w.d1.stats.readSql.slice(sqlOffset);
+      assert.equal(readCount, 4,
+        "three real-cookie pre-reads plus the post-batch logical reservation-count recheck");
+      assert.equal(statements.length, readCount);
+      assert.match(statements[0], /FROM "session" s/);
+      assert.match(statements[1], /JOIN "system_settings" settings/);
+      assert.match(statements[2], /invalid_snapshot/);
+      assert.match(statements[3], /reserved_x_id_snapshot/);
+      assert.equal(w.d1.stats.batches - batchesBefore, 1, "one atomic batch attempt must roll back");
+      assert.deepEqual(state(w), afterConcurrent,
+        "the failed request must add no slot/audit/outbox/queue mutation beyond the injected competitor");
+    } finally {
+      thaw();
+      w.sqlite.close();
+    }
+  });
+
   test("T02: pending X-ID reservation cap and legacy normalized snapshot match CURRENT", async () => {
     // u_pend has no approved X link, only a pending new_link(x_pend).
     // This exercises the single_pending CTE and pending_x_count, not the
