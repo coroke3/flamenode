@@ -290,7 +290,8 @@ export function SlotGrid({
       setSavedName("");
     };
     clearViewerPrivateUi();
-    setSavedName(readSavedSlotDisplayName(viewerXId));
+    // Authentication can retire a viewer even when both X IDs are null.
+    setSavedName(isAuthenticated ? readSavedSlotDisplayName(viewerXId) : "");
     // A successful Active X switch must clear an already-open dialog even
     // before the parent overlay supplies a different viewerXId.
     // Retire private UI before BFCache captures this document.
@@ -313,7 +314,7 @@ export function SlotGrid({
       window.removeEventListener("pagehide", onPageHide);
       window.removeEventListener("pageshow", onPageShow);
     };
-  }, [viewerXId]);
+  }, [viewerXId, isAuthenticated]);
 
   React.useEffect(() => {
     setActionMenu(null);

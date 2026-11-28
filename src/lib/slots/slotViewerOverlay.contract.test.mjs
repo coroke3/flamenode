@@ -182,3 +182,10 @@ test("a repeated event and baseSlots reference cannot revive a previous request 
   assert.match(panel, /setOverlayState\(\{ value, eventId: requestEventId, baseSlots: requestBaseSlots, scope: requestScope \}\)/);
   assert.match(panel, /\[eventId, refreshNonce, baseSlots, overlayScope\]/);
 });
+
+
+test("auth-only retirement with the same X ID clears the private action generation and skips unauthenticated saved-name restore", async () => {
+  const slotGrid = await readFile(new URL("../../components/event/SlotGrid.tsx", import.meta.url), "utf8");
+  assert.match(slotGrid, /clearViewerPrivateUi\(\);\s*\/\/ Authentication[^\n]*\n\s*setSavedName\(isAuthenticated \? readSavedSlotDisplayName\(viewerXId\) : ""\)/);
+  assert.match(slotGrid, /\}, \[viewerXId, isAuthenticated\]\);/);
+});

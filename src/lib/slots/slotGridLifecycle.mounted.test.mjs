@@ -361,7 +361,7 @@ for (const name of ["reserve", "release", "extend", "merge"]) {
 // These cases keep the actual private UI OPEN, with no server action at all,
 // and prove that even an unchanged null-X prop is not enough to retain it.
 for (const name of ["reserve", "release", "extend", "merge", "menu"]) {
-  for (const boundary of ["bfcache-null-X", "pagehide-null-X", "active-event-null-X", "event-unmount"]) {
+  for (const boundary of ["bfcache-null-X", "pagehide-null-X", "active-event-null-X", "event-unmount", "auth-loss-null-X"]) {
     test("SEC-921 mounted SlotGrid: unsubmitted private UI " + name + " / " + boundary, async () => {
       const container = document.createElement("div");
       document.body.appendChild(container);
@@ -421,6 +421,9 @@ for (const name of ["reserve", "release", "extend", "merge", "menu"]) {
             assert.equal(openUi(), null, "persisted pagehide must synchronously remove the open private UI");
           }
           else if (boundary === "active-event-null-X") window.dispatchEvent(new dom.window.Event(activeXChanged));
+          else if (boundary === "auth-loss-null-X") root.render(h(SlotGrid, {
+            key: "a", ...props(freshSlots()), isAuthenticated: false, canReserve: false, canTakeSlot: false,
+          }));
           else root.render(h(SlotGrid, { key: "b", ...props(freshSlots()) }));
         });
         assert.equal(openUi(), null, "old unsubmitted UI must be retired");
@@ -451,6 +454,69 @@ for (const name of ["reserve", "release", "extend", "merge", "menu"]) {
   }
 }
 
+
+
+// A replacement overlay may retire authenticated capability without changing
+// eventId, X ID, or dispatching any browser / Active X lifecycle event.
+for (const name of ["reserve", "release", "extend", "merge"]) {
+  for (const completion of ["success", "guard", "transport", "control"]) {
+    for (const reauthenticate of [false, true]) {
+      test("SEC-921 mounted SlotGrid: same null-X auth loss " + name + " / " + completion + " / reauth=" + reauthenticate, async () => {
+        const container = document.createElement("div");
+        document.body.appendChild(container);
+        const root = createRoot(container);
+        const start = requests.length, refreshStart = refreshes.length, redirectStart = redirects.length;
+        const controlStart = controlRethrows.length;
+        const successorSlots = freshSlots();
+        const storage = dom.window.localStorage;
+        storage.clear();
+        storage.setItem("fn:lastSlotDisplayName:unassigned", "legacy private");
+        let pending;
+        try {
+          await settle(() => root.render(h(SlotGrid, { key: "a", ...props(slotsFor(name)) })));
+          await startAction(container, name);
+          assert.equal(requests.length, start + 1);
+          pending = requests[start];
+          assert.equal(pending.name, name);
+          await settle(() => root.render(h(SlotGrid, {
+            key: "a", ...props(successorSlots),
+            isAuthenticated: false, canReserve: false, canTakeSlot: false,
+          })));
+          assertNoPrivateActionUi(container);
+          if (reauthenticate) {
+            await settle(() => root.render(h(SlotGrid, { key: "a", ...props(successorSlots) })));
+            assertNoPrivateActionUi(container);
+          }
+          await settle(() => {
+            if (completion === "success") pending.resolve({ ok: true, slotId: "free", groupSize: 1 });
+            else if (completion === "guard") pending.resolve({ ok: false, reason: "guard", message: "previous viewer private name" });
+            else {
+              const error = new Error(completion === "control" ? "NEXT_REDIRECT" : "previous viewer transport error");
+              if (completion === "control") controlErrors.add(error);
+              pending.reject(error);
+            }
+          });
+          pending = null;
+          assertNoPrivateActionUi(container);
+          assert.equal(refreshes.length, refreshStart);
+          assert.equal(redirects.length, redirectStart);
+          assert.equal(controlRethrows.length, controlStart);
+          assert.equal(requests.length, start + 1);
+          if (!reauthenticate) await settle(() => root.render(h(SlotGrid, { key: "a", ...props(successorSlots) })));
+          await click(container.querySelector('button[aria-label="next-free を確保"]'), "new null-X viewer reserve");
+          assert.equal(container.querySelector("#reserve-display-name").value, "");
+          assert.equal(storage.length, 1);
+          assert.equal(storage.getItem("fn:lastSlotDisplayName:unassigned"), "legacy private");
+        } finally {
+          await settle(() => root.unmount());
+          if (pending) await settle(() => pending.resolve({ ok: false }));
+          storage.clear();
+          container.remove();
+        }
+      });
+    }
+  }
+}
 
 // Mount the actual parent and child together. Verify overlay-derived rows,
 // child action UI and completions at the same synchronous pagehide boundary.
