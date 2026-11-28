@@ -178,9 +178,9 @@ test("SA-056/057: notification post-audit failure causes transaction rollback",(
     assert.equal(count(db),0);
   }finally{db.close();}
 });
-test("SA-056/057: SQL builder never mounts a Hono route",async()=>{
+test("SA-056/057: SQL builder is not imported directly in index",async()=>{
   const s=await readFile(new URL("../src/routes/manage/index.ts",import.meta.url),"utf8");
-  assert.doesNotMatch(s,/slotSubmittedDangerOutbox|slotSubmittedDangerRoutes/);
+  assert.doesNotMatch(s,/slotSubmittedDangerOutbox/);
 });
 
 test("MIG-0656 U04u: SA-056/057 legacy group IDs escape mentions only in DM payload",()=>{

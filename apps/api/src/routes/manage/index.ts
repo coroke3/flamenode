@@ -14,6 +14,13 @@ import { manageVideosRoutes } from "./videos.ts";
 import { manageNotificationCenterRoutes } from "./notificationCenter.ts";
 import { manageOverviewRoutes } from "./overview.ts";
 import { manageSlotsRoutes } from "./slots.ts";
+import { slotAvailableDeleteChunkRoutes } from "./slotAvailableDeleteChunk.ts";
+import { slotBatchAvailableDeleteRoutes } from "./slotBatchAvailableDelete.ts";
+import { slotBatchLabelWriteRoutes } from "./slotBatchLabelWrite.ts";
+import { slotBatchReservedReleaseRoutes } from "./slotBatchReservedRelease.ts";
+import { slotGeneratedChunkRoutes } from "./slotGeneratedChunk.ts";
+import { slotSingleReleaseRoutes } from "./slotSingleRelease.ts";
+import { slotSubmittedDangerRoutes } from "./slotSubmittedDanger.ts";
 import { manageStaffRoutes } from "./staff.ts";
 import { registerStaffWriteRoutes } from "./staffWrite.ts";
 import { manageXLinkRequestRoutes } from "./xlink.ts";
@@ -35,7 +42,7 @@ manageRoutes.use("*", async (c, next) => {
 // MIG-0655: playlist writes verify Origin BEFORE reading the Auth.js session.
 const playlistWritePaths = ["/events/:id/youtube-playlist", "/events/:id/youtube-playlist/sync"];
 const staffWritePaths = ["/events/:id/staff", "/events/:id/staff/:staffId", "/events/:id/owner-transfer"];
-// SA-058..064 slot write candidates remain UNMOUNTED until parity and review.
+// SA-056..064 slot write routes (Origin-first / session / writeGuard / DB).
 const slotWritePaths = [
   "/events/:id/slots/batch-delete",
   "/events/:id/slots/batch-release",
@@ -44,8 +51,6 @@ const slotWritePaths = [
   "/events/:id/slots/generate-chunk",
   "/events/:id/slots/delete-available-chunk",
 ];
-// SA-056/057 are prepared for the same Origin-first / session / writeGuard / DB
-// stack. The submitted-danger Hono candidate remains deliberately UNMOUNTED.
 const submittedDangerWritePaths = [
   "/events/:id/slots/:slotId/force-release-submitted",
   "/events/:id/slots/:slotId/release-submitted-video",
@@ -93,6 +98,13 @@ manageRoutes.route("/navigation", manageNavigationRoutes);
 manageRoutes.route("/events/:id/staff", manageStaffRoutes);
 registerStaffWriteRoutes(manageRoutes);
 manageRoutes.route("/events/:id/slots", manageSlotsRoutes);
+manageRoutes.route("/events/:id/slots", slotGeneratedChunkRoutes);
+manageRoutes.route("/events/:id/slots", slotAvailableDeleteChunkRoutes);
+manageRoutes.route("/events/:id/slots", slotBatchReservedReleaseRoutes);
+manageRoutes.route("/events/:id/slots", slotBatchLabelWriteRoutes);
+manageRoutes.route("/events/:id/slots", slotBatchAvailableDeleteRoutes);
+manageRoutes.route("/events/:id/slots", slotSingleReleaseRoutes);
+manageRoutes.route("/events/:id/slots", slotSubmittedDangerRoutes);
 manageRoutes.route("/events/:id/edit", manageEventEditRoutes);
 manageRoutes.route("/events/:id/videos/:videoId", manageVideoDetailRoutes);
 manageRoutes.route("/events/:id/videos", manageVideosRoutes);
@@ -106,6 +118,10 @@ manageRoutes.route("/", manageDashboardRoutes);
 
 // D1 failures: fixed code only (errors may carry bound values); the SPA shows its "unavailable" state.
 manageRoutes.onError((_error, c) => {
-  console.error("[manage] READ_FAILED");
+  try {
+    console.error("[manage] READ_FAILED");
+  } catch {
+    // A failing diagnostic sink must not interrupt the unavailable response.
+  }
   return c.json({ error: "unavailable" }, 503, { "Cache-Control": NO_STORE });
 });

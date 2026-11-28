@@ -31,10 +31,8 @@ const NO_STORE = "private, no-store";
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const WRITE_FAILED = "予約枠の解放に失敗しました。再読み込み後にお試しください。";
 
-/** This router is NOT imported into manage/index.ts. */
 export const slotSingleReleaseRoutes = new Hono<AppEnv>();
-slotSingleReleaseRoutes.use("*", costGuardMiddleware("manage_slot_update"));
-slotSingleReleaseRoutes.post("/:slotId/release", async (c) => {
+slotSingleReleaseRoutes.post("/:slotId/release", costGuardMiddleware("manage_slot_update"), async (c) => {
   c.header("Cache-Control", NO_STORE);
   const user = c.get("user");
   if (!user) return c.json({ ok: false, message: "ログインが必要です。" }, 401);

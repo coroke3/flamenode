@@ -549,9 +549,9 @@ test("SA-059 U04c: session invalidation after scoped read rolls back one atomic 
   }
 });
 
-test("SA-059 U03n: candidate route stays UNMOUNTED in production parent",()=>{
+test("SA-059 U03n: candidate route is mounted in manage parent",()=>{
   const index=readFileSync(new URL("../src/routes/manage/index.ts",import.meta.url),"utf8");
-  assert.doesNotMatch(index,/slotAvailableDeleteChunkRoutes|slotAvailableDeleteChunk\.ts/);
+  assert.match(index,/manageRoutes\.route\("\/events\/:id\/slots",\s*slotAvailableDeleteChunkRoutes\)/);
 });
 
 test("MIG-0656 U04s: SA-059 refuses absent parent Auth.js, missing cookie and forged token",async()=>{

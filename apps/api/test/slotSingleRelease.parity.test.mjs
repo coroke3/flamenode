@@ -190,12 +190,12 @@ test("SA-060 U02c-5d: opted-out recipient releases slots without DM", async () =
   assert.equal(s.countRows("audit_logs"), 2);
   assert.equal(s.countRows("notification_outbox"), 0);
 });
-test("SA-060 U02c-5d: CostGuard denies writes and candidate is not mounted", async () => {
+test("SA-060 U02c-5d: CostGuard denies writes and route is mounted", async () => {
   const s = setup({ mode: "maintenance", count: 2 });
   assert.equal((await s.post()).status, 503);
   assert.equal(s.countRows("audit_logs"), 0);
   const index = readFileSync(new URL("../src/routes/manage/index.ts", import.meta.url), "utf8");
-  assert.doesNotMatch(index, /slotSingleReleaseRoutes|slotSingleRelease\.ts/);
+  assert.match(index, /manageRoutes\.route\("\/events\/:id\/slots",\s*slotSingleReleaseRoutes\)/);
 });
 
 test("SA-060 U02c-5e: stale CAS after scoped SELECT cannot partially release the group", async () => {

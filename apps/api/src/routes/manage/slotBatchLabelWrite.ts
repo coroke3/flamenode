@@ -28,13 +28,8 @@ const EVENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const WRITE_FAILED = "枠の更新に失敗しました。再読み込み後にお試しください。";
 
 /** CURRENT typeof slots.$inferSelect: full snapshots, not list-view rows. */
-/**
- * The parent index.ts intentionally does not mount this router while other
- * SA-056..063 handlers and post-commit queue wake integration are incomplete.
- */
 export const slotBatchLabelWriteRoutes = new Hono<AppEnv>();
-slotBatchLabelWriteRoutes.use("*", costGuardMiddleware("manage_slot_update"));
-slotBatchLabelWriteRoutes.patch("/labels", async (c) => {
+slotBatchLabelWriteRoutes.patch("/labels", costGuardMiddleware("manage_slot_update"), async (c) => {
   c.header("Cache-Control", NO_STORE);
   const user = c.get("user");
   if (!user) return c.json({ ok: false, message: "ログインが必要です。" }, 401);

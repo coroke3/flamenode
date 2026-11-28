@@ -227,9 +227,9 @@ test("SA-064 U04e: session, staff grant, TOS and CostGuard revocations after sco
   }
 });
 
-test("SA-064 U02c-0: the write candidate is deliberately NOT mounted in manage index", () => {
+test("SA-064 U02c-0: the write route is mounted in manage index", () => {
   const source=readFileSync(new URL("../src/routes/manage/index.ts",import.meta.url),"utf8");
-  assert.doesNotMatch(source,/slotBatchLabelWriteRoutes|slotBatchLabelWrite\.ts/);
+  assert.match(source,/manageRoutes\.route\("\/events\/:id\/slots",\s*slotBatchLabelWriteRoutes\)/);
 });
 
 test("MIG-0656 U04r: post-scope linked-X revocation and major-TOS publication roll back SA-064",async()=>{

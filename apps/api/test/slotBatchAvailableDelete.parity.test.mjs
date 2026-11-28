@@ -154,12 +154,12 @@ test("SA-062 U02c-1: concurrent status flip aborts entire CAS mutation",async()=
   assert.equal(s.count("static_rebuild_queue"),0);
 });
 
-test("SA-062 U02c-1: CostGuard blocks deletion and this candidate is NOT mounted",async()=>{
+test("SA-062 U02c-1: CostGuard blocks deletion and route is mounted in manage parent",async()=>{
   const s=setup({settings:"maintenance"});
   assert.equal((await s.del()).status,503);
   assert.equal(s.count("audit_logs"),0);
   const index=readFileSync(new URL("../src/routes/manage/index.ts",import.meta.url),"utf8");
-  assert.doesNotMatch(index,/slotBatchAvailableDeleteRoutes|slotBatchAvailableDelete\.ts/);
+  assert.match(index,/manageRoutes\.route\("\/events\/:id\/slots",\s*slotBatchAvailableDeleteRoutes\)/);
 });
 
 test("SA-061 U02c-4: single available delete with strict audit and 3 projections",async()=>{

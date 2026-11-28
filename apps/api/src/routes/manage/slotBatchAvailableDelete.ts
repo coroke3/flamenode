@@ -99,10 +99,8 @@ async function runAvailableDeletion(
   }
 }
 
-/** This router is intentionally NOT registered with manageRoutes. */
 export const slotBatchAvailableDeleteRoutes = new Hono<AppEnv>();
-slotBatchAvailableDeleteRoutes.use("*", costGuardMiddleware("manage_slot_delete"));
-slotBatchAvailableDeleteRoutes.post("/batch-delete", async (c) => {
+slotBatchAvailableDeleteRoutes.post("/batch-delete", costGuardMiddleware("manage_slot_delete"), async (c) => {
   c.header("Cache-Control", NO_STORE);
   const user = c.get("user");
   if (!user) return c.json({ ok: false, message: "ログインが必要です。" }, 401);
@@ -119,8 +117,8 @@ slotBatchAvailableDeleteRoutes.post("/batch-delete", async (c) => {
   return runAvailableDeletion(c, eventId, validated.data.slot_ids, "slot_admin_batch_delete");
 });
 
-/** SA-061 DELETE /:slotId is not mounted; no JSON body is accepted. */
-slotBatchAvailableDeleteRoutes.delete("/:slotId", async (c) => {
+/** SA-061 DELETE /:slotId; no JSON body is accepted. */
+slotBatchAvailableDeleteRoutes.delete("/:slotId", costGuardMiddleware("manage_slot_delete"), async (c) => {
   c.header("Cache-Control", NO_STORE);
   const user = c.get("user");
   if (!user) return c.json({ok:false,message:"ログインが必要です。"},401);

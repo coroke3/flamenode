@@ -185,12 +185,12 @@ test("SA-063 U02c-3: notification opt-out does not block valid slot release",asy
   assert.equal(s.count("notification_outbox"),0);
   assert.equal(s.count("audit_logs"),2);
 });
-test("SA-063 U02c-3: CostGuard blocks and production router does not mount this candidate",async()=>{
+test("SA-063 U02c-3: CostGuard blocks and manage router mounts this route",async()=>{
   const s=setup({mode:"maintenance"});
   assert.equal((await s.post()).status,503);
   assert.equal(s.count("notification_outbox"),0);
   const index=readFileSync(new URL("../src/routes/manage/index.ts",import.meta.url),"utf8");
-  assert.doesNotMatch(index,/slotBatchReservedReleaseRoutes|slotBatchReservedRelease\.ts/);
+  assert.match(index,/manageRoutes\.route\("\/events\/:id\/slots",\s*slotBatchReservedReleaseRoutes\)/);
 });
 
 test("SA-063 U04g: mid-request session, scope and CostGuard revocation aborts release/audit/Queue/DM",async()=>{

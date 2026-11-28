@@ -48,10 +48,8 @@ SELECT
 
 type ScopeRead = { exists_id: string | null; staff_json: string | null; cost_guard_json: string | null };
 
-/** Deliberately NOT imported or mounted in manage/index.ts. */
 export const slotGeneratedChunkRoutes = new Hono<AppEnv>();
-slotGeneratedChunkRoutes.use("*", costGuardMiddleware("manage_slot_create"));
-slotGeneratedChunkRoutes.post("/generate-chunk", async (c) => {
+slotGeneratedChunkRoutes.post("/generate-chunk", costGuardMiddleware("manage_slot_create"), async (c) => {
   c.header("Cache-Control", NO_STORE);
   const user = c.get("user");
   if (!user) return c.json({ ok: false, message: "ログインが必要です。" }, 401);

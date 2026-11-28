@@ -32,10 +32,8 @@ const NO_STORE = "private, no-store";
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const WRITE_FAILED = "空き枠の削除に失敗しました。再読み込み後にお試しください。";
 
-/** Test-only/independent-review candidate; NEVER mount in manage/index.ts yet. */
 export const slotAvailableDeleteChunkRoutes = new Hono<AppEnv>();
-slotAvailableDeleteChunkRoutes.use("*", costGuardMiddleware("manage_slot_delete"));
-slotAvailableDeleteChunkRoutes.post("/delete-available-chunk", async (c) => {
+slotAvailableDeleteChunkRoutes.post("/delete-available-chunk", costGuardMiddleware("manage_slot_delete"), async (c) => {
   c.header("Cache-Control", NO_STORE);
   const user = c.get("user");
   if (!user) return c.json({ ok: false, message: "ログインが必要です。" }, 401);

@@ -465,9 +465,9 @@ test("SA-056/057 U03f: 21 members, invalid IDs and missing video fail closed",as
     assert.deepEqual(countEffects(missing),{audits:0,outbox:0,queue:0});
   }finally{missing.sqlite.close();}
 });
-test("SA-056/057 U03f: no accidental managed route mount or immediate Queue wake",()=>{
+test("SA-056/057 U03f: mounted in manage parent with no immediate Queue wake",()=>{
   const s=readFileSync(new URL("../src/routes/manage/index.ts",import.meta.url),"utf8");
-  assert.doesNotMatch(s,/slotSubmittedDangerRoutes|slotSubmittedDanger\.ts/);
+  assert.match(s,/manageRoutes\.route\("\/events\/:id\/slots",\s*slotSubmittedDangerRoutes\)/);
   const handler=readFileSync(new URL("../src/routes/manage/slotSubmittedDanger.ts",import.meta.url),"utf8");
   assert.doesNotMatch(handler,/notificationWakeSource|staticRebuildWakeSource|\.send\(/);
   assert.match(handler,/mutateWithAudit\(db,/);

@@ -195,7 +195,7 @@ test("SA-058 invalid modes, row defaults, duplicates and >3 reject before SQL",(
     ()=>buildGeneratedSlotChunkAtomicPlan(input),undefined,JSON.stringify(input));
 });
 
-test("SA-058 D1 SQL remains bounded, prepared and UNMOUNTED",async()=>{
+test("SA-058 D1 SQL remains bounded, prepared and helper is not imported directly in index",async()=>{
   const p=buildGeneratedSlotChunkAtomicPlan({
     eventId:"ev",mode:"count",rows:materialize("count",3),
   });
@@ -206,5 +206,5 @@ test("SA-058 D1 SQL remains bounded, prepared and UNMOUNTED",async()=>{
   assert.match(queries[1].sql,/json_each\(\?\)/);
   const {readFile}=await import("node:fs/promises");
   const index=await readFile(new URL("../src/routes/manage/index.ts",import.meta.url),"utf8");
-  assert.doesNotMatch(index,/slotGeneratedChunkMutation|slotGeneratedChunkRoutes/);
+  assert.doesNotMatch(index,/slotGeneratedChunkMutation/);
 });

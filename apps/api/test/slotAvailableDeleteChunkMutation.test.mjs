@@ -238,7 +238,7 @@ test("SA-059 invalid selections cannot produce a D1 mutation statement",()=>{
   }),/slot_available_delete_chunk_invalid_/);
 });
 
-test("SA-059 SQL uses bound snapshot and candidate remains unmounted",async()=>{
+test("SA-059 SQL uses bound snapshot and mutation helper is not imported directly in index",async()=>{
   const plan=buildAvailableDeleteChunkAtomicPlan({
     eventId:"ev",selection:{ok:true,rows:[slot("a"),slot("b")],hasMore:true},
   });
@@ -248,5 +248,5 @@ test("SA-059 SQL uses bound snapshot and candidate remains unmounted",async()=>{
   assert.ok(query.params.length<=4);
   const {readFile}=await import("node:fs/promises");
   const index=await readFile(new URL("../src/routes/manage/index.ts",import.meta.url),"utf8");
-  assert.doesNotMatch(index,/slotAvailableDeleteChunkMutation|slotAvailableDeleteChunkRoutes/);
+  assert.doesNotMatch(index,/slotAvailableDeleteChunkMutation/);
 });

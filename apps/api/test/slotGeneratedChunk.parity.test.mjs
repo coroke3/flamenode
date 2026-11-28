@@ -509,9 +509,9 @@ test("SA-058 U04c: session invalidation after scoped read rolls back one atomic 
   }
 });
 
-test("SA-058 U03p: all generated writes remain UNMOUNTED on the production parent",()=>{
+test("SA-058 U03p: generated chunk route is mounted on the manage parent",()=>{
   const index=readFileSync(new URL("../src/routes/manage/index.ts",import.meta.url),"utf8");
-  assert.doesNotMatch(index,/slotGeneratedChunkRoutes|slotGeneratedChunk\.ts/);
+  assert.match(index,/manageRoutes\.route\("\/events\/:id\/slots",\s*slotGeneratedChunkRoutes\)/);
 });
 
 test("MIG-0656 U04s: SA-058 refuses absent parent Auth.js, missing cookie and forged token",async()=>{

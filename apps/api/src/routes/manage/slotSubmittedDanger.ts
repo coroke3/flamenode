@@ -43,9 +43,7 @@ const NO_STORE = "private, no-store";
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const WRITE_FAILED = "提出済み枠の変更に失敗しました。画面を更新して再試行してください。";
 
-/** This router MUST remain unmounted pending independent reviewer/Lead gate. */
 export const slotSubmittedDangerRoutes = new Hono<AppEnv>();
-slotSubmittedDangerRoutes.use("*", costGuardMiddleware("manage_slot_update"));
 
 async function submittedDanger(c: Context<AppEnv>, kind: SubmittedDangerKind) {
   c.header("Cache-Control", NO_STORE);
@@ -174,7 +172,7 @@ async function submittedDanger(c: Context<AppEnv>, kind: SubmittedDangerKind) {
 }
 
 /** Explicit paths, both POST-only; they do not overlap existing SA-060. */
-slotSubmittedDangerRoutes.post("/:slotId/force-release-submitted", (c) =>
+slotSubmittedDangerRoutes.post("/:slotId/force-release-submitted", costGuardMiddleware("manage_slot_update"), (c) =>
   submittedDanger(c, "force-release"));
-slotSubmittedDangerRoutes.post("/:slotId/release-submitted-video", (c) =>
+slotSubmittedDangerRoutes.post("/:slotId/release-submitted-video", costGuardMiddleware("manage_slot_update"), (c) =>
   submittedDanger(c, "keep-reservation"));

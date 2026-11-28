@@ -275,5 +275,5 @@ test("SA-056/057: only three read-only bounded SQL statements and never mounted"
   assert.match(SLOT_SUBMITTED_DANGER_RAW_GROUP_SQL,/LIMIT 21/);
   assert.match(SLOT_SUBMITTED_DANGER_VIDEO_REFS_SQL,/LIMIT 21/);
   const index=await readFile(new URL("../src/routes/manage/index.ts",import.meta.url),"utf8");
-  assert.doesNotMatch(index,/slotSubmittedDangerSnapshot|slotSubmittedDangerRoutes/);
+  assert.doesNotMatch(index,/slotSubmittedDangerSnapshot/);
 });

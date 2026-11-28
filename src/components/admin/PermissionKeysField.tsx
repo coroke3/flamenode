@@ -64,39 +64,34 @@ function initialPolicyStates(
 
 export function PermissionKeysField({
   name,
-  defaultValue,
+  value,
+  onChange,
   disabled = false,
   allowUserVideoEdits,
 }: {
   name: string;
-  defaultValue: string | null | undefined;
+  value: string;
+  onChange: (value: string) => void;
   disabled?: boolean;
   allowUserVideoEdits?: number;
 }): React.ReactElement {
-  const [states, setStates] = React.useState<Map<GeneralEditableFieldKey, PolicyState>>(() =>
-    initialPolicyStates(defaultValue, allowUserVideoEdits),
+  const states = React.useMemo(
+    () => initialPolicyStates(value, allowUserVideoEdits),
+    [value, allowUserVideoEdits],
   );
-  const [dirty, setDirty] = React.useState(false);
-  const value = dirty ? buildPermissionJson(states) : (defaultValue ?? "");
 
   const setState = (key: GeneralEditableFieldKey, state: PolicyState) => {
     if (disabled) return;
-    setDirty(true);
-    setStates((current) => {
-      const next = new Map(current);
-      next.set(key, state);
-      return next;
-    });
+    const next = new Map(states);
+    next.set(key, state);
+    onChange(buildPermissionJson(next));
   };
 
   const setAll = (state: PolicyState) => {
     if (disabled) return;
-    setDirty(true);
-    setStates(() => {
-      const next = new Map<GeneralEditableFieldKey, PolicyState>();
-      for (const key of GENERAL_EDITABLE_FIELD_KEYS) next.set(key, state);
-      return next;
-    });
+    const next = new Map<GeneralEditableFieldKey, PolicyState>();
+    for (const key of GENERAL_EDITABLE_FIELD_KEYS) next.set(key, state);
+    onChange(buildPermissionJson(next));
   };
 
   const allowedCount = Array.from(states.values()).filter((state) => state === "allow").length;

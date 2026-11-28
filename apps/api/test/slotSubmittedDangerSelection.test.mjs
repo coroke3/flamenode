@@ -123,5 +123,5 @@ test("SA-056/057: expected event, legal kind and snapshot shape, no route mount"
   assert.equal(select({slotId:" a "}).ok,false);
   assert.equal(select({anchor:slot("a",{slot_label:42})}).ok,false);
   const index=await readFile(new URL("../src/routes/manage/index.ts",import.meta.url),"utf8");
-  assert.doesNotMatch(index,/slotSubmittedDangerSelection|slotSubmittedDangerRoutes/);
+  assert.doesNotMatch(index,/slotSubmittedDangerSelection/);
 });

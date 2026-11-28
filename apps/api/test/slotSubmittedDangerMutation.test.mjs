@@ -257,7 +257,7 @@ test("SA-056/057: strict audit failure simulations roll back both slot and video
   }finally{db.close();}
 });
 
-test("SA-056/057: malformed selection rejects before SQL and candidate is unmounted",async()=>{
+test("SA-056/057: malformed selection rejects before SQL and mutation helper is not imported directly",async()=>{
   const rows=[slot("a"),slot("b")];
   const good=selection("force-release",rows,["a","b"]);
   for(const input of [
@@ -277,5 +277,5 @@ test("SA-056/057: malformed selection rejects before SQL and candidate is unmoun
   assert.deepEqual(p.preMutationAssertions.map(x=>q(x).params.length),[5,8]);
   assert.ok(p.mutationStatements.every(x=>q(x).params.length<=5));
   const index=await readFile(new URL("../src/routes/manage/index.ts",import.meta.url),"utf8");
-  assert.doesNotMatch(index,/slotSubmittedDangerMutation|slotSubmittedDangerRoutes/);
+  assert.doesNotMatch(index,/slotSubmittedDangerMutation/);
 });
