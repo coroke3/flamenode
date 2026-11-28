@@ -111,9 +111,10 @@ function scanOversizedKvMirror(raw: string): ParsedOperationModeKvMirror | null 
     return [start, i];
   };
   // Skip batches of short scalar array entries only when each is followed by
-  // a comma. Longer tokens, strings and containers use the full scanner.
+  // a comma. Short unescaped strings are also complete scalar tokens;
+  // escaped/longer strings, longer numbers and containers use the full scanner.
   // The next state still requires a value, so a trailing comma is invalid.
-  const scalarArrayRun = /(?:(?:true|false|null|-?(?:0|[1-9][0-9]{0,15})(?:\.[0-9]{1,16})?(?:[eE][+-]?[0-9]{1,6})?)[ \t\r\n]{0,16},[ \t\r\n]{0,16}){2,256}/y;
+  const scalarArrayRun = /(?:(?:true|false|null|-?(?:0|[1-9][0-9]{0,15})(?:\.[0-9]{1,16})?(?:[eE][+-]?[0-9]{1,6})?|"[^"\\\u0000-\u001f]{0,32}")[ \t\r\n]{0,16},[ \t\r\n]{0,16}){2,256}/y;
   // Only nested object members may be skipped: root keys can change mode
   // or updated_at. Require complete comma-delimited scalar members; all
   // escaped or longer keys/values and containers use the general scanner.
@@ -215,7 +216,7 @@ function scanOversizedKvMirror(raw: string): ParsedOperationModeKvMirror | null 
           break;
         case ARRAY_VALUE: {
           const c = raw[i];
-          if (c === "t" || c === "f" || c === "n" || c === "-" || (c >= "0" && c <= "9")) {
+          if (c === '"' || c === "t" || c === "f" || c === "n" || c === "-" || (c >= "0" && c <= "9")) {
             scalarArrayRun.lastIndex = i;
             if (scalarArrayRun.test(raw)) {
               i = scalarArrayRun.lastIndex;

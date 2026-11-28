@@ -706,10 +706,17 @@ test("MIG-0661 T09 / #916: scalar array batches preserve grammar at batch and fa
   const prefix = '{"mode":"normal","updated_at":1,"reason":"' + pad + '","extra":';
   const suffix = ',"mode":"maintenance"}';
   const dense = "0,-1.2e+4,true,false,null,".repeat(3000);
+  const denseStrings = '"","日本語","🚀","a,b","{}[]",'.repeat(3000);
   const cases = [
     ...[0, 1, 2, 3, 255, 256, 257, 258, 511, 512, 513].map((n) =>
       ["[0," + "1,".repeat(n) + "2]", true]),
     ["[0," + dense + "0]", true],
+    ...[0, 1, 2, 3, 255, 256, 257, 258, 511, 512, 513].map((n) =>
+      ["[0," + '"text",'.repeat(n) + '"last"]', true]),
+    ["[0," + denseStrings + "0]", true],
+    ["[0," + denseStrings + '"' + "x".repeat(32) + '","' + "y".repeat(33) + '","\\u0061",{},[1,2]]', true],
+    ...['"\\x"', '"a\u0001b"', '"a\u0000b"', '"unterminated', '"x",', '"x" "y"', '"x"\u00a0', ""].map((tail) =>
+      ["[0," + denseStrings + tail + "]", false]),
     ["[0," + dense + '[],{},[1,2],"text",{"mode":"static_only"}]', true],
     ["[0,1,2," + "9".repeat(70000) + ",0,1]", true],
     ["[0,1,2,0.12345678901234567,1e+1234567,-0,1]", true],
