@@ -1,5 +1,6 @@
 import { cancelR2BodyBestEffort } from "@flamenode/server-core/r2Body";
 import { readVisibilityManifestObject } from "@flamenode/server-core/visibility/manifestR2";
+import { PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY } from "@flamenode/server-core/visibility/manifestCore";
 import {
   buildPublicArtifactVisibilityContext,
   filterPublicArtifactPayload,
@@ -63,6 +64,7 @@ export async function loadPublicSnapshot(options: {
 
   const guardMode = resolveGuardMode(guardModeRaw);
   let context: PublicArtifactVisibilityContext | undefined;
+  let initialManifestEtag: string | null = null;
 
   // For events_index, fence entity does not exist so observe mode does not read manifest (CURRENT loader.ts L278-L279).
   // For other targets (like event_release), observe and enforce both read the manifest.
@@ -76,6 +78,7 @@ export async function loadPublicSnapshot(options: {
         if (!manifestResult.etag) {
           return { kind: "unavailable" };
         }
+        initialManifestEtag = manifestResult.etag;
       }
       context = buildPublicArtifactVisibilityContext(manifestResult.manifest);
     } catch {
@@ -92,6 +95,31 @@ export async function loadPublicSnapshot(options: {
 
   const raw = await readBoundedR2Json(bucket, key, maxBytes);
   if (raw == null) return { kind: "unavailable" };
+
+  // SEC-712: video visibility may be revoked while this playlist GET is in flight.
+  // Only this consumer needs a second manifest commit-point check. The initial
+  // manifest still denies a blocked parent event before fetching the playlist.
+  // HEAD avoids downloading the same 1 MiB bounded manifest body a second time
+  // in Cloudflare. Synthetic buckets without HEAD re-read through the validated
+  // bounded manifest reader; never silently skip the privacy check.
+  const isPublicEventPlaylist =
+    targetType === "event_slots" &&
+    /^events\/[A-Za-z0-9_-]{1,64}\/playlist\.v1\.json$/.test(key);
+  if (guardMode === "enforce" && isPublicEventPlaylist) {
+    try {
+      const latestEtag = typeof bucket.head === "function"
+        ? (await bucket.head(PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY))?.etag ?? null
+        : (await readVisibilityManifestObject(bucket)).etag;
+      if (!initialManifestEtag || !latestEtag ||
+          latestEtag !== initialManifestEtag) {
+        // An R2 mutation, missing manifest or unverifiable ETag is a hard
+        // deny; the initial blocked-video context can no longer be trusted.
+        return { kind: "unavailable" };
+      }
+    } catch {
+      return { kind: "unavailable" };
+    }
+  }
 
   const filtered = filterPublicArtifactPayload(
     targetType,
