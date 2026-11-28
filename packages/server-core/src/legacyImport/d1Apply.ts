@@ -558,6 +558,7 @@ export async function legacyImportD1ApplyStep(
         SELECT
           json_extract(incoming.value, '$.id'),
           json_extract(incoming.value, '$.target_type'),
+          json_extract(incoming.value, '$.target_id'),
           json_extract(incoming.value, '$.reason'),
           json_extract(incoming.value, '$.priority'),
           'pending', 0, ${input.actorAuthUserId}, ${now}, ${now}

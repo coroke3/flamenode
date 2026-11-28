@@ -21,7 +21,7 @@ const previewFingerprint = (token) => createHash("sha256").update(token).digest(
 const runDigest = (token) => previewFingerprint(token).slice(0, 24);
 
 function extendLegacyImportUserSchema(sqlite) {
-  sqlite.exec("ALTER TABLE \\"user\\" ADD COLUMN \\"emailVerified\\" INTEGER; ALTER TABLE \\"user\\" ADD COLUMN can_create_events INTEGER; ALTER TABLE \\"user\\" ADD COLUMN is_notification_enabled INTEGER; ALTER TABLE \\"user\\" ADD COLUMN terms_reaccept_required INTEGER; ALTER TABLE \\"user\\" ADD COLUMN onboarding_completed_at INTEGER; ALTER TABLE \\"user\\" ADD COLUMN last_guild_check INTEGER; ALTER TABLE \\"user\\" ADD COLUMN created_at INTEGER; ALTER TABLE x_users ADD COLUMN profile_text TEXT; ALTER TABLE x_users ADD COLUMN portfolio_contact TEXT; ALTER TABLE x_users ADD COLUMN youtube_channel_url TEXT; ALTER TABLE x_users ADD COLUMN other_social_links TEXT; ALTER TABLE x_users ADD COLUMN creative_start_date INTEGER;");
+  sqlite.exec('ALTER TABLE "user" ADD COLUMN "emailVerified" INTEGER; ALTER TABLE "user" ADD COLUMN can_create_events INTEGER; ALTER TABLE "user" ADD COLUMN is_notification_enabled INTEGER; ALTER TABLE "user" ADD COLUMN terms_reaccept_required INTEGER; ALTER TABLE "user" ADD COLUMN onboarding_completed_at INTEGER; ALTER TABLE "user" ADD COLUMN last_guild_check INTEGER; ALTER TABLE "user" ADD COLUMN created_at INTEGER; ALTER TABLE x_users ADD COLUMN profile_text TEXT; ALTER TABLE x_users ADD COLUMN portfolio_contact TEXT; ALTER TABLE x_users ADD COLUMN youtube_channel_url TEXT; ALTER TABLE x_users ADD COLUMN other_social_links TEXT; ALTER TABLE x_users ADD COLUMN creative_start_date INTEGER;');
 }
 const ADMIN = { id: "admin-1", name: "Admin", email: null, image: null,
   role: "admin", is_banned: 0, active_x_user_id: null };
