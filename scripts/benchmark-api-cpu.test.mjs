@@ -114,7 +114,7 @@ test("MIG-0639 / #918 native KV diagnostic transport: seed, exact read receipt, 
   assert.equal(await probe(request("/unrelated"), env, 1, dispatch), null);
   const seedResponse = await probe(request("/__bench/operation-mode-kv-seed?reset=1", "PUT", fixture.raw), env, 2, dispatch);
   const seed = { ...(await seedResponse.json()), workerBuild: "transport", requestOrdinal: 2 };
-  assert.deepEqual(seed, { bytes: fixture.bytes, sha256: await sha256(fixture.raw), reset: true });
+  assert.deepEqual(seed, { bytes: fixture.bytes, sha256: await sha256(fixture.raw), reset: true, workerBuild: "transport", requestOrdinal: 2 });
   assert.equal(actualPuts, 1);
   assert.equal(stored, fixture.raw);
   assert.equal(actualGets, 0);
