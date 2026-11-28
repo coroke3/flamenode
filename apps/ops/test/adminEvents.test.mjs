@@ -1,13 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readManageEventEdit } from "../.test-dist/apps/ops/src/api/eventLifecycle.js";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation, createMemoryRouter, RouterProvider } from "react-router-dom";
 import { JSDOM } from "jsdom";
 import { DeleteEventTemplateButton } from "../.test-dist/apps/ops/src/routes/admin/DeleteEventTemplateButton.js";
 import {
   deleteAdminEventTemplate, eventDisplayState, eventIndexQuery, formatEventUnix,
-  readAdminEvents, readAdminEventTemplates,
+  readAdminEvents, readAdminEventTemplates, readAdminEventNew,
 } from "../.test-dist/apps/ops/src/api/adminEvents.js";
 import {
   addEventsToGroup,
@@ -24,6 +25,11 @@ import {
 } from "../.test-dist/apps/ops/src/api/adminEventGroups.js";
 import { AdminEvents } from "../.test-dist/apps/ops/src/routes/admin/AdminEvents.js";
 import { EventTemplates } from "../.test-dist/apps/ops/src/routes/admin/EventTemplates.js";
+import { EventNew } from "../.test-dist/apps/ops/src/routes/admin/EventNew.js";
+import { EventEdit } from "../.test-dist/apps/ops/src/routes/manage/EventEdit.js";
+import { RenameEventIdForm } from "../.test-dist/apps/ops/src/routes/manage/RenameEventIdForm.js";
+import { DeleteEventForm } from "../.test-dist/apps/ops/src/routes/manage/DeleteEventForm.js";
+import { buildFormDraftStorageKey } from "../.test-dist/apps/ops/src/lib/useFormDraft.js";
 import { EventGroupsPage } from "../.test-dist/apps/ops/src/routes/admin/EventGroups.js";
 import {
   EventGroupCreatePage,
@@ -49,11 +55,26 @@ const templates = {
     updated_at: 100,
   }],
 };
+const eventNew = {
+  ...templates, userId: "admin-account", templateId: "t1", templateName: "Example",
+  templateSettingsJson: JSON.stringify({
+    event_type: "collabo", slot_type: "time", slot_visibility_mode: "anonymous",
+    explanation: "Template information", youtube_description_template: "  First\r\nSecond  ",
+    allow_user_video_edits: 1, user_video_edit_permission_keys_json: '["title"]',
+    custom_question_definitions: [
+      { question_key: "q_template", label: "Choice", type: "select", required: true,
+        options_json: '[" A ","B","A"]', is_active: true, visibility: "review" },
+      { question_key: "stage_permission_1", label: "Stage", type: "textarea", required: false,
+        options_json: null, is_active: true, visibility: "private" },
+    ],
+  }),
+  formInitial: "deferred",
+};
 
 async function withDom(url, fn) {
   const dom = new JSDOM("<!doctype html><div id='root'></div>", { url });
   const keys = [
-    "window", "document", "FormData", "Element", "HTMLElement",
+    "window", "document", "sessionStorage", "FormData", "Element", "HTMLElement",
     "HTMLInputElement", "HTMLSelectElement", "HTMLTextAreaElement",
     "Node", "Event", "MouseEvent", "navigator", "ResizeObserver",
     "requestAnimationFrame", "cancelAnimationFrame",
@@ -71,6 +92,8 @@ async function withDom(url, fn) {
   const caf = (id) => clearTimeout(id);
   dom.window.requestAnimationFrame = raf;
   dom.window.cancelAnimationFrame = caf;
+  dom.window.scrollTo = () => {};
+  dom.window.HTMLElement.prototype.scrollIntoView = () => {};
   globalThis.requestAnimationFrame = raf;
   globalThis.cancelAnimationFrame = caf;
   // JSDOM has no ResizeObserver; TableScroll needs only observe/disconnect.
@@ -106,6 +129,279 @@ function LocationProbe() {
   const loc = useLocation();
   return React.createElement("output", { "data-testid": "loc" }, loc.pathname + loc.search);
 }
+
+// These test ports reject any unexpected mutation or navigation; the component
+// itself has no fallback provider. Write behavior is supplied explicitly below.
+const eventNewPorts = {
+  createEvent: async () => assert.fail("unexpected createEvent"),
+  updateEvent: async () => assert.fail("create page must never call updateEvent"),
+  router: {
+    push() { assert.fail("unexpected push"); },
+    refresh() { assert.fail("unexpected refresh"); },
+  },
+};
+const eventDraftKey = (userId, templateId = "t1") => buildFormDraftStorageKey({
+  authUserId: userId, formId: "event-create-" + templateId, schemaVersion: "event-form-v3",
+});
+
+async function withEventNew(props, run, entry = "/admin/events/new?template=t1") {
+  let router;
+  try {
+    return await withDom("https://flamenode.test" + entry, async (view) => {
+      const { dom, container, root } = view;
+      const assigned = [], commits = [];
+      Object.defineProperty(globalThis, "window", { configurable: true, value: new Proxy(dom.window, {
+        get(target, property) {
+          if (property === "location") return {
+            assign: href => assigned.push(href), href: target.location.href, origin: target.location.origin,
+          };
+          const value = Reflect.get(target, property);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      }) });
+      let updateProps;
+      function Host() {
+        const [current, update] = React.useState(props);
+        const location = useLocation();
+        updateProps = update;
+        return React.createElement(React.Profiler, { id: "event-new", onRender() {
+          commits.push({ fetchFn: current.fetchFn, search: location.search,
+            template: container.querySelector('[name="template_id"]')?.value ?? null,
+            title: container.querySelector('[name="title"]')?.value ?? null,
+            hasForm: Boolean(container.querySelector("form")) });
+        } }, React.createElement(EventNew, current), React.createElement(LocationProbe));
+      }
+      router = createMemoryRouter([
+        { path: "/admin/events/new", element: React.createElement(Host) },
+        { path: "*", element: React.createElement("p", null, "Destination") },
+      ], { initialEntries: [entry] });
+      await React.act(async () => root.render(React.createElement(RouterProvider, { router })));
+      const change = (name, value) => React.act(async () => {
+        const input = container.querySelector('[name="' + name + '"]');
+        assert.ok(input, name);
+        Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), "value").set.call(input, value);
+        input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+      });
+      await run({ ...view, router, assigned, commits, change,
+        update: next => React.act(async () => updateProps(previous => ({ ...previous, ...next }))) });
+    });
+  } finally {
+    router?.dispose();
+  }
+}
+
+test("MIG-0721 U03b: CURRENT template markup, query selection and form defaults use the real read boundary", async () => {
+  const encodedId = "pick &/?#日";
+  const cases = [
+    { query: "?template=" + encodeURIComponent(" " + encodedId + " "), id: encodedId, name: "Chosen", settings: eventNew.templateSettingsJson },
+    { query: "", id: "", name: null, settings: null },
+    { query: "?template=%20%20", id: "", name: null, settings: null },
+    { query: "?template=t1&template=t2", id: "", name: null, settings: null },
+    { query: "?template=unknown", id: "unknown", name: null, settings: null },
+    { query: "?template=invalid", id: "invalid", name: "Invalid settings", settings: "{" },
+    { query: "?template=t1", id: "t1", name: "Selected without list", settings: eventNew.templateSettingsJson, guardOk: false },
+  ];
+  for (const item of cases) {
+    const calls = [];
+    const body = { ...eventNew, templateId: item.id, templateName: item.name,
+      templateSettingsJson: item.settings, guardOk: item.guardOk ?? true,
+      templates: item.guardOk === false ? [] : [{ ...templates.templates[0], id: item.id || "t1", name: "Choice" }] };
+    await withEventNew({ ...eventNewPorts, fetchFn: async (url, init) => {
+      calls.push({ url, init }); return json(200, body);
+    } }, async ({ container }) => {
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0].url, "/api/admin-read/events/new" + (item.id ? "?" + new URLSearchParams({ template: item.id }) : ""));
+      assert.equal(calls[0].init.method, "GET");
+      assert.equal(container.querySelector("h1").textContent, "新規イベント作成");
+      assert.match(container.textContent, item.name ? new RegExp("テンプレート「" + item.name + "」") : /イベント本体を作成します/);
+      const form = container.querySelector("form");
+      assert.ok(form);
+      assert.equal(form.querySelector('[name="template_id"]')?.value ?? null, item.id || null);
+      assert.equal(form.querySelector('[name="visibility_status"]').value, "private");
+      for (const name of ["start_time", "end_time", "entry_start_time", "entry_end_time"]) {
+        assert.equal(form.querySelector('[name="' + name + '"]').value, "");
+      }
+      assert.equal(form.querySelector('[name="explanation"]').value, item.settings === eventNew.templateSettingsJson ? "Template information" : "");
+      const choices = [...container.querySelectorAll('a[href^="/admin/events/new"]')]
+        .filter(link => !link.closest("form"));
+      if (item.guardOk === false) {
+        assert.equal(choices.length, 0);
+        assert.doesNotMatch(container.textContent, /テンプレートの利用権限/);
+      } else {
+        assert.equal(choices[0].getAttribute("href"), "/admin/events/new?template=" + encodeURIComponent(item.id || "t1"));
+        assert.equal(choices[0].classList.contains("fn-btn-primary"), Boolean(item.id));
+        assert.equal(choices.some(link => link.textContent.trim() === "テンプレートなし"), Boolean(item.id));
+      }
+      assert.ok(container.querySelector('a[href="/admin/events/templates"]'));
+      assert.equal(container.querySelectorAll('a[href="/admin/events"]').length, 2);
+    }, "/admin/events/new" + item.query);
+  }
+});
+
+test("MIG-0721 U03b: query A-B-A, provider replacement and unmount retire reads without stale frames", async () => {
+  const pending = [];
+  const provider = name => (url, init) => new Promise(resolve => pending.push({ name, url, init, resolve }));
+  const first = provider("first"), second = provider("second");
+  let lastSignal, lastContainer;
+  await withEventNew({ ...eventNewPorts, fetchFn: first }, async ({ container, router, update, commits }) => {
+    assert.equal(pending.length, 1);
+    await React.act(async () => router.navigate("/admin/events/new?template=b"));
+    await React.act(async () => router.navigate("/admin/events/new?template=t1"));
+    assert.equal(pending.length, 3);
+    assert.ok(pending[0].init.signal.aborted && pending[1].init.signal.aborted);
+    await React.act(async () => pending[1].resolve(json(200, { ...eventNew, templateId: "b" })));
+    await React.act(async () => pending[0].resolve(json(200, eventNew)));
+    assert.equal(container.querySelector("form"), null);
+    assert.ok(commits.every(commit => !commit.hasForm));
+    await React.act(async () => pending[2].resolve(json(200, eventNew)));
+    assert.ok(container.querySelector("form"));
+    await update({ refreshKey: 1 });
+    const frameStart = commits.length;
+    await update({ fetchFn: second });
+    assert.ok(pending[3].init.signal.aborted);
+    assert.equal(container.querySelector("form"), null);
+    assert.ok(commits.slice(frameStart).every(commit => !commit.hasForm));
+    await React.act(async () => pending[4].resolve(json(200, { ...eventNew, userId: "second-owner", templateName: "Second provider" })));
+    await React.act(async () => pending[3].resolve(json(200, { ...eventNew, templateName: "Retired provider" })));
+    assert.match(container.textContent, /Second provider/);
+    assert.doesNotMatch(container.textContent, /Retired provider/);
+    await update({ refreshKey: 2 });
+    lastSignal = pending[5].init.signal;
+    lastContainer = container;
+  });
+  assert.ok(lastSignal.aborted);
+  assert.equal(lastContainer.querySelector("form"), null);
+});
+
+test("MIG-0721 U03b: same-owner refresh retains edits while server-user changes isolate and restore drafts", async () => {
+  let body = eventNew, status = 200;
+  const fetchFn = async () => json(status, body);
+  await withEventNew({ ...eventNewPorts, fetchFn }, async ({ dom, container, change, update }) => {
+    const original = container.querySelector("form");
+    await change("title", "Owner A before debounce");
+    body = { ...eventNew, templateSettingsJson: JSON.stringify({ explanation: "Refreshed settings" }) };
+    await update({ refreshKey: 1 });
+    assert.equal(container.querySelector("form"), original);
+    assert.equal(container.querySelector('[name="title"]').value, "Owner A before debounce");
+    status = 503;
+    await update({ refreshKey: 2 });
+    assert.equal(container.querySelector("form"), original);
+    assert.equal(container.querySelector('[name="title"]').value, "Owner A before debounce");
+    status = 200;
+    body = { ...eventNew, userId: "other-account" };
+    await update({ refreshKey: 3 });
+    assert.notEqual(container.querySelector("form"), original);
+    assert.equal(container.querySelector('[name="title"]').value, "");
+    assert.equal(JSON.parse(dom.window.localStorage.getItem(eventDraftKey("admin-account"))).value.title, "Owner A before debounce");
+    await change("title", "Owner B before debounce");
+    body = eventNew;
+    await update({ refreshKey: 4 });
+    assert.equal(container.querySelector('[name="title"]').value, "Owner A before debounce");
+    assert.equal(JSON.parse(dom.window.localStorage.getItem(eventDraftKey("other-account"))).value.title, "Owner B before debounce");
+  });
+});
+
+test("MIG-0721 U03b: initial failure has no form; explicit denial removes it and ignores retired success", async () => {
+  for (const status of [401, 403]) {
+    const pending = [];
+    const fetchFn = (url, init) => new Promise(resolve => pending.push({ init, resolve }));
+    await withEventNew({ ...eventNewPorts, fetchFn }, async ({ container, update, assigned }) => {
+      await React.act(async () => pending[0].resolve(json(503, {})));
+      assert.equal(container.querySelector("form"), null);
+      assert.match(container.querySelector('[role="alert"]').textContent, /取得できません/);
+      await update({ refreshKey: 1 });
+      await React.act(async () => pending[1].resolve(json(200, eventNew)));
+      assert.ok(container.querySelector("form"));
+      await update({ refreshKey: 2 });
+      await update({ refreshKey: 3 });
+      await React.act(async () => pending[3].resolve(json(status, { redirect: "/dashboard" })));
+      assert.equal(container.querySelector("form"), null);
+      assert.deepEqual(assigned, [status === 401 ? "/entry" : "/dashboard"]);
+      assert.ok(pending[2].init.signal.aborted);
+      await React.act(async () => pending[2].resolve(json(200, eventNew)));
+      assert.equal(container.querySelector("form"), null);
+      assert.equal(assigned.length, 1);
+    });
+  }
+});
+
+test("MIG-0721 U03b: picker cancel, confirm, hash and history preserve the existing Data Router draft contract", async () => {
+  const calls = [];
+  const fetchFn = async url => {
+    calls.push(url);
+    const id = new URL(url, "https://flamenode.test").searchParams.get("template") ?? "";
+    return json(200, { ...eventNew, templateId: id, templateName: id,
+      templates: ["t1", "b"].map(id => ({ ...templates.templates[0], id, name: "Template " + id })) });
+  };
+  await withEventNew({ ...eventNewPorts, fetchFn }, async ({ dom, container, router, change }) => {
+    const click = label => React.act(async () => {
+      const node = [...container.querySelectorAll("a,button"), ...dom.window.document.querySelectorAll('[role="alertdialog"] button')]
+        .find(node => node.textContent.trim() === label);
+      assert.ok(node, label); node.click();
+    });
+    const original = container.querySelector("form");
+    await change("title", "Template A edit");
+    await click("Template b");
+    assert.ok(dom.window.document.querySelector('[role="alertdialog"]'));
+    assert.equal(router.state.location.search, "?template=t1");
+    assert.equal(calls.length, 1);
+    await click("編集を続ける");
+    assert.equal(container.querySelector("form"), original);
+    await React.act(async () => container.querySelector('form nav a[href$="#section-publish"]').click());
+    assert.equal(router.state.location.hash, "#section-publish");
+    assert.equal(dom.window.document.querySelector('[role="alertdialog"]'), null);
+    assert.equal(container.querySelector("form"), original);
+    assert.equal(calls.length, 1);
+    await click("Template b");
+    await click("このページを離れる");
+    assert.equal(router.state.location.search, "?template=b");
+    assert.equal(container.querySelector('[name="title"]').value, "");
+    assert.equal(JSON.parse(dom.window.localStorage.getItem(eventDraftKey("admin-account"))).value.title, "Template A edit");
+    await change("title", "Template B edit");
+    await React.act(async () => router.navigate(-1));
+    await click("このページを離れる");
+    assert.equal(router.state.location.search, "?template=t1");
+    assert.equal(container.querySelector('[name="title"]').value, "Template A edit");
+    await React.act(async () => router.navigate(1));
+    await click("このページを離れる");
+    assert.equal(router.state.location.search, "?template=b");
+    assert.equal(container.querySelector('[name="title"]').value, "Template B edit");
+  });
+});
+
+test("MIG-0721 U03b: one injected create call retains a failed draft and success clears it before navigation", async () => {
+  const writes = [], destinations = [];
+  let navigate;
+  const ports = { ...eventNewPorts,
+    createEvent: data => new Promise(resolve => writes.push({ data, resolve })),
+    router: { push: href => { destinations.push(href); void navigate(href); }, refresh() { assert.fail("create with eventId must push"); } },
+  };
+  await withEventNew({ ...ports, fetchFn: async () => json(200, eventNew) }, async ({ dom, container, router, change }) => {
+    navigate = href => router.navigate(href);
+    await change("id", "new-event");
+    await change("title", "New event title");
+    await React.act(async () => dom.window.dispatchEvent(new dom.window.Event("pagehide")));
+    const key = eventDraftKey("admin-account");
+    assert.ok(dom.window.localStorage.getItem(key));
+    const submit = () => container.querySelector("form").dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+    await React.act(async () => { submit(); submit(); });
+    assert.equal(writes.length, 1);
+    assert.equal(writes[0].data.get("template_id"), "t1");
+    assert.equal(writes[0].data.get("title"), "New event title");
+    await React.act(async () => writes[0].resolve({ ok: false, message: "CURRENT rejection" }));
+    assert.match(container.textContent, /CURRENT rejection/);
+    assert.equal(container.querySelector('[name="title"]').value, "New event title");
+    assert.ok(dom.window.localStorage.getItem(key));
+    await React.act(async () => submit());
+    assert.equal(writes.length, 2);
+    await React.act(async () => writes[1].resolve({ ok: true, eventId: "created /日本" }));
+    assert.deepEqual(destinations, ["/manage/events/created%20%2F%E6%97%A5%E6%9C%AC/edit"]);
+    assert.equal(container.querySelector("form"), null);
+    assert.equal(dom.window.document.querySelector('[role="alertdialog"]'), null);
+    await React.act(async () => dom.window.dispatchEvent(new dom.window.Event("pagehide")));
+    assert.equal(dom.window.localStorage.getItem(key), null);
+  });
+});
 
 test("MIG-0728 U02: event query normalizes CURRENT sort/filter and trims q", () => {
   assert.equal(eventIndexQuery(new URLSearchParams("sort=x&filter=y&q=%20foo%20")),
@@ -145,6 +441,237 @@ test("MIG-0728 U02: template read rejects malformed and guard-denied payloads ar
   assert.deepEqual(await readAdminEventTemplates(async () => json(200, { guardOk: false, templates: [] })),
     { status: "ok", data: { guardOk: false, templates: [] } });
   assert.deepEqual(await readAdminEventTemplates(async () => json(401, {})), { status: "anonymous" });
+});
+
+test("MIG-0721 U03c: streamed admin-read template DTOs remain readable by the Ops client", async () => {
+  const largeTemplates = {
+    guardOk: true,
+    templates: Array.from({ length: 100 }, (_, index) => ({
+      id: "stream-" + String(index + 1).padStart(3, "0"),
+      name: "あ".repeat(120),
+      description: "い".repeat(500),
+      source_event_id: null,
+      updated_at: 4102444800 - index,
+    })),
+  };
+  const largeNew = {
+    ...eventNew,
+    templateName: "テンプレート🚀",
+    templates: largeTemplates.templates,
+  };
+  assert.ok(Buffer.byteLength(JSON.stringify(largeTemplates)) > 64 * 1024);
+  assert.ok(Buffer.byteLength(JSON.stringify(largeNew)) > 64 * 1024);
+
+  const streamedResponse = value => {
+    const bytes = new TextEncoder().encode(JSON.stringify(value));
+    const needle = new TextEncoder().encode("あ");
+    let split = -1;
+    for (let index = 0; index <= bytes.length - needle.length; index += 1) {
+      if (bytes[index] === needle[0] && bytes[index + 1] === needle[1] &&
+          bytes[index + 2] === needle[2]) {
+        split = index;
+        break;
+      }
+    }
+    assert.notEqual(split, -1, "fixture contains a three-byte UTF-8 character");
+    // Force the decoder to receive the first Japanese character across three
+    // separate chunks, then keep the rest of the large response streamed.
+    const ends = [split + 1, split + 2];
+    for (let offset = split + 3 + 8192; offset < bytes.length; offset += 8192) ends.push(offset);
+    ends.push(bytes.length);
+    let start = 0;
+    const chunks = ends.map(end => {
+      const chunk = bytes.slice(start, end);
+      start = end;
+      return chunk;
+    });
+    let next = 0;
+    const response = new Response(new ReadableStream({
+      pull(controller) {
+        if (next >= chunks.length) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(chunks[next++]);
+      },
+    }), {
+      status: 200,
+      headers: {
+        "content-type": "application/json; charset=UTF-8",
+        "cache-control": "private, no-store",
+      },
+    });
+    assert.equal(response.headers.get("content-length"), null);
+    return { response, chunkCount: chunks.length };
+  };
+
+  const listWire = streamedResponse(largeTemplates);
+  const listResult = await readAdminEventTemplates(async (path, init) => {
+    assert.equal(path, "/api/admin-read/events/templates");
+    assert.equal(init.cache, "no-store");
+    assert.equal(init.credentials, "same-origin");
+    return listWire.response;
+  });
+  assert.ok(listWire.chunkCount > 1);
+  assert.equal(listWire.response.bodyUsed, true);
+  assert.deepEqual(listResult, { status: "ok", data: largeTemplates });
+
+  const newWire = streamedResponse(largeNew);
+  const newResult = await readAdminEventNew("t1", async (path, init) => {
+    assert.equal(path, "/api/admin-read/events/new?template=t1");
+    assert.equal(init.cache, "no-store");
+    assert.equal(init.credentials, "same-origin");
+    return newWire.response;
+  });
+  const expected = await readAdminEventNew("t1", async () => json(200, largeNew));
+  assert.ok(newWire.chunkCount > 1);
+  assert.equal(newWire.response.bodyUsed, true);
+  assert.deepEqual(newResult, expected);
+  assert.equal(newResult.status, "ok");
+  assert.equal(newResult.data.templates.length, 100);
+  assert.equal(newResult.data.formProps.draftAuthUserId, "admin-account");
+  assert.equal(newResult.data.formProps.initial.explanation, "Template information");
+});
+
+test("MIG-0721 U03d: interrupted streamed admin reads never expose partial DTOs or forms", async () => {
+  const interrupted = () => new Response(new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode('{"guardOk":true,"templates":[{"id":"partial-template"'));
+      controller.error(new Error("synthetic response stream interruption"));
+    },
+  }), {
+    status: 200,
+    headers: {
+      "content-type": "application/json; charset=UTF-8",
+      "cache-control": "private, no-store",
+    },
+  });
+
+  const listResponse = interrupted();
+  assert.deepEqual(await readAdminEventTemplates(async (path, init) => {
+    assert.equal(path, "/api/admin-read/events/templates");
+    assert.equal(init.cache, "no-store");
+    assert.equal(init.credentials, "same-origin");
+    return listResponse;
+  }), { status: "unavailable" });
+  assert.equal(listResponse.bodyUsed, true);
+
+  const selectedResponse = interrupted();
+  assert.deepEqual(await readAdminEventNew("t1", async (path, init) => {
+    assert.equal(path, "/api/admin-read/events/new?template=t1");
+    assert.equal(init.cache, "no-store");
+    assert.equal(init.credentials, "same-origin");
+    return selectedResponse;
+  }), { status: "unavailable" });
+  assert.equal(selectedResponse.bodyUsed, true);
+
+  await withEventNew({ ...eventNewPorts, fetchFn: async () => interrupted() }, async ({ container }) => {
+    assert.ok(container.querySelector('[role="alert"]'));
+    assert.match(container.querySelector('[role="alert"]').textContent, /取得できません/);
+    assert.equal(container.querySelector("form"), null);
+    assert.equal(container.querySelector('[name="title"]'), null);
+    assert.equal(container.textContent.includes("partial-template"), false);
+  });
+});
+
+test("MIG-0721 U03a: new-event read encodes selection and preserves CURRENT template defaults and owner", async () => {
+  const body = { ...eventNew, templateId: "pick &/?#日" };
+  const controller = new AbortController();
+  const seen = [];
+  const result = await readAdminEventNew(" \tpick &/?#日\n", async (path, init) => {
+    seen.push([path, init]);
+    return json(200, body);
+  }, controller.signal);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0][0], "/api/admin-read/events/new?template=pick+%26%2F%3F%23%E6%97%A5");
+  assert.equal(seen[0][1].method, "GET");
+  assert.equal(seen[0][1].credentials, "same-origin");
+  assert.equal(seen[0][1].cache, "no-store");
+  assert.equal(seen[0][1].headers.accept, "application/json");
+  assert.equal(seen[0][1].signal, controller.signal);
+  assert.equal(result.status, "ok");
+  const { formProps, ...dto } = result.data;
+  assert.deepEqual(dto, body, "retain the validated read DTO, including the deferred marker");
+  assert.equal(formProps.templateId, body.templateId);
+  assert.equal(formProps.draftAuthUserId, "admin-account");
+  assert.equal(formProps.initial.event_type, "collabo");
+  assert.equal(formProps.initial.explanation, "Template information");
+  assert.equal(formProps.initial.youtube_description_template, "First\nSecond");
+  assert.equal(formProps.initial.user_video_edit_permission_keys_json, '["title"]');
+  assert.equal(formProps.initial.slot_visibility_mode, "anonymous");
+  assert.equal(formProps.initial.visibility_status, "private");
+  for (const key of ["start_time", "end_time", "entry_start_time", "entry_end_time"]) {
+    assert.equal(formProps.initial[key], null);
+  }
+  assert.deepEqual(formProps.initial.custom_questions, [{
+    clientId: "q_template", question_key: "q_template", label: "Choice", description: "",
+    type: "select", required: true, options: ["A", "B"], placeholder: "", enabled: true,
+  }], "the canonical helper filters stage-permission questions and normalizes choices");
+});
+
+test("MIG-0721 U03a: missing, unknown and invalid snapshots retain selection metadata without initial values", async () => {
+  const cases = [
+    [null, "", null, null],
+    [" \t ", "", null, null],
+    [" missing ", "missing", null, null],
+    ["t1", "t1", "Unavailable settings", null],
+    ["t1", "t1", "Malformed settings", "{"],
+    ["t1", "t1", "Invalid snapshot", '{"event_type":"unknown","slot_type":"time"}'],
+  ];
+  for (const [selection, templateId, templateName, templateSettingsJson] of cases) {
+    const body = { ...eventNew, templateId, templateName, templateSettingsJson };
+    const result = await readAdminEventNew(selection, async (path) => {
+      assert.equal(path, "/api/admin-read/events/new" + (templateId ? "?template=" + templateId : ""));
+      return json(200, body);
+    });
+    assert.deepEqual(result, { status: "ok", data: {
+      ...body, formProps: {
+        initial: undefined, templateId: templateId || undefined, draftAuthUserId: "admin-account",
+      },
+    } });
+  }
+});
+
+test("MIG-0721 U03a: guard-denied template lists keep selected settings and server draft ownership", async () => {
+  const body = { ...eventNew, guardOk: false, templates: [], userId: "other-admin" };
+  const result = await readAdminEventNew("t1", async () => json(200, body));
+  assert.equal(result.status, "ok", "the list guard is not an HTTP authorization failure");
+  const { formProps, ...dto } = result.data;
+  assert.deepEqual(dto, body);
+  assert.equal(formProps.templateId, "t1");
+  assert.equal(formProps.draftAuthUserId, "other-admin");
+  assert.equal(formProps.initial.event_type, "collabo");
+  assert.equal(formProps.initial.visibility_status, "private");
+});
+
+test("MIG-0721 U03a: HTTP denial, malformed DTOs and aborted reads never yield form props", async () => {
+  let unauthorizedBodyReads = 0;
+  const unauthorized = json(401, eventNew);
+  unauthorized.json = async () => { unauthorizedBodyReads += 1; return eventNew; };
+  assert.deepEqual(await readAdminEventNew("t1", async () => unauthorized), { status: "anonymous" });
+  assert.equal(unauthorizedBodyReads, 0);
+  for (const [response, expected] of [
+    [json(403, { ...eventNew, redirect: "/dashboard", reason: "admin_required" }),
+      { status: "forbidden", redirect: "/dashboard", reason: "admin_required" }],
+    [json(403, { ...eventNew, redirect: "https://example.test" }), { status: "forbidden" }],
+    [new Response("{", { status: 403 }), { status: "forbidden" }],
+    [json(404, eventNew), { status: "notFound" }],
+    [json(501, eventNew), { status: "unsupported" }],
+    [json(503, eventNew), { status: "unavailable" }],
+    [new Response("{", { status: 200 }), { status: "unavailable" }],
+    [json(200, { ...eventNew, userId: null }), { status: "unavailable" }],
+    [json(200, { ...eventNew, formInitial: {} }), { status: "unavailable" }],
+    [json(200, { ...eventNew, templateSettingsJson: {} }), { status: "unavailable" }],
+  ]) {
+    assert.deepEqual(await readAdminEventNew("t1", async () => response), expected);
+  }
+  assert.deepEqual(await readAdminEventNew("t1", async () => { throw new Error("offline"); }),
+    { status: "unavailable" });
+  const controller = new AbortController();
+  const late = json(200, eventNew);
+  late.json = async () => { controller.abort(); return eventNew; };
+  assert.deepEqual(await readAdminEventNew("t1", async () => late, controller.signal),
+    { status: "unavailable" }, "an abort during JSON decoding cannot expose a completed form model");
 });
 
 test("MIG-0728 U02: delete enforces HTTP authentication, encoded ID, and strict success", async () => {
@@ -708,4 +1235,463 @@ test("MIG-0728 U03: OpsRoutes mounts all 5 routes behind OpsGate and blocks non-
   } finally {
     globalThis.fetch = origFetch;
   }
+});
+
+
+// MIG-0721 U02a/U02b: preserve the response-bound authenticated draft owner.
+// Read boundary only; no mounted form or inference from Active X.
+const editFixture = (id = "event-1") => ({
+  draftAuthUserId: "auth-a",
+  isAdmin: false, pendingCount: 0, activeXUserId: null,
+  manageStaffXUserIds: ["staff-x"],
+  editableSections: { basic: true, publish: false, questions: true, slots: false },
+  initial: {
+    id, updated_at: 0, title: "Editable event", event_type: "event",
+    explanation: null, youtube_description_template: "",
+    required_video_fields_json: null, icon_url: null, img_url: null, accent_color: null,
+    start_time: 0, end_time: null, entry_start_time: null, entry_end_time: 0,
+    visibility_status: "private", allow_user_video_event_links: 0,
+    allow_unslotted_posts: null, allow_user_video_edits: 1,
+    user_video_edit_permission_keys_json: '["title"]',
+    video_form_settings_json: '{"stage_permissions":[{"id":"stage_permission_1","enabled":true,"required":false,"label":"Stage","description":"","placeholder":""}]}',
+    custom_questions: [{
+      clientId: "q-1", question_key: "q_select", label: "Choice", description: "",
+      type: "select", required: false, options: ["A", "B"], placeholder: "", enabled: true,
+    }],
+    max_slots_per_video: 0, max_slot_reservation_groups_per_xid: null,
+    slot_interval_minutes: 15, slot_part_gap_minutes: 0, slot_type: "time",
+    slot_visibility_mode: "anonymous", parts_json: null, editable_fields: null,
+    review_settings: null,
+  },
+});
+
+test("MIG-0721 U02a: edit GET preserves the canonical DTO and opaque requested event ID", async () => {
+  for (const id of ["event-1", " space /?#% 日 ", "%2e%2e"]) {
+    const dto = editFixture(id);
+    if (id !== "event-1") {
+      dto.activeXUserId = "active-x";
+      dto.pendingCount = 4;
+      dto.isAdmin = true;
+    }
+    const calls = [];
+    const signal = new AbortController().signal;
+    const result = await readManageEventEdit(id, async (path, init) => {
+      calls.push({ path, init });
+      return json(200, dto);
+    }, signal);
+    assert.deepEqual(result, { status: "ok", data: dto });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].path, "/api/manage/events/" + encodeURIComponent(id) + "/edit");
+    assert.equal(new URL(calls[0].path, "https://example.test").pathname, calls[0].path);
+    assert.deepEqual(calls[0].init, {
+      method: "GET", credentials: "same-origin", cache: "no-store",
+      headers: { accept: "application/json" }, signal,
+    });
+    assert.equal(result.data.draftAuthUserId, dto.draftAuthUserId);
+    assert.equal(Object.hasOwn(result.data, "userId"), false);
+  }
+});
+
+test("MIG-0721 U02a: malformed IDs and dot segments never initiate a GET", async () => {
+  let requests = 0;
+  const unexpected = async () => { requests++; throw new Error("unexpected fetch"); };
+  for (const id of ["", ".", "..", "a\0b", "\ud800", "\udc00"]) {
+    assert.deepEqual(await readManageEventEdit(id, unexpected), { status: "unavailable" });
+  }
+  assert.equal(requests, 0);
+});
+
+test("MIG-0721 U02a: wrong event, invalid schema, JSON and HTTP status fail safely", async () => {
+  const valid = editFixture();
+  for (const invalid of [
+    editFixture("another-event"), null, [],
+    { ...valid, editableSections: { ...valid.editableSections, basic: "true" } },
+    { ...valid, initial: { ...valid.initial, updated_at: null } },
+    { ...valid, initial: { ...valid.initial, custom_questions: [{ ...valid.initial.custom_questions[0], type: "unknown" }] } },
+  ]) {
+    assert.deepEqual(await readManageEventEdit("event-1", async () => json(200, invalid)),
+      { status: "unavailable" });
+  }
+  for (const [status, expected] of [
+    [401, "anonymous"], [403, "forbidden"], [404, "notFound"],
+    [501, "unsupported"], [503, "unavailable"],
+  ]) {
+    assert.deepEqual(await readManageEventEdit("event-1", async () => json(status, valid)),
+      { status: expected });
+    assert.deepEqual(await readManageEventEdit("event-1", async () => new Response("{", { status })),
+      { status: expected });
+  }
+  assert.deepEqual(await readManageEventEdit("event-1", async () => json(403, {
+    redirect: "/entry", reason: "terms_required",
+  })), { status: "forbidden", redirect: "/entry", reason: "terms_required" });
+  assert.deepEqual(await readManageEventEdit("event-1", async () => json(403, {
+    redirect: "https://other.example/private",
+  })), { status: "forbidden" });
+  assert.deepEqual(await readManageEventEdit("event-1", async () => new Response("{", { status: 200 })),
+    { status: "unavailable" });
+  assert.deepEqual(await readManageEventEdit("event-1", async () => { throw new Error("network"); }),
+    { status: "unavailable" });
+});
+
+test("MIG-0721 U02a: abort retires a delayed successful edit response", async () => {
+  const controller = new AbortController();
+  let resolveResponse;
+  let observedSignal;
+  const pending = readManageEventEdit("event-1", (_path, init) => {
+    observedSignal = init.signal;
+    return new Promise(resolve => { resolveResponse = resolve; });
+  }, controller.signal);
+  assert.equal(observedSignal, controller.signal);
+  controller.abort();
+  resolveResponse(json(200, editFixture()));
+  assert.deepEqual(await pending, { status: "unavailable" });
+});
+
+
+test("MIG-0721 U02b: edit read validates opaque draft owner and never substitutes Active X", async () => {
+  const dto = editFixture();
+  const { draftAuthUserId: _owner, ...missingOwner } = dto;
+  for (const invalid of [
+    missingOwner, { ...dto, draftAuthUserId: "" }, { ...dto, draftAuthUserId: null },
+    { ...dto, draftAuthUserId: 123 }, { ...missingOwner, userId: "auth-a", activeXUserId: "auth-a" },
+  ]) {
+    assert.deepEqual(await readManageEventEdit("event-1", async () => json(200, invalid)),
+      { status: "unavailable" });
+  }
+  for (const owner of ["auth-a", "auth-b", "auth-a", "opaque/日本語"]) {
+    const expected = { ...dto, draftAuthUserId: owner };
+    assert.equal(expected.activeXUserId, null);
+    const r = await readManageEventEdit("event-1", async () => json(200, expected));
+    assert.deepEqual(r, { status: "ok", data: expected });
+  }
+});
+
+// U02c uses injected verified-host grants. This is a mounted JSDOM consumer,
+// not evidence that the actual protected host observes account transitions.
+const editAuthority = (authUserId, generation) => ({ authUserId, generation });
+const editDraftKey = authUserId => buildFormDraftStorageKey({
+  authUserId, formId: "event-edit-event-1", schemaVersion: "event-form-v3",
+});
+const editReadFixture = (owner, title, editableSections = editFixture().editableSections) => ({
+  ...editFixture(), draftAuthUserId: owner, editableSections,
+  initial: { ...editFixture().initial, title },
+});
+
+async function withEventEdit(props, run) {
+  let router;
+  try {
+    return await withDom("https://flamenode.test/manage/events/event-1/edit", async view => {
+      const { dom, container, root } = view;
+      let updateProps;
+      const commits = [];
+      function Host() {
+        const [current, update] = React.useState(props);
+        updateProps = update;
+        return React.createElement(React.Profiler, { id: "event-edit", onRender() {
+          commits.push({ generation: current.authority?.generation ?? null,
+            title: container.querySelector('[name="title"]')?.value ?? null,
+            hasForm: Boolean(container.querySelector("form")) });
+        } }, React.createElement(EventEdit, current));
+      }
+      router = createMemoryRouter([
+        { path: "/manage/events/:id/edit", element: React.createElement(Host) },
+      ], { initialEntries: ["/manage/events/event-1/edit"] });
+      await React.act(async () => root.render(React.createElement(RouterProvider, { router })));
+      const change = (name, value) => React.act(async () => {
+        const input = container.querySelector('[name="' + name + '"]');
+        assert.ok(input, name);
+        Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), "value").set.call(input, value);
+        input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+      });
+      await run({ ...view, router, commits, change,
+        update: next => React.act(async () => updateProps(previous => ({ ...previous, ...next }))) });
+    });
+  } finally {
+    router?.dispose();
+  }
+}
+
+test("MIG-0721 U02c: committed null-X A-B-A retires old reads and submit receipts; isolates and restores only the current draft", async () => {
+  const pending = [], writes = [], navigation = [];
+  const fetchFn = (path, init) => new Promise(resolve => pending.push({ path, init, resolve }));
+  const ports = { createEvent: async () => assert.fail("edit must not create"),
+    updateEvent: data => new Promise(resolve => writes.push({ data, resolve })),
+    router: { push: href => navigation.push(href), refresh: () => navigation.push("refresh") } };
+  await withEventEdit({ ...ports, fetchFn, authority: null }, async ({ dom, container, commits, change, update }) => {
+    const title = () => container.querySelector('[name="title"]')?.value ?? null;
+    const finish = (index, body) => React.act(async () => pending[index].resolve(json(200, body)));
+    assert.equal(pending.length, 0);
+    await update({ authority: editAuthority("auth-a", "a1") });
+    assert.equal(pending.length, 1);
+    assert.equal(title(), null);
+    await finish(0, editReadFixture("auth-a", "Server A"));
+    assert.equal(title(), "Server A");
+    assert.equal(container.querySelector('[name="revision"]').value, "0");
+    assert.ok(container.querySelector('a[href="/manage/events/event-1/slots"]'));
+    assert.equal(container.querySelector('[name="title"]').readOnly, false);
+    await update({ authority: editAuthority("auth-a", "a1") });
+    assert.equal(pending.length, 1, "same verified generation is not a new read");
+    await change("title", "Private A draft");
+    await React.act(async () => dom.window.dispatchEvent(new dom.window.Event("pagehide")));
+    assert.equal(JSON.parse(dom.window.localStorage.getItem(editDraftKey("auth-a"))).value.title, "Private A draft");
+    const submit = () => container.querySelector("form").dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+    await React.act(async () => { submit(); submit(); });
+    assert.equal(writes.length, 1);
+    assert.equal(writes[0].data.get("revision"), "0");
+
+    const switchFrame = commits.length;
+    await update({ authority: editAuthority("auth-b", "b1") });
+    assert.equal(pending.length, 2);
+    assert.equal(title(), null);
+    assert.ok(commits.slice(switchFrame).every(frame => !frame.hasForm));
+    // A response for the wrong Auth user may not select or restore that draft.
+    await finish(1, editReadFixture("auth-a", "Mismatched old A"));
+    assert.equal(title(), null);
+    assert.doesNotMatch(container.textContent, /Mismatched old A|Private A draft/);
+    const retry = [...container.querySelectorAll("button")].find(b => b.textContent.trim() === "イベント設定を再取得");
+    assert.ok(retry);
+    await React.act(async () => retry.click());
+    assert.equal(pending.length, 3);
+    await finish(2, editReadFixture("auth-b", "Server B"));
+    assert.equal(title(), "Server B");
+    await change("title", "Private B draft");
+    await React.act(async () => dom.window.dispatchEvent(new dom.window.Event("pagehide")));
+    assert.equal(JSON.parse(dom.window.localStorage.getItem(editDraftKey("auth-b"))).value.title, "Private B draft");
+    await update({ refreshKey: 1 });
+    assert.equal(title(), null);
+    assert.equal(pending.length, 4);
+    await update({ authority: editAuthority("auth-a", "a2") });
+    assert.equal(pending.length, 5);
+    assert.ok(pending[3].init.signal.aborted);
+    await finish(3, editReadFixture("auth-b", "Retired B"));
+    assert.equal(title(), null);
+    await finish(4, editReadFixture("auth-a", "Fresh server A"));
+    assert.equal(title(), "Private A draft");
+    await React.act(async () => writes[0].resolve({ ok: true, pendingPublicReflection: true }));
+    assert.deepEqual(navigation, [], "retired write receipt cannot refresh the current visit");
+    assert.equal(title(), "Private A draft");
+    assert.ok(dom.window.localStorage.getItem(editDraftKey("auth-a")));
+    assert.doesNotMatch(container.textContent, /Retired B|Private B draft|保存しました/);
+    assert.ok(pending.every(p => p.path === "/api/manage/events/event-1/edit" &&
+      p.init.method === "GET" && p.init.cache === "no-store"));
+    await update({ authority: null });
+    assert.equal(title(), null);
+    assert.equal(pending.length, 5);
+  });
+});
+
+test("MIG-0721 U02c: current grant requires fresh valid owner/resource/section receipt; slot-only permission and denial controls", async () => {
+  const pending = [];
+  const fetchFn = (path, init) => new Promise(resolve => pending.push({ path, init, resolve }));
+  const onlySlots = { basic: false, publish: false, questions: false, slots: true };
+  const valid = editReadFixture("auth-a", "Only slots", onlySlots);
+  await withEventEdit({ ...eventNewPorts, authority: editAuthority("auth-a", "g1"), fetchFn },
+    async ({ container, commits, update }) => {
+      const form = () => container.querySelector("form");
+      const resolve = response => React.act(async () => pending.at(-1).resolve(response));
+      await resolve(json(200, valid));
+      assert.ok(form());
+      assert.equal(form().querySelector('[name="title"]').readOnly, true);
+      assert.equal(form().querySelector("#section-slots [role=status]"), null);
+      for (const section of ["basic", "publish", "questions"]) {
+        assert.match(form().querySelector("#section-" + section).textContent, /変更権限がありません/);
+      }
+      let revision = 0;
+      for (const response of [
+        json(401, {}), json(403, { redirect: "/dashboard" }), json(404, {}),
+        json(503, {}), new Response("{", { status: 200 }),
+        json(200, { ...valid, draftAuthUserId: "auth-b" }),
+        json(200, { ...valid, initial: { ...valid.initial, id: "other" } }),
+        json(200, { ...valid, editableSections: { ...onlySlots, slots: false } }),
+      ]) {
+        const start = commits.length;
+        await update({ refreshKey: ++revision });
+        assert.equal(form(), null, "explicit refresh removes prior private controls");
+        assert.ok(commits.slice(start).every(frame => !frame.hasForm));
+        await resolve(response);
+        assert.equal(form(), null);
+        assert.doesNotMatch(container.textContent, /Only slots/);
+        await update({ refreshKey: ++revision });
+        await resolve(json(200, valid));
+        assert.ok(form());
+      }
+      const count = pending.length;
+      await update({ authority: editAuthority(" auth-a ", "g2") });
+      assert.equal(form(), null, "must not trim an opaque authenticated owner into another draft bucket");
+      assert.equal(pending.length, count);
+    });
+});
+
+
+test("MIG-0721 U02d: rename form preserves CURRENT confirmation, FormData, error and replace/refresh", async () => {
+  let nextResult = { ok: false, message: "rename rejected" };
+  const submitted = [];
+  const replacements = [];
+  const refreshes = [];
+  await withDom("https://flamenode.test/manage/events/event-1/edit", async ({ dom, container, root }) => {
+    await React.act(async () => root.render(React.createElement(RenameEventIdForm, {
+      eventId: "event-1",
+      renameEvent: async formData => { submitted.push(formData); return nextResult; },
+      onReplace: href => replacements.push(href),
+      onRefresh: () => refreshes.push("refresh"),
+    })));
+    const setValue = (input, value) => {
+      Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), "value").set.call(input, value);
+      input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    };
+    const form = container.querySelector("form");
+    const newId = container.querySelector("#admin-new-event-id");
+    const confirm = container.querySelector("#admin-event-id-confirm");
+    const button = form.querySelector('button[type="submit"]');
+    assert.ok(form && newId && confirm && button);
+    assert.equal(button.disabled, true);
+    await React.act(async () => {
+      setValue(newId, "new-event");
+      setValue(confirm, "event-2");
+    });
+    assert.equal(button.disabled, true, "confirmation must exactly match the old ID");
+    await React.act(async () => setValue(confirm, "event-1"));
+    assert.equal(button.disabled, false);
+    await React.act(async () => {
+      form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+      await Promise.resolve();
+    });
+    assert.equal(submitted.length, 1);
+    assert.deepEqual([...submitted[0].entries()], [
+      ["old_event_id", "event-1"], ["new_event_id", "new-event"], ["confirm", "event-1"],
+    ]);
+    assert.match(container.querySelector('[role="alert"]').textContent, /rename rejected/);
+    assert.deepEqual(replacements, []);
+    nextResult = { ok: true, eventId: "renamed/id" };
+    await React.act(async () => {
+      form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+      await Promise.resolve();
+    });
+    assert.deepEqual(replacements, ["/manage/events/renamed%2Fid/edit"]);
+    assert.deepEqual(refreshes, ["refresh"]);
+    assert.equal(submitted.length, 2);
+  });
+});
+
+test("MIG-0721 U02d: delete form rejects a nonmatching confirmation and navigates only after success", async () => {
+  let nextResult = { ok: false, message: "delete rejected" };
+  const submitted = [];
+  const navigations = [];
+  await withDom("https://flamenode.test/manage/events/event-1/edit", async ({ dom, container, root }) => {
+    await React.act(async () => root.render(React.createElement(DeleteEventForm, {
+      eventId: "event-1",
+      redirectHref: "/manage",
+      deleteEvent: async formData => { submitted.push(formData); return nextResult; },
+      onNavigate: href => navigations.push(href),
+    })));
+    const setValue = (input, value) => {
+      Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), "value").set.call(input, value);
+      input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    };
+    const form = container.querySelector("form");
+    const input = form.querySelector("input");
+    const button = form.querySelector('button[type="submit"]');
+    assert.ok(form && input && button);
+    assert.equal(button.disabled, true);
+    await React.act(async () => setValue(input, "event-2"));
+    assert.equal(button.disabled, true);
+    await React.act(async () => {
+      form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+    });
+    assert.equal(submitted.length, 0, "a programmatic submit must still fail closed");
+    assert.match(container.querySelector('[role="alert"]').textContent, /完全一致/);
+    await React.act(async () => setValue(input, "event-1"));
+    assert.equal(button.disabled, false);
+    await React.act(async () => {
+      form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+      await Promise.resolve();
+    });
+    assert.equal(submitted.length, 1);
+    assert.deepEqual([...submitted[0].entries()], [
+      ["event_id", "event-1"], ["confirm", "event-1"],
+    ]);
+    assert.match(container.querySelector('[role="alert"]').textContent, /delete rejected/);
+    assert.deepEqual(navigations, []);
+    nextResult = { ok: true };
+    await React.act(async () => {
+      form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+      await Promise.resolve();
+    });
+    assert.deepEqual(navigations, ["/manage"]);
+    assert.equal(submitted.length, 2);
+  });
+});
+
+test("MIG-0721 U02d: EventEdit exposes danger forms only for admin with both explicit mutation ports", async () => {
+  async function mount({ isAdmin, withPorts }) {
+    const pending = [];
+    const fetchFn = (path, init) => new Promise(resolve => pending.push({ path, init, resolve }));
+    await withEventEdit({
+      ...eventNewPorts,
+      authority: editAuthority("auth-a", "u02d"),
+      fetchFn,
+      ...(withPorts ? {
+        renameEvent: async () => ({ ok: false }),
+        deleteEvent: async () => ({ ok: false }),
+      } : {}),
+    }, async ({ container }) => {
+      assert.equal(pending.length, 1);
+      await React.act(async () => pending[0].resolve(json(200, {
+        ...editReadFixture("auth-a", "Admin event"),
+        isAdmin,
+      })));
+      const danger = container.querySelector(".fn-console-panel--danger");
+      if (isAdmin && withPorts) {
+        assert.ok(danger);
+        assert.ok(container.querySelector('input[name="new_event_id"]'));
+        assert.match(danger.textContent, /イベントを非公開にする/);
+      } else {
+        assert.equal(danger, null, "never render inert or non-admin danger controls");
+      }
+    });
+  }
+  await mount({ isAdmin: true, withPorts: false });
+  await mount({ isAdmin: false, withPorts: true });
+  await mount({ isAdmin: true, withPorts: true });
+});
+
+
+test("MIG-0721 U02e: EventEdit uses CURRENT ManageEventPageShell identity, navigation, pending and accent props", async () => {
+  const current = {
+    ...editReadFixture("auth-a", "Shell parity event"),
+    pendingCount: 4,
+    activeXUserId: "active-x",
+    manageStaffXUserIds: ["staff-x"],
+    initial: { ...editReadFixture("auth-a", "Shell parity event").initial, accent_color: "#1a2b3c" },
+  };
+  await withEventEdit({
+    ...eventNewPorts,
+    authority: editAuthority("auth-a", "u02e"),
+    fetchFn: async () => json(200, current),
+  }, async ({ container }) => {
+    const shell = container.querySelector(".manage-event-page-shell");
+    assert.ok(shell, "the existing shared ManageEventPageShell must wrap EventEdit");
+    assert.equal(shell.style.getPropertyValue("--manage-event-accent"), "#1a2b3c");
+    assert.equal(shell.querySelector("h1")?.textContent, "Shell parity event");
+    const back = [...shell.querySelectorAll("a")].find(a => a.textContent.includes("イベント概要へ"));
+    assert.equal(back?.getAttribute("href"), "/manage/events/event-1");
+    const activeTab = shell.querySelector('.fn-console-event-tabs a[aria-current="page"]');
+    assert.match(activeTab?.textContent ?? "", /設定/);
+    assert.equal(shell.querySelector(".fn-console-event-tab-count")?.textContent, "4");
+    const notice = shell.querySelector(".manage-active-x-notice");
+    assert.ok(notice, "non-admin Active X mismatch remains a notice");
+    assert.match(notice.textContent, /@active-x/);
+    const slots = shell.querySelector('.manage-slot-quicklink a[href="/manage/events/event-1/slots"]');
+    assert.match(slots?.textContent ?? "", /枠設定を開く/);
+  });
+
+  await withEventEdit({
+    ...eventNewPorts,
+    authority: editAuthority("auth-a", "u02e-admin"),
+    fetchFn: async () => json(200, { ...current, isAdmin: true }),
+  }, async ({ container }) => {
+    assert.ok(container.querySelector(".manage-event-page-shell"));
+    assert.equal(container.querySelector(".manage-active-x-notice"), null,
+      "CURRENT hides the Active X mismatch notice for admins");
+  });
 });

@@ -1,0 +1,353 @@
+/** MIG-0721 U01b-2: CURRENT EventSettingsPreview UI source-parity port.
+ * Unmounted, no routes or mutations enabled. Only imports are rewritten.
+ */
+import * as React from "react";
+import {
+  parseVideoFormSettings,
+  resolveStagePermissionFields,
+} from "../../lib/event/formSettings.js";
+import { formatRequiredVideoFieldSummary } from "@flamenode/domain/video";
+import { buildAccentVars } from "../../lib/event/accent.js";
+import {
+  GENERAL_CUSTOM_QUESTION_TYPE_LABELS,
+  type EventGeneralCustomQuestionDraft,
+} from "../../lib/event/generalCustomQuestionDraft.js";
+
+export interface EventSettingsPreviewValue {
+  title?: string | null;
+  event_type?: string | null;
+  explanation?: string | null;
+  icon_url?: string | null;
+  img_url?: string | null;
+  accent_color?: string | null;
+  start_time?: number | string | null;
+  end_time?: number | string | null;
+  entry_start_time?: number | string | null;
+  entry_end_time?: number | string | null;
+  visibility_status?: string | null;
+  allow_user_video_event_links?: number | string | null;
+  allow_unslotted_posts?: number | string | null;
+  allow_user_video_edits?: number | string | null;
+  user_video_edit_permission_keys_json?: string | null;
+  video_form_settings_json?: string | null;
+  max_slots_per_video?: number | string | null;
+  max_slot_reservation_groups_per_xid?: number | string | null;
+  slot_interval_minutes?: number | string | null;
+  slot_type?: string | null;
+  slot_visibility_mode?: string | null;
+  slot_part_gap_minutes?: number | string | null;
+  parts_json?: string | null;
+  parts_text?: string | null;
+  editable_fields?: string | null;
+  review_settings?: string | null;
+  required_video_fields_json?: string | null;
+  general_custom_questions?: EventGeneralCustomQuestionDraft[];
+}
+
+function toBool(value: number | string | boolean | null | undefined): boolean {
+  return value === 1 || value === "1" || value === true;
+}
+
+function visibilityLabel(event: EventSettingsPreviewValue): {
+  label: string;
+  className: string;
+} {
+  switch (event.visibility_status) {
+    case "public":
+      return { label: "公開", className: "fn-badge-accent" };
+    case "private":
+      return { label: "非公開", className: "fn-badge-soft" };
+    case "archived":
+      return { label: "アーカイブ", className: "fn-badge-warning" };
+    case "draft":
+    default:
+      return { label: "下書き", className: "fn-badge-soft" };
+  }
+}
+
+function displayDate(value: number | string | null | undefined): string {
+  if (value == null || value === "") return "未設定";
+  if (typeof value === "number") {
+    return new Date(value * 1000).toLocaleString("ja-JP", {
+      timeZone: "Asia/Tokyo",
+    });
+  }
+  return value.includes("T") ? value.replace("T", " ") : value;
+}
+
+function parseParts(value: EventSettingsPreviewValue): {
+  parts: string[];
+  error: string | null;
+} {
+  if (value.parts_text != null) {
+    return {
+      parts: value.parts_text
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean),
+      error: null,
+    };
+  }
+  if (!value.parts_json) return { parts: [], error: null };
+  try {
+    const parsed = JSON.parse(value.parts_json) as unknown;
+    if (!Array.isArray(parsed)) {
+      return { parts: [], error: "parts_json は配列ではありません。" };
+    }
+    return {
+      parts: parsed.filter(
+        (item): item is string =>
+          typeof item === "string" && item.trim().length > 0,
+      ),
+      error: null,
+    };
+  } catch {
+    return { parts: [], error: "parts_json を解析できません。" };
+  }
+}
+
+function tryJsonSummary(raw: string | null | undefined): string {
+  if (!raw || !raw.trim()) return "未設定";
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (Array.isArray(parsed)) return `${parsed.length} 件`;
+    if (parsed && typeof parsed === "object") {
+      return Object.keys(parsed as Record<string, unknown>).join(", ") || "空オブジェクト";
+    }
+    return String(parsed);
+  } catch {
+    return "JSONを解析できません";
+  }
+}
+
+function Field({
+  label,
+  value,
+}: {
+  label: string;
+  value: React.ReactNode;
+}): React.ReactElement {
+  return (
+    <div style={{ display: "grid", gap: 2 }}>
+      <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{label}</span>
+      <span style={{ fontSize: 13, color: "var(--text-primary)" }}>{value}</span>
+    </div>
+  );
+}
+
+export function EventSettingsPreview({
+  event,
+}: {
+  event: EventSettingsPreviewValue;
+}): React.ReactElement {
+  const accentStyle = event.accent_color?.trim()
+    ? buildAccentVars(event.accent_color, "dark")
+    : undefined;
+  const formSettings = parseVideoFormSettings(event.video_form_settings_json);
+  const stageQuestions = resolveStagePermissionFields([formSettings]);
+  const generalQuestions = (event.general_custom_questions ?? []).filter(
+    (question) => question.label.trim() || question.question_key,
+  );
+  const parts = parseParts(event);
+  const slotType = event.slot_type ?? "time";
+  const visibility = visibilityLabel(event);
+  const reservationLimit = Number(event.max_slot_reservation_groups_per_xid ?? 0);
+
+  return (
+    <section
+      aria-label="イベント設定プレビュー"
+      style={{
+        marginTop: 18,
+        padding: 16,
+        border: "1px solid var(--border-subtle)",
+        borderRadius: "var(--radius-md)",
+        background: "var(--bg-elevated)",
+        display: "grid",
+        gap: 16,
+      }}
+    >
+      <header style={{ display: "grid", gap: 4 }}>
+        <span className="fn-badge fn-badge-soft" style={{ justifySelf: "start" }}>
+          プレビュー
+        </span>
+        <h2 style={{ margin: 0, fontSize: 16 }}>イベント設定プレビュー</h2>
+      </header>
+
+      <article
+        style={{
+          ...accentStyle,
+          border: "1px solid var(--border-subtle)",
+          borderTop: "4px solid var(--event-accent, var(--accent-primary))",
+          borderRadius: "var(--radius-sm)",
+          overflow: "hidden",
+          background: "var(--bg-surface)",
+        }}
+      >
+        {event.img_url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={event.img_url}
+            alt=""
+            style={{ width: "100%", height: 120, objectFit: "cover", display: "block" }}
+          />
+        ) : null}
+        <div style={{ padding: 14, display: "grid", gap: 10 }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            {event.icon_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={event.icon_url}
+                alt=""
+                width={24}
+                height={24}
+                style={{ borderRadius: "50%", objectFit: "cover" }}
+              />
+            ) : null}
+            <div>
+              <h3 style={{ margin: 0, fontSize: 18 }}>
+                {event.title || "イベント名未入力"}
+              </h3>
+              <p className="fn-muted" style={{ margin: "2px 0 0", fontSize: 12 }}>
+                {event.event_type ?? "event"}
+              </p>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <span className={`fn-badge ${visibility.className}`}>
+              {visibility.label}
+            </span>
+          </div>
+          <p style={{ margin: 0, fontSize: 13, lineHeight: 1.7 }}>
+            {(event.explanation || "イベント説明は未入力です。").slice(0, 180)}
+            {(event.explanation?.length ?? 0) > 180 ? "…" : ""}
+          </p>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+              gap: 10,
+            }}
+          >
+            <Field
+              label="開催期間"
+              value={`${displayDate(event.start_time)} - ${displayDate(event.end_time)}`}
+            />
+            <Field
+              label="受付期間"
+              value={`${displayDate(event.entry_start_time)} - ${displayDate(event.entry_end_time)}`}
+            />
+          </div>
+        </div>
+      </article>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+          gap: 12,
+        }}
+      >
+        <article className="fn-card" style={{ padding: 12 }}>
+          <h3 style={{ margin: "0 0 8px", fontSize: 14 }}>投稿フォーム項目</h3>
+          {stageQuestions.length > 0 || generalQuestions.length > 0 ? (
+            <div style={{ display: "grid", gap: 12 }}>
+              {stageQuestions.length > 0 ? (
+                <div style={{ display: "grid", gap: 10 }}>
+                  <strong style={{ fontSize: 12 }}>ステージ・権利確認</strong>
+                  {stageQuestions.map((question, index) => (
+                    <div key={question.id} style={{ display: "grid", gap: 6 }}>
+                      <span className={`fn-badge ${question.required ? "fn-badge-warning" : "fn-badge-soft"}`} style={{ justifySelf: "start" }}>
+                        質問 {index + 1} / {question.required ? "必須" : "任意"}
+                      </span>
+                      <Field label="ラベル" value={question.label} />
+                      <Field label="説明" value={question.description} />
+                      <Field label="プレースホルダー" value={question.placeholder} />
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {generalQuestions.length > 0 ? (
+                <div style={{ display: "grid", gap: 10 }}>
+                  <strong style={{ fontSize: 12 }}>カスタム質問</strong>
+                  {generalQuestions.map((question, index) => (
+                    <div key={question.clientId || question.question_key} style={{ display: "grid", gap: 6 }}>
+                      <span className={`fn-badge ${question.required ? "fn-badge-warning" : "fn-badge-soft"}`} style={{ justifySelf: "start" }}>
+                        質問 {index + 1} / {question.required ? "必須" : "任意"} / {GENERAL_CUSTOM_QUESTION_TYPE_LABELS[question.type]}
+                      </span>
+                      <Field label="ラベル" value={question.label} />
+                      <Field
+                        label="形式"
+                        value={GENERAL_CUSTOM_QUESTION_TYPE_LABELS[question.type]}
+                      />
+                      {question.options.some((option) => option.trim()) ? (
+                        <Field
+                          label="選択肢"
+                          value={question.options
+                            .map((option) => option.trim())
+                            .filter(Boolean)
+                            .join(" / ")}
+                        />
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <p className="fn-muted" style={{ margin: 0, fontSize: 12 }}>追加質問は表示されません。</p>
+          )}
+          <Field
+            label="投稿必須項目"
+            value={formatRequiredVideoFieldSummary(event.required_video_fields_json)}
+          />
+        </article>
+
+        <article className="fn-card" style={{ padding: 12 }}>
+          <h3 style={{ margin: "0 0 8px", fontSize: 14 }}>部 / セクション</h3>
+          {parts.error ? (
+            <p style={{ color: "var(--accent-danger)", fontSize: 12 }}>{parts.error}</p>
+          ) : parts.parts.length > 0 ? (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {parts.parts.map((part) => (
+                <span key={part} className="fn-badge fn-badge-soft">{part}</span>
+              ))}
+            </div>
+          ) : (
+            <p className="fn-muted" style={{ margin: 0, fontSize: 12 }}>部の選択は表示されません。</p>
+          )}
+        </article>
+
+        <article className="fn-card" style={{ padding: 12 }}>
+          <h3 style={{ margin: "0 0 8px", fontSize: 14 }}>枠設定</h3>
+          <div style={{ display: "grid", gap: 6 }}>
+            <Field label="枠タイプ" value={slotType === "count" ? "件数枠" : "時間枠"} />
+            <Field label="確保者表示" value={event.slot_visibility_mode ?? "public_name"} />
+            <Field label="1作品あたり最大枠数" value={event.max_slots_per_video ?? 1} />
+            <Field
+              label="1 X IDあたりの確保上限"
+              value={reservationLimit > 0 ? `${reservationLimit} 件` : "無制限"}
+            />
+            <Field
+              label="枠同士の間隔"
+              value={event.slot_interval_minutes ? `${event.slot_interval_minutes} 分` : "自動判定"}
+            />
+            <Field label="部の分割閾値" value={`${event.slot_part_gap_minutes ?? 15} 分`} />
+            <Field label="見え方" value={slotType === "count" ? "番号付きの件数枠として表示" : "開始・終了時刻付きで表示"} />
+          </div>
+        </article>
+
+        <article className="fn-card" style={{ padding: 12 }}>
+          <h3 style={{ margin: "0 0 8px", fontSize: 14 }}>権限・運用設定</h3>
+          <div style={{ display: "grid", gap: 6 }}>
+            <Field label="ユーザーの追加紐付け" value={toBool(event.allow_user_video_event_links) ? "許可" : "不許可"} />
+            <Field label="枠なし投稿の紐づけ" value={toBool(event.allow_unslotted_posts) ? "許可" : "不許可"} />
+            <Field label="所有者の一般作品権限" value={toBool(event.allow_user_video_edits) ? "個別指定" : "既定"} />
+            <Field label="一般作品の編集許可" value={tryJsonSummary(event.user_video_edit_permission_keys_json)} />
+            <Field label="編集対象フィールド" value={tryJsonSummary(event.editable_fields)} />
+            <Field label="審査設定" value={tryJsonSummary(event.review_settings)} />
+          </div>
+        </article>
+      </div>
+    </section>
+  );
+}

@@ -167,6 +167,8 @@ export const manageEventEditRoutes = new Hono<AppEnv>().get("/", async (c) => {
   >(row.stage_questions, []);
 
   const body: ManageEventEditResponse = {
+    // CURRENT EventForm uses the authenticated user ID, not the Active X ID.
+    draftAuthUserId: user.id,
     isAdmin: snapshot.isAdmin,
     pendingCount: Number(row.pending_count ?? 0),
     activeXUserId: resolveActiveXUserId(user.active_x_user_id, parseJsonColumn<ManageLinkedX[]>(row.linked, [])),

@@ -15,6 +15,8 @@ export const ManageGeneralQuestionDraftSchema = z.object({
 });
 
 export const ManageEventEditResponseSchema = z.object({
+  /** Authenticated draft owner from this authorized GET, not an X ID or authorization token. */
+  draftAuthUserId: z.string().min(1),
   isAdmin: z.boolean(),
   pendingCount: z.number(),
   activeXUserId: z.string().nullable(),

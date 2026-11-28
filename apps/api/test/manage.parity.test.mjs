@@ -1154,6 +1154,7 @@ if (runUnderRootTsx(import.meta.url)) {
     const user = (await refDb.select().from(S.users).where(eq(S.users.id, `u_${name}`)))[0];
     const linked = await getHeaderLinkedXUsersForAuthUser(refDb, user.id);
     return {
+      draftAuthUserId: user.id,
       isAdmin: snapshot.isAdmin,
       pendingCount: nav.pendingByEvent.get(eventId) ?? 0,
       activeXUserId: await resolveActiveXUserId(refDb, user.id, normalizeXId(user.active_x_user_id) || null, linked),
@@ -1180,10 +1181,15 @@ if (runUnderRootTsx(import.meta.url)) {
         const ref = await refEdit(name, eventId);
         if (ref === 404) {
           assert.equal(r.status, 404, `${name} ${eventId}`);
+          assert.equal(Object.hasOwn(r.body, "draftAuthUserId"), false);
           continue;
         }
         assert.equal(r.status, 200, `${name} ${eventId}`);
         assert.deepEqual(r.body, canon(ref), `${name} ${eventId}`);
+        assert.equal(r.body.draftAuthUserId, "u_" + name);
+        assert.equal(r.headers.get("cache-control"), "private, no-store");
+        assert.equal(r.stats.writes, 0);
+        assert.ok(r.stats.statements <= 3 && r.bytes <= 64 * 1024);
         record("edit", r);
       }
     }
@@ -1193,6 +1199,48 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.deepEqual((await call("/api/manage/events/evB/edit", "tok-slot")).body.editableSections, { basic: false, publish: false, questions: false, slots: true });
     assert.equal((await call("/api/manage/events/evC/edit", "tok-owner")).status, 404);
     assert.equal((await call("/api/manage/events/evGen19/edit", "tok-admin")).status, 503, "19 general questions fail like CURRENT");
+  });
+
+  test("MIG-0721 U02b: edit GET returns its authenticated draft owner, even with null Active X", async () => {
+    const db = createSqlite();
+    seed(db);
+    try {
+      // Isolated fixture: two distinct authorized accounts, both no linked X.
+      db.prepare('UPDATE "user" SET role = ? WHERE id = ?').run("admin", "u_plain");
+      const path = "/api/manage/events/evA/edit";
+      const { ManageEventEditResponseSchema } = await import("@flamenode/contracts");
+      const receipts = [];
+      for (const name of ["admin", "plain", "admin"]) {
+        const other = name === "admin" ? "u_plain" : "u_admin";
+        const r = await call(path + "?draftAuthUserId=" + other + "&userId=" + other, "tok-" + name, { sqlite: db });
+        assert.equal(r.status, 200);
+        assert.equal(r.headers.get("cache-control"), "private, no-store");
+        assert.ok(ManageEventEditResponseSchema.safeParse(r.body).success);
+        assert.equal(r.body.draftAuthUserId, "u_" + name);
+        assert.equal(r.body.activeXUserId, null);
+        assert.equal(r.body.isAdmin, true);
+        assert.equal(r.body.initial.id, "evA");
+        assert.equal(r.stats.statements, 2);
+        assert.equal(r.stats.writes, 0);
+        assert.ok(r.bytes <= 64 * 1024);
+        const { draftAuthUserId, ...rest } = r.body;
+        receipts.push(rest);
+      }
+      assert.deepEqual(receipts[0], receipts[1]);
+      assert.deepEqual(receipts[0], receipts[2]);
+      for (const [token, expected] of [
+        [undefined, 401], ["tok-expired", 401], ["tok-banned", 403],
+        ["tok-rev", 404], ["tok-outsider", 404],
+      ]) {
+        const r = await call(path, token, { sqlite: db });
+        assert.equal(r.status, expected, token);
+        assert.equal(r.headers.get("cache-control"), "private, no-store", token);
+        assert.equal(Object.hasOwn(r.body, "draftAuthUserId"), false, token);
+        assert.equal(r.stats.writes, 0, token);
+      }
+    } finally {
+      db.close();
+    }
   });
 
   // app/(manage)/manage/events/[id]/youtube-playlist/page.tsx
