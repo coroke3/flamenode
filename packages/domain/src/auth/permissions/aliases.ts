@@ -17,7 +17,9 @@ export function canonicalizePermissionKey(
   key: string,
 ): PermissionKey | null {
   if (isValidPermissionKey(key)) return key;
-  return LEGACY_TO_CANONICAL[key] ?? null;
+  return Object.prototype.hasOwnProperty.call(LEGACY_TO_CANONICAL, key)
+    ? LEGACY_TO_CANONICAL[key]
+    : null;
 }
 
 /**
