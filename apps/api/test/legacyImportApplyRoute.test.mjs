@@ -106,15 +106,51 @@ function legacySoftwareId(normalizedName) {
 const ADMIN = { id: "admin-1", name: "Admin", email: null, image: null,
   role: "admin", is_banned: 0, active_x_user_id: null };
 
-function setup({ user = ADMIN, role = "admin", settings = "normal", bucket, applyStep, bindings = {}, beforeBatch } = {}) {
+// Capture the actual bound statements and batch sizes in the isolated fixture.
+// SQLite permits more binds than D1; do not let a passing SQLite test hide a
+// D1 request-budget violation. No parameter values or SQL contents are stored.
+function setup({ user = ADMIN, role = "admin", settings = "normal", bucket, applyStep, bindings = {}, beforeBatch, captureD1Budget = false } = {}) {
   const { db, sqlite, stats } = createAdminD1();
-  if (beforeBatch) {
+  const trace = { binds: [], batches: [] };
+  if (captureD1Budget) {
+    const prepare = db.prepare.bind(db);
+    db.prepare = (query) => {
+      const prepared = prepare(query);
+      return {
+        ...prepared,
+        bind: (...params) => {
+          trace.binds.push(params.length);
+          return prepared.bind(...params);
+        },
+      };
+    };
+  }
+  if (beforeBatch || captureD1Budget) {
     const originalBatch = db.batch.bind(db);
     db.batch = async (statements) => {
-      beforeBatch(sqlite);
+      if (captureD1Budget) trace.batches.push(statements.length);
+      beforeBatch?.(sqlite);
       return originalBatch(statements);
     };
   }
+  const d1Budget = {
+    mark: () => ({ reads: stats.reads, binds: trace.binds.length, batches: trace.batches.length }),
+    assertSince: (mark, label, expectedReads, expectedBatches) => {
+      assert.equal(captureD1Budget, true, "D1 budget capture must be enabled");
+      const reads = stats.reads - mark.reads;
+      const binds = trace.binds.slice(mark.binds);
+      const batches = trace.batches.slice(mark.batches);
+      assert.equal(reads, expectedReads, label + ": caller reads");
+      assert.equal(batches.length, expectedBatches, label + ": D1 batch calls");
+      const logicalQueries = reads + batches.reduce((sum, size) => sum + size, 0);
+      assert.ok(logicalQueries <= 50, label + ": request logical queries " + logicalQueries + "/50");
+      // Every fixture read and batch statement must be observed; counting
+      // extra driver preparations is harmless, but missing statements is not.
+      assert.ok(binds.length >= logicalQueries, label + ": bound statement capture incomplete");
+      assert.ok(binds.every((count) => count <= 100),
+        label + ": max bound parameters " + Math.max(0, ...binds) + "/100");
+    },
+  };
   seedBase(sqlite, { role, settings });
   let d1ApplyCalls = 0;
   const app = new Hono();
@@ -135,7 +171,7 @@ function setup({ user = ADMIN, role = "admin", settings = "normal", bucket, appl
     app.request("/api/admin/import/legacy/apply", {
       method: "POST", headers: { Origin: origin }, body: data,
     }, { DB: db, BUCKET: bucket, NEXT_PUBLIC_SITE_URL: SITE, ...bindings });
-  return { request, sqlite, stats, getD1ApplyCalls: () => d1ApplyCalls };
+  return { request, sqlite, stats, d1Budget, getD1ApplyCalls: () => d1ApplyCalls };
 }
 
 test("MIG-0645 U02 apply Hono: cross-origin rejects before D1, multipart or R2", async () => {
@@ -1619,8 +1655,8 @@ test("MIG-0645 U02al Hono: new video rows, provenance, queue and receipt are ato
   let creatorRace = false;
   let replacementRace = false;
   let serverDb;
-  const { request, sqlite, stats } = setup({
-    bucket, applyStep: (input) => {
+  const { request, sqlite, stats, d1Budget } = setup({
+    bucket, captureD1Budget: true, applyStep: (input) => {
       serverDb = input.db;
       return legacyImportD1ApplyStep(input);
     },
@@ -1700,12 +1736,14 @@ test("MIG-0645 U02al Hono: new video rows, provenance, queue and receipt are ato
 
     const readsBefore = stats.reads;
     const batchesBefore = stats.batches;
+    const createBudgetMark = d1Budget.mark();
     const pending = await request(form());
     assert.equal(pending.status, 503, JSON.stringify(await pending.clone().json()));
     const pendingBody = await pending.json();
     assert.equal(pendingBody.kind, "committed_progress_pending");
     assert.equal(pendingBody.progress.stage, "complete");
     assert.equal(pendingBody.result.created.videos, 1);
+    d1Budget.assertSince(createBudgetMark, "video creation", 3, 1);
     assert.equal(stats.reads - readsBefore, 3, "creator/catalog share the receipt and video-ID query");
     assert.equal(stats.batches, batchesBefore + 1);
     const saved = sqlite.prepare("SELECT * FROM videos WHERE id = ?").get(video.id);
@@ -1734,9 +1772,11 @@ test("MIG-0645 U02al Hono: new video rows, provenance, queue and receipt are ato
     // support rows on the receipt branch.
     sqlite.prepare("UPDATE x_users SET profile_text = ? WHERE id = ?").run("x".repeat(128 * 1024), "creator-video");
     const replayReads = stats.reads;
+    const createReplayBudgetMark = d1Budget.mark();
     const replay = await request(form());
     assert.equal(replay.status, 200, JSON.stringify(await replay.clone().json()));
     assert.equal((await replay.json()).result.created.videos, 1);
+    d1Budget.assertSince(createReplayBudgetMark, "video creation receipt replay", 3, 0);
     assert.equal(stats.reads - replayReads, 3);
     assert.equal(stats.batches, batchesBefore + 1);
     assert.equal(wakes.length, wakesBefore + 2);
@@ -2026,8 +2066,10 @@ test("MIG-0645 U02al Hono: new video rows, provenance, queue and receipt are ato
     ).all();
     async function expectReplacementReadRefusal(label) {
       const reads = stats.reads;
+      const mark = d1Budget.mark();
       const response = await request(replacement.form());
       assert.equal(response.status, 409, label + ": " + JSON.stringify(await response.clone().json()));
+      d1Budget.assertSince(mark, label, 3, 0);
       assert.equal(stats.reads - reads, 3, label + ": one stage read plus two preloads");
       assert.equal(stats.batches, beforeRejectedBatches, label + ": no batch");
       assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n,
@@ -2073,8 +2115,10 @@ test("MIG-0645 U02al Hono: new video rows, provenance, queue and receipt are ato
     // A failed final R2 CAS must leave the committed D1 receipt available
     // for recovery without rereading or reapplying canonical data.
     failNextCompletion();
+    const replaceBudgetMark = d1Budget.mark();
     const accepted = await request(replacement.form());
     assert.equal(accepted.status, 503, JSON.stringify(await accepted.clone().json()));
+    d1Budget.assertSince(replaceBudgetMark, "private video replacement", 3, 1);
     const result = await accepted.json();
     assert.equal(result.kind, "committed_progress_pending");
     assert.equal(result.result.replaced.videos, 1);
@@ -2105,8 +2149,10 @@ test("MIG-0645 U02al Hono: new video rows, provenance, queue and receipt are ato
     sqlite.prepare("UPDATE x_users SET profile_text = ? WHERE id = ?")
       .run("x".repeat(128 * 1024), "creator-video");
     const replacementReplayReads = stats.reads;
+    const replacementReplayBudgetMark = d1Budget.mark();
     const recovered = await request(replacement.form());
     assert.equal(recovered.status, 200, JSON.stringify(await recovered.clone().json()));
+    d1Budget.assertSince(replacementReplayBudgetMark, "private replacement receipt replay", 3, 0);
     const recoveredBody = await recovered.json();
     assert.equal(recoveredBody.result.replaced.videos, 1);
     assert.equal(recoveredBody.result.complete, true);
