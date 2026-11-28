@@ -32,7 +32,7 @@ import {
   eventReleaseObjectKey,
 } from "@flamenode/server-core/publicData/eventDetailCore";
 import { legacyImportD1ApplyStep } from "../src/routes/admin/legacyImportD1ApplyAdapter.ts";
-import { createAdminD1, seedBase } from "./helpers/sqliteD1.mjs";
+import { createAdminD1, seedBase, seedEvent } from "./helpers/sqliteD1.mjs";
 
 const SITE = "https://app.flamenode.example";
 // CURRENT RH-002 durable run identity; the bearer preview token itself is never persisted.
@@ -225,13 +225,13 @@ function previewBucket({ failAdvanceOnce = false, failAdvanceStage = "x_users", 
   };
 }
 
-async function createApplyCredential(bucket, authUserId = ADMIN.id, planOverride = null, strategy = "create_only") {
+async function createApplyCredential(bucket, authUserId = ADMIN.id, planOverride = null, strategy = "create_only", snapshots = {}) {
   const plan = planOverride ?? normalizeLegacyFiles([], {
     eventVisibility: "private", videoVisibility: "private", now: 1700000000,
   });
   assert.deepEqual(plan.errors, []);
   const credential = await createLegacyImportPreview(bucket, {
-    authUserId, strategy, plan,
+    authUserId, strategy, plan, ...snapshots,
   });
   const form = () => {
     const data = new FormData();
@@ -1185,6 +1185,166 @@ test("MIG-0645 U02ad Hono: empty events stage writes only its durable marker", a
   }
 });
 
+
+function extendLegacyImportQuestionSchema(sqlite) {
+  sqlite.exec(`
+    CREATE TABLE event_custom_questions (
+      id TEXT PRIMARY KEY, event_id TEXT NOT NULL, question_key TEXT NOT NULL,
+      label TEXT NOT NULL, description TEXT, type TEXT NOT NULL, required INTEGER NOT NULL,
+      options_json TEXT, placeholder TEXT, max_length INTEGER, sort_order INTEGER NOT NULL,
+      is_active INTEGER NOT NULL, visibility TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+      UNIQUE(event_id, question_key)
+    );
+    CREATE TABLE videos (id TEXT PRIMARY KEY);
+  `);
+}
+
+function questionPlan(count) {
+  const plan = normalizeLegacyFiles([], {
+    eventVisibility: "private", videoVisibility: "private", now: 1700000000,
+  });
+  for (let index = 0; index < count; index++) {
+    plan.eventCustomQuestions.push({
+      id: "question-" + index, event_id: "ev-1", source_key: "source-" + index,
+      question_key: "question_" + index, label: "Question " + index, description: "Legacy field",
+      type: "textarea", required: 0, options_json: null, placeholder: null,
+      max_length: 1000, sort_order: index, is_active: 1, visibility: "review",
+    });
+  }
+  return plan;
+}
+
+async function reachQuestionStage(request, form) {
+  for (const expected of ["x_users", "softwares", "events", "custom_questions"]) {
+    const response = await request(form());
+    assert.equal(response.status, 200, JSON.stringify(await response.clone().json()));
+    assert.equal((await response.json()).progress.stage, expected);
+  }
+}
+
+test("MIG-0645 U02ai Hono: bounded question creation, reuse, limit/collision refusal and durable receipt replay", async () => {
+  const { bucket } = previewBucket({ failAdvanceOnce: true, failAdvanceStage: "videos" });
+  const { request, sqlite, stats } = setup({ bucket, applyStep: legacyImportD1ApplyStep });
+  extendLegacyImportUserSchema(sqlite);
+  extendLegacyImportSoftwareSchema(sqlite);
+  extendLegacyImportEventSchema(sqlite);
+  extendLegacyImportQuestionSchema(sqlite);
+  seedEvent(sqlite, { visibility_status: "private" });
+  try {
+    const plan = questionPlan(7);
+    const { form } = await createApplyCredential(bucket, ADMIN.id, plan);
+    await reachQuestionStage(request, form);
+    const reads = stats.reads;
+    const batches = stats.batches;
+    const first = await request(form());
+    assert.equal(first.status, 200, JSON.stringify(await first.clone().json()));
+    const firstBody = await first.json();
+    assert.equal(firstBody.progress.stage, "custom_questions");
+    assert.equal(firstBody.progress.index, 1);
+    assert.deepEqual(firstBody.result.customQuestions, { created: 6, reused: 0 });
+    assert.equal(stats.reads - reads, 3);
+    assert.equal(stats.batches - batches, 1);
+    const second = await request(form());
+    assert.equal(second.status, 503, JSON.stringify(await second.clone().json()));
+    const pending = await second.json();
+    assert.equal(pending.kind, "committed_progress_pending");
+    assert.equal(pending.progress.stage, "videos");
+    assert.deepEqual(pending.result.customQuestions, { created: 7, reused: 0 });
+    const afterCommitBatches = stats.batches;
+    const replay = await request(form());
+    assert.equal(replay.status, 200, JSON.stringify(await replay.clone().json()));
+    assert.deepEqual((await replay.json()).result.customQuestions, { created: 7, reused: 0 });
+    assert.equal(stats.batches, afterCommitBatches, "receipt replay does not duplicate inserts");
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM event_custom_questions").get().n, 7);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE table_name = 'event_custom_questions' AND context = 'legacy_import:custom-question'").get().n, 7);
+
+    const again = await createApplyCredential(bucket, ADMIN.id, questionPlan(1));
+    await reachQuestionStage(request, again.form);
+    const reused = await request(again.form());
+    assert.equal(reused.status, 200, JSON.stringify(await reused.clone().json()));
+    assert.deepEqual((await reused.json()).result.customQuestions, { created: 0, reused: 1 });
+
+    const conflictPlan = questionPlan(1);
+    conflictPlan.eventCustomQuestions[0].label = "Changed definition";
+    const conflict = await createApplyCredential(bucket, ADMIN.id, conflictPlan);
+    await reachQuestionStage(request, conflict.form);
+    const beforeConflict = stats.batches;
+    assert.equal((await request(conflict.form())).status, 409);
+    assert.equal(stats.batches, beforeConflict);
+    assert.equal(sqlite.prepare("SELECT label FROM event_custom_questions WHERE id = 'question-0'").get().label, "Question 0");
+
+    // The CURRENT import cap is 18 including existing definitions.
+    const filler = sqlite.prepare(`INSERT INTO event_custom_questions
+      SELECT ?, event_id, ?, label, description, type, required, options_json, placeholder,
+             max_length, sort_order, is_active, visibility, created_at, updated_at
+        FROM event_custom_questions WHERE id = 'question-0'`);
+    for (let i = 7; i < 18; i++) filler.run("filler-" + i, "filler_" + i);
+    const overPlan = questionPlan(1);
+    overPlan.eventCustomQuestions[0].id = "overflow-question";
+    overPlan.eventCustomQuestions[0].question_key = "overflow_question";
+    const over = await createApplyCredential(bucket, ADMIN.id, overPlan);
+    await reachQuestionStage(request, over.form);
+    assert.equal((await request(over.form())).status, 409);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM event_custom_questions").get().n, 18);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE table_name = 'event_custom_questions'").get().n, 7);
+
+    const empty = await createApplyCredential(bucket, ADMIN.id, questionPlan(0));
+    await reachQuestionStage(request, empty.form);
+    const noQuestions = await request(empty.form());
+    assert.equal(noQuestions.status, 200, JSON.stringify(await noQuestions.clone().json()));
+    const emptyBody = await noQuestions.json();
+    assert.equal(emptyBody.progress.stage, "videos");
+    assert.deepEqual(emptyBody.result.customQuestions, { created: 0, reused: 0 });
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("MIG-0645 U02ai Hono: skip-existing question creation requires unchanged relevant video existence", async () => {
+  const { bucket } = previewBucket();
+  const { request, sqlite } = setup({ bucket, applyStep: legacyImportD1ApplyStep });
+  extendLegacyImportUserSchema(sqlite);
+  extendLegacyImportSoftwareSchema(sqlite);
+  extendLegacyImportEventSchema(sqlite);
+  extendLegacyImportQuestionSchema(sqlite);
+  seedEvent(sqlite, { visibility_status: "private" });
+  try {
+    const plan = questionPlan(2);
+    // The question stage only consumes video IDs and their linked answers.
+    // No video-stage D1 mutation is exercised in this fixture.
+    for (const id of ["existing-video", "new-video"]) {
+      plan.videos.push({
+        id, primary_event_id: "ev-1", creator_x_user_id: null, collaboration_type: "individual",
+        source_type: "external", creator_display_name: "Creator", creator_display_name_yomi: null,
+        creator_icon_url: null, creator_youtube_channel_url: null, creator_profile_text: null,
+        creator_other_social_links: null, title: id, music: null, credit: null, music_reference_url: null,
+        closing_comment: null, youtube_video_id: null, intro_comment: null, highlights: null,
+        production_story: null, visibility_status: "private", scheduling_type: "manual",
+        scheduled_time: null, created_at: 1700000000,
+      });
+    }
+    plan.videoCustomAnswers.push(
+      { video_id: "existing-video", event_id: "ev-1", question_id: "question-0", question_key: "question_0", answer_text: "old", answer_json: null },
+      { video_id: "new-video", event_id: "ev-1", question_id: "question-1", question_key: "question_1", answer_text: "new", answer_json: null },
+    );
+    sqlite.prepare("INSERT INTO videos(id) VALUES (?)").run("existing-video");
+    const snapshots = { skipExistingVideoIds: ["existing-video"] };
+    const stale = await createApplyCredential(bucket, ADMIN.id, plan, "skip_existing", snapshots);
+    await reachQuestionStage(request, stale.form);
+    sqlite.prepare("INSERT INTO videos(id) VALUES (?)").run("new-video");
+    assert.equal((await request(stale.form())).status, 409);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM event_custom_questions").get().n, 0);
+    sqlite.prepare("DELETE FROM videos WHERE id = ?").run("new-video");
+    const fresh = await createApplyCredential(bucket, ADMIN.id, plan, "skip_existing", snapshots);
+    await reachQuestionStage(request, fresh.form);
+    const accepted = await request(fresh.form());
+    assert.equal(accepted.status, 200, JSON.stringify(await accepted.clone().json()));
+    assert.deepEqual((await accepted.json()).result.customQuestions, { created: 1, reused: 0 });
+    assert.deepEqual(sqlite.prepare("SELECT id FROM event_custom_questions ORDER BY id").all().map(row => row.id), ["question-1"]);
+  } finally {
+    sqlite.close();
+  }
+});
 
 test("MIG-0645 U02p Hono: audit receipt INSERT failure rolls back the complete SQLite D1 batch", async () => {
   // This intentionally injected adapter is a transaction-boundary regression.

@@ -1,5 +1,5 @@
 import { getTableColumns, sql } from "drizzle-orm";
-import { events, eventStaff } from "@flamenode/db/schema";
+import { events, eventStaff, eventCustomQuestions } from "@flamenode/db/schema";
 import {
   isValidPreloadedActorSnapshotJson,
   isValidPreloadedAuditSettings,
@@ -13,9 +13,11 @@ import type { LegacyImportApplyProgress } from "./previewStore.ts";
 import {
   MAX_LEGACY_EVENT_STAFF_PER_EVENT,
   MAX_LEGACY_IMPORT_STEP_BYTES,
+  MAX_LEGACY_IMPORT_SELECTED_ROWS,
 } from "./cpuBudget.ts";
 import {
   LEGACY_IMPORT_SOFTWARE_STEP_SIZE,
+  LEGACY_IMPORT_QUESTION_STEP_SIZE,
   LEGACY_IMPORT_X_USER_STEP_SIZE,
   legacyImportReceiptMatchesProgress,
   legacyImportSkipSnapshotFingerprint,
@@ -38,6 +40,46 @@ function canonicalRowJson(columns: Record<string, { name: string }>, table: stri
 }
 const existingEventJson = canonicalRowJson(getTableColumns(events), "events");
 const existingStaffJson = canonicalRowJson(getTableColumns(eventStaff), "event_staff");
+const existingQuestionJson = canonicalRowJson(getTableColumns(eventCustomQuestions), "event_custom_questions");
+// CURRENT legacy import limit (distinct from the interactive new-question limit).
+const MAX_EVENT_CUSTOM_QUESTIONS = 18;
+type PlannedQuestion = CanonicalLegacyPlan["eventCustomQuestions"][number];
+
+function questionGroup(input: ApplyInput): {
+  questions: PlannedQuestion[];
+  videoSnapshot: Array<{ id: string; exists: number }>;
+} {
+  const start = input.progress.index * LEGACY_IMPORT_QUESTION_STEP_SIZE;
+  const questions = input.plan.eventCustomQuestions.slice(start, start + LEGACY_IMPORT_QUESTION_STEP_SIZE);
+  if (input.strategy !== "skip_existing") return { questions, videoSnapshot: [] };
+  const ids = new Set(questions.map((row) => row.id));
+  const skipped = new Set(input.progress.skipExistingVideoIds);
+  const answers = input.plan.videoCustomAnswers.filter((row) => ids.has(row.question_id));
+  const needed = new Set(answers.filter((row) => !skipped.has(row.video_id)).map((row) => row.question_id));
+  const videoSnapshot = [...new Set(answers.map((row) => row.video_id))].sort()
+    .map((id) => ({ id, exists: skipped.has(id) ? 1 : 0 }));
+  if (videoSnapshot.length > MAX_LEGACY_IMPORT_SELECTED_ROWS ||
+      new TextEncoder().encode(JSON.stringify(videoSnapshot)).byteLength > MAX_LEGACY_IMPORT_STEP_BYTES) {
+    return fixedFailure("旧形式インポートのカスタム質問作品snapshotが上限超過です。");
+  }
+  return { questions: questions.filter((row) => needed.has(row.id)), videoSnapshot };
+}
+
+function sameQuestionDefinition(current: Record<string, unknown>, planned: PlannedQuestion): boolean {
+  return current.id === planned.id &&
+    current.event_id === planned.event_id &&
+    current.question_key === planned.question_key &&
+    current.label === planned.label &&
+    current.description === planned.description &&
+    current.type === planned.type &&
+    current.required === planned.required &&
+    current.options_json === planned.options_json &&
+    current.placeholder === planned.placeholder &&
+    current.max_length === planned.max_length &&
+    current.sort_order === planned.sort_order &&
+    current.is_active === planned.is_active &&
+    current.visibility === planned.visibility;
+}
 
 type ApplyInput = {
   db: ServerCoreDb;
@@ -64,7 +106,8 @@ type StoredStepOutcome =
   | { kind: "none" }
   | { kind: "x_users"; created: number; createdAuthUsers: number }
   | { kind: "softwares"; created: number }
-  | { kind: "event"; action: "created" | "replaced" | "skipped" };
+  | { kind: "event"; action: "created" | "replaced" | "skipped" }
+  | { kind: "custom_questions"; created: number; reused: number };
 
 type PlannedSoftwareRow = { id: string; name: string; normalized_name: string };
 
@@ -237,6 +280,39 @@ function nextEventProgress(
   return next;
 }
 
+function nextQuestionProgress(
+  plan: CanonicalLegacyPlan,
+  progress: LegacyImportApplyProgress,
+  outcome: StoredStepOutcome,
+  effectiveCount: number,
+): LegacyImportApplyProgress {
+  const next = {
+    ...progress,
+    counts: { ...progress.counts },
+    skipExistingEventIds: [...progress.skipExistingEventIds],
+    skipExistingVideoIds: [...progress.skipExistingVideoIds],
+  };
+  if (plan.eventCustomQuestions.length === 0) {
+    if (outcome.kind !== "none") return fixedFailure("旧形式インポートのカスタム質問進捗が不正です。");
+  } else {
+    if (outcome.kind !== "custom_questions" ||
+        !Number.isSafeInteger(outcome.created) || outcome.created < 0 ||
+        !Number.isSafeInteger(outcome.reused) || outcome.reused < 0 ||
+        outcome.created + outcome.reused !== effectiveCount) {
+      return fixedFailure("旧形式インポートのカスタム質問進捗が不正です。");
+    }
+    next.counts.createdCustomQuestions += outcome.created;
+    next.counts.reusedCustomQuestions += outcome.reused;
+  }
+  const groupCount = Math.max(1, Math.ceil(plan.eventCustomQuestions.length / LEGACY_IMPORT_QUESTION_STEP_SIZE));
+  if (progress.index + 1 < groupCount) next.index += 1;
+  else {
+    next.stage = "videos";
+    next.index = 0;
+  }
+  return next;
+}
+
 const LEGACY_STEP_TARGET_PATTERN =
   /^[a-f0-9]{24}:[a-f0-9]{24}:(?:system_user|x_users|softwares|events|custom_questions|videos):\d+$/;
 
@@ -309,6 +385,18 @@ function parseReceipt(value: Record<string, unknown>) {
   ) {
     outcome = { kind: "softwares", created: outcomeRecord.created as number };
   } else if (
+    outcomeRecord.kind === "custom_questions" &&
+    Number.isSafeInteger(outcomeRecord.created) &&
+    (outcomeRecord.created as number) >= 0 &&
+    Number.isSafeInteger(outcomeRecord.reused) &&
+    (outcomeRecord.reused as number) >= 0
+  ) {
+    outcome = {
+      kind: "custom_questions",
+      created: outcomeRecord.created as number,
+      reused: outcomeRecord.reused as number,
+    };
+  } else if (
     outcomeRecord.kind === "event" &&
     ["created", "replaced", "skipped"].includes(String(outcomeRecord.action))
   ) {
@@ -351,15 +439,15 @@ function parseReceipt(value: Record<string, unknown>) {
 /**
  * Bounded real Hono D1 apply units for RH-002.
  * system_user, x_users, software catalog, event create/preview-confirmed skip,
- * and proven imported-event same-visibility replacement are supported.
- * Visibility-changing replacements and later stages remain fail closed.
+ * proven imported-event same-visibility replacement and custom question steps.
+ * Visibility-changing replacements and video mutations remain fail closed.
  */
 export async function legacyImportD1ApplyStep(
   input: ApplyInput,
 ): Promise<{ progress: LegacyImportApplyProgress; complete: boolean }> {
   if (input.plan.errors.length > 0) return fixedFailure(input.plan.errors.join("\n"));
   const stage = input.progress.stage;
-  if (stage !== "system_user" && stage !== "x_users" && stage !== "softwares" && stage !== "events") {
+  if (stage !== "system_user" && stage !== "x_users" && stage !== "softwares" && stage !== "events" && stage !== "custom_questions") {
     return fixedFailure("旧形式インポートのこの段階はHono側でまだ利用できません。");
   }
   if (stage === "system_user" && input.progress.index !== 0) {
@@ -393,6 +481,12 @@ export async function legacyImportD1ApplyStep(
     }
   }
 
+  if (stage === "custom_questions") {
+    const groupCount = Math.max(1, Math.ceil(input.plan.eventCustomQuestions.length / LEGACY_IMPORT_QUESTION_STEP_SIZE));
+    if (!Number.isSafeInteger(input.progress.index) || input.progress.index < 0 || input.progress.index >= groupCount) {
+      return fixedFailure("旧形式インポートのカスタム質問進捗位置が不正です。");
+    }
+  }
   const actorJson = input.preloaded.actorSnapshotJsonById?.[input.actorAuthUserId];
   if (
     !isValidPreloadedAuditSettings(input.preloaded.settings) ||
@@ -428,11 +522,59 @@ export async function legacyImportD1ApplyStep(
   const eventIdForRead = plannedEvent?.id ?? "";
   const readReplacement = input.strategy === "replace_imported";
   const replacementTargetId = entitySnapshotTargetId("event", eventIdForRead);
+  const { questions, videoSnapshot } = stage === "custom_questions"
+    ? questionGroup(input)
+    : { questions: [], videoSnapshot: [] };
+  const questionPayload = JSON.stringify(questions);
+  if (stage === "custom_questions" && (
+      questions.length > LEGACY_IMPORT_QUESTION_STEP_SIZE ||
+      new Set(questions.map((row) => row.id)).size !== questions.length ||
+      new Set(questions.map((row) => JSON.stringify([row.event_id, row.question_key]))).size !== questions.length ||
+      new TextEncoder().encode(questionPayload).byteLength > MAX_LEGACY_IMPORT_STEP_BYTES
+  )) {
+    return fixedFailure("旧形式インポートのカスタム質問planが不正または上限超過です。");
+  }
 
   // One bounded D1 read per request: receipt plus the reserved principal or a
   // 40-row X/software normalized-name existence snapshot.
   // One bounded D1 read per request: receipt plus the stage-specific existing-state snapshot.
-  const readRows = stage === "system_user"
+  const readRows = stage === "custom_questions"
+    ? questions.length === 0
+      ? await input.db.all(sql`
+          SELECT 'marker' AS kind, after_json AS payload
+            FROM audit_logs
+           WHERE table_name = ${STEP_AUDIT_TABLE}
+             AND target_id = ${identity.targetId}
+             AND context = ${STEP_AUDIT_CONTEXT}
+           LIMIT 2
+        `) as unknown as ReadRow[]
+      : await input.db.all(sql`
+          WITH marker_rows AS (
+            SELECT after_json AS payload FROM audit_logs
+             WHERE table_name = ${STEP_AUDIT_TABLE}
+               AND target_id = ${identity.targetId}
+               AND context = ${STEP_AUDIT_CONTEXT}
+             LIMIT 2
+          ), existing_rows AS (
+            SELECT ${existingQuestionJson} AS payload FROM event_custom_questions
+             WHERE NOT EXISTS (SELECT 1 FROM marker_rows)
+               AND (
+                 id IN (SELECT json_extract(value, '$.id') FROM json_each(${questionPayload}))
+                 OR (event_id, question_key) IN (
+                   SELECT json_extract(value, '$.event_id'), json_extract(value, '$.question_key')
+                     FROM json_each(${questionPayload})
+                 )
+               )
+             LIMIT ${questions.length * 2 + 1}
+          )
+          SELECT 'marker' AS kind, payload FROM marker_rows
+          UNION ALL
+          SELECT 'existing' AS kind,
+            CASE WHEN SUM(length(CAST(payload AS BLOB))) OVER () <= ${MAX_LEGACY_IMPORT_STEP_BYTES}
+              THEN payload ELSE NULL END
+            FROM existing_rows
+        `) as unknown as ReadRow[]
+    : stage === "system_user"
     ? await input.db.all(sql`
         WITH marker_rows AS (
           SELECT after_json AS payload
@@ -615,7 +757,9 @@ export async function legacyImportD1ApplyStep(
     ? plannedXUserRows.length
     : stage === "softwares"
       ? plannedSoftwareRows.length
-      : 0;
+      : stage === "custom_questions"
+        ? questions.length * 2
+        : 0;
   if (
     markerRows.length + principalRows.length + existingRows.length +
       eventRows.length + eventStaffSnapshotRows.length + replacementRowCount !== readRows.length
@@ -634,7 +778,7 @@ export async function legacyImportD1ApplyStep(
     (replacementRowCount > 0 && (stage !== "events" || !readReplacement || eventRows.length !== 1 || markerRows.length !== 0)) ||
     (stage === "events" && readReplacement && eventRows.length === 1 && replacementEventRows.length !== 1) ||
     (stage === "system_user" && existingRows.length !== 0) ||
-    ((stage === "x_users" || stage === "softwares" || stage === "events") && principalRows.length !== 0) ||
+    (stage !== "system_user" && principalRows.length !== 0) ||
     (stage !== "events" && (eventRows.length !== 0 || eventStaffSnapshotRows.length !== 0)) ||
     (markerRows.length === 1 && (
       principalRows.length !== 0 || existingRows.length !== 0 ||
@@ -662,7 +806,9 @@ export async function legacyImportD1ApplyStep(
         ? nextXUsersProgress(input.plan, input.progress, receipt.outcome)
         : stage === "softwares"
           ? nextSoftwareProgress(input.plan, input.progress, receipt.outcome)
-          : nextEventProgress(input.plan, input.progress, receipt.outcome);
+          : stage === "custom_questions"
+            ? nextQuestionProgress(input.plan, input.progress, receipt.outcome, questions.length)
+            : nextEventProgress(input.plan, input.progress, receipt.outcome);
     if (!legacyImportReceiptMatchesProgress(receipt, identity, expected)) {
       return fixedFailure("旧形式インポートのステップ監査と進捗が一致しません。");
     }
@@ -1248,6 +1394,136 @@ export async function legacyImportD1ApplyStep(
     }, input.loadWakeHost);
     // The audited D1 batch commits queue rows first; mutateWithAudit then sends one
     // best-effort wake. Receipt replay never re-sends after an R2 progress CAS failure.
+    return { progress: nextProgress, complete: false };
+  }
+
+  if (stage === "custom_questions") {
+    const existing = existingRows.map((row) => ({
+      payload: row.payload,
+      row: parseJsonRecord(row.payload, "旧形式インポートのカスタム質問snapshotが不正です。"),
+    }));
+    if (existing.some(({ row }) => typeof row.id !== "string") ||
+        new Set(existing.map(({ row }) => row.id)).size !== existing.length) {
+      return fixedFailure("旧形式インポートのカスタム質問snapshotが重複しています。");
+    }
+    const missing: PlannedQuestion[] = [];
+    const reusedPayloads: string[] = [];
+    for (const question of questions) {
+      const matches = existing.filter(({ row }) => row.id === question.id ||
+        (row.event_id === question.event_id && row.question_key === question.question_key));
+      if (matches.length === 0) {
+        missing.push(question);
+      } else {
+        const match = matches[0];
+        if (matches.length !== 1 || !sameQuestionDefinition(match.row, question) ||
+            typeof match.payload !== "string") {
+          return fixedFailure("既存のカスタム質問IDまたは定義が一致しません。");
+        }
+        reusedPayloads.push(match.payload);
+      }
+    }
+    const outcome: StoredStepOutcome = input.plan.eventCustomQuestions.length === 0
+      ? { kind: "none" }
+      : { kind: "custom_questions", created: missing.length, reused: reusedPayloads.length };
+    const nextProgress = nextQuestionProgress(input.plan, input.progress, outcome, questions.length);
+    const now = Math.floor(Date.now() / 1000);
+    const rows = missing.map(({ source_key: _sourceKey, ...question }) => ({
+      ...question, created_at: now, updated_at: now,
+    }));
+    const missingPayload = JSON.stringify(rows);
+    const reusedPayload = JSON.stringify(reusedPayloads);
+    const videoPayload = JSON.stringify(videoSnapshot);
+    const assertions = [
+      markerAbsenceAssertion,
+      ...(questions.length > 0 ? [input.db.run(sql`
+        SELECT CASE WHEN
+          NOT EXISTS (
+            SELECT 1 FROM json_each(${questionPayload}) AS incoming
+             WHERE NOT EXISTS (
+               SELECT 1 FROM events WHERE id = json_extract(incoming.value, '$.event_id')
+             )
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM json_each(${reusedPayload}) AS incoming
+             WHERE NOT EXISTS (
+               SELECT 1 FROM event_custom_questions
+                WHERE id = json_extract(incoming.value, '$.id')
+                  AND ${existingQuestionJson} = incoming.value
+             )
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM json_each(${missingPayload}) AS incoming
+             WHERE EXISTS (
+               SELECT 1 FROM event_custom_questions
+                WHERE id = json_extract(incoming.value, '$.id')
+                   OR (event_id = json_extract(incoming.value, '$.event_id')
+                     AND question_key = json_extract(incoming.value, '$.question_key'))
+             )
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM (
+              SELECT json_extract(value, '$.event_id') AS event_id, COUNT(*) AS incoming_count
+                FROM json_each(${missingPayload})
+               GROUP BY json_extract(value, '$.event_id')
+            ) AS incoming
+             WHERE (SELECT COUNT(*) FROM event_custom_questions AS current
+                     WHERE current.event_id = incoming.event_id) + incoming.incoming_count
+                   > ${MAX_EVENT_CUSTOM_QUESTIONS}
+          )
+        THEN 1 ELSE json_extract('legacy_import_question_snapshot_mismatch', '$') END
+      `)] : []),
+      ...(rows.length > 0 && videoSnapshot.length > 0 ? [input.db.run(sql`
+        SELECT CASE WHEN NOT EXISTS (
+          SELECT 1 FROM json_each(${videoPayload}) AS incoming
+           WHERE CAST(json_extract(incoming.value, '$.exists') AS INTEGER) <>
+             CASE WHEN EXISTS (
+               SELECT 1 FROM videos WHERE id = json_extract(incoming.value, '$.id')
+             ) THEN 1 ELSE 0 END
+        ) THEN 1 ELSE json_extract('legacy_import_video_snapshot_mismatch', '$') END
+      `)] : []),
+    ];
+    const mutation = rows.length === 0
+      ? input.db.run(sql`SELECT 1`)
+      : input.db.run(sql`
+          INSERT INTO event_custom_questions (
+            id, event_id, question_key, label, description, type, required,
+            options_json, placeholder, max_length, sort_order, is_active, visibility,
+            created_at, updated_at
+          )
+          SELECT
+            json_extract(value, '$.id'), json_extract(value, '$.event_id'),
+            json_extract(value, '$.question_key'), json_extract(value, '$.label'),
+            json_extract(value, '$.description'), json_extract(value, '$.type'),
+            json_extract(value, '$.required'), json_extract(value, '$.options_json'),
+            json_extract(value, '$.placeholder'), json_extract(value, '$.max_length'),
+            json_extract(value, '$.sort_order'), json_extract(value, '$.is_active'),
+            json_extract(value, '$.visibility'), json_extract(value, '$.created_at'),
+            json_extract(value, '$.updated_at')
+          FROM json_each(${missingPayload})
+        `);
+    await mutateWithAudit(input.db, {
+      preMutationAssertions: assertions,
+      mutationStatements: [mutation],
+      expectedMutationChanges: [rows.length > 0 ? rows.length : null],
+      audits: [
+        ...rows.map((row) => ({
+          table_name: "event_custom_questions",
+          target_id: row.id,
+          operation: "CREATE" as const,
+          before: null,
+          after: row,
+          actor_user_id: input.actorAuthUserId,
+          reason: "旧形式動画の未対応項目をカスタム質問として作成",
+          context: "legacy_import:custom-question",
+          retention_class: "long_audit" as const,
+          restore_strategy: "delete_created" as const,
+          strict: true,
+        })),
+        buildMarkerAudit(nextProgress, outcome),
+      ],
+      callerQueryCount: 3,
+      preloaded: input.preloaded,
+    });
     return { progress: nextProgress, complete: false };
   }
 
