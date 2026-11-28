@@ -17,6 +17,10 @@ import type { PreloadedAuditContext } from "@flamenode/server-core/audit/logger"
 import type { EnvValues, QueueWakeHostLoader } from "@flamenode/server-core/ports";
 import type { VisibilityFenceHost } from "@flamenode/server-core/visibility/manifestHost";
 import {
+  upsertBlockedEntityInManifest,
+  type PublicVisibilityBlockedEntitiesManifest,
+} from "@flamenode/server-core/visibility/manifestCore";
+import {
   readVisibilityManifestObject,
   putVisibilityManifestWithCas,
   type VisibilityManifestBucket,
@@ -47,6 +51,54 @@ type AtomicD1Step = (input: Parameters<PipelineStep>[0] & {
   loadWakeHost: QueueWakeHostLoader;
   eventEffects: ReturnType<typeof createLegacyImportEventEffects>;
 }) => ReturnType<PipelineStep>;
+
+/**
+ * U02aq: import-local precommit for event/video visibility fences.
+ * Unlike a general transition helper, an import cannot assume ownership of an
+ * existing manifest token. Fail closed on initial read, CAS retry, and
+ * confirmation; preserve an identical token's original blocked_at/reason.
+ * This helper alone does not authorize any D1 transition or compensation.
+ */
+export async function precommitLegacyImportVisibilityFence(input: {
+  entityType: "event" | "video";
+  entityId: string;
+  fenceToken: string;
+  reason?: string | null;
+}, host: VisibilityFenceHost): Promise<void> {
+  if (!input.entityId || !input.fenceToken) {
+    throw new Error("public_visibility_fence_token_mismatch");
+  }
+  function ownedEntry(manifest: PublicVisibilityBlockedEntitiesManifest) {
+    const entries = manifest.entities.filter((entry) =>
+      entry.entity_type === input.entityType && entry.entity_id === input.entityId);
+    if (entries.length > 1 ||
+        entries.some((entry) => entry.fence_token !== input.fenceToken)) {
+      throw new Error("public_visibility_fence_token_mismatch");
+    }
+    return entries[0] ?? null;
+  }
+  function addIfAbsent(manifest: PublicVisibilityBlockedEntitiesManifest) {
+    if (ownedEntry(manifest)) return manifest;
+    const now = Math.floor(Date.now() / 1000);
+    return upsertBlockedEntityInManifest(manifest, {
+      entity_type: input.entityType,
+      entity_id: input.entityId,
+      fence_token: input.fenceToken,
+      blocked_at: now,
+      reason: input.reason ?? null,
+    }, now);
+  }
+  const { manifest, etag } = await host.manifest.read();
+  if (ownedEntry(manifest)) return;
+  await host.manifest.write(addIfAbsent(manifest), {
+    ifMatchEtag: etag,
+    mutateOnConflict: addIfAbsent,
+  });
+  const { manifest: confirmed } = await host.manifest.read();
+  if (!ownedEntry(confirmed)) {
+    throw new Error("public_visibility_fence_token_mismatch");
+  }
+}
 
 /** Unmounted RH-002 event replacement effects. Constructing the host is I/O-free. */
 export function createLegacyImportEventEffects(

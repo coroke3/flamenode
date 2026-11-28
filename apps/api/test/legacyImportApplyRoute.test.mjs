@@ -15,6 +15,7 @@ import { createAdminRoutes } from "../src/routes/admin/index.ts";
 import {
   createLegacyImportApplyRoutes,
   createLegacyImportEventEffects,
+  precommitLegacyImportVisibilityFence,
 } from "../src/routes/admin/legacyImportApplyRoute.ts";
 import { preCommitEventVisibilityTransition } from "@flamenode/server-core/visibility/eventTransition";
 import {
@@ -252,9 +253,15 @@ async function createApplyCredential(bucket, authUserId = ADMIN.id, planOverride
 }
 
 // Separate R2 object double for the manifest's conditional PUT contract.
-function manifestBucket(concurrentEntry = null) {
-  let current = null;
+function manifestBucket(concurrentEntry = null, initialEntries = []) {
   let version = 0;
+  let current = null;
+  if (initialEntries.length > 0) {
+    const manifest = emptyPublicVisibilityBlockedEntitiesManifest(1);
+    manifest.revision = 1;
+    manifest.entities.push(...initialEntries);
+    current = { etag: String(++version), body: JSON.stringify(manifest) };
+  }
   const attempts = [];
   let reads = 0;
   return {
@@ -335,6 +342,71 @@ test("MIG-0645 U02ag event fence host: absent bucket and competing same-event to
   );
   assert.deepEqual(fixture.manifest().entities, [concurrent]);
   assert.ok(fixture.attempts.length <= 3);
+});
+
+test("MIG-0645 U02aq import fence precommit: never take an existing event or video token", async () => {
+  for (const entityType of ["event", "video"]) {
+    const input = { entityType, entityId: "same-id", fenceToken: "import-token", reason: "legacy_import_visibility" };
+    const competing = {
+      entity_type: entityType, entity_id: "same-id", fence_token: "other-token",
+      blocked_at: 1, reason: "other",
+    };
+    const occupied = manifestBucket(null, [competing]);
+    const host = createLegacyImportEventEffects(occupied.bucket).fenceHost;
+    await assert.rejects(precommitLegacyImportVisibilityFence(input, host), /public_visibility_fence_token_mismatch/);
+    assert.equal(occupied.attempts.length, 0, "initial conflict must not attempt PUT");
+    assert.deepEqual(occupied.manifest().entities, [competing]);
+
+    const firstWriter = manifestBucket(competing);
+    await assert.rejects(precommitLegacyImportVisibilityFence(input,
+      createLegacyImportEventEffects(firstWriter.bucket).fenceHost), /public_visibility_fence_token_mismatch/);
+    assert.deepEqual(firstWriter.manifest().entities, [competing]);
+    assert.ok(firstWriter.attempts.length <= 3, "retry budget remains bounded");
+
+    const sameToken = { ...competing, fence_token: input.fenceToken };
+    const resumed = manifestBucket(null, [sameToken]);
+    await precommitLegacyImportVisibilityFence(input, createLegacyImportEventEffects(resumed.bucket).fenceHost);
+    assert.equal(resumed.attempts.length, 0, "same-token retry is read-only");
+    assert.deepEqual(resumed.manifest().entities, [sameToken], "preserve initial reason and blocked_at");
+
+    const otherType = { ...competing, entity_type: entityType === "video" ? "event" : "video" };
+    const independent = manifestBucket(otherType);
+    await precommitLegacyImportVisibilityFence(input, createLegacyImportEventEffects(independent.bucket).fenceHost);
+    assert.equal(independent.attempts.length, 2);
+    assert.equal(independent.reads(), 3);
+    assert.equal(independent.manifest().entities.length, 2);
+    assert.deepEqual(independent.manifest().entities.find((row) => row.entity_type === otherType.entity_type), otherType);
+    assert.equal(independent.manifest().entities.find((row) => row.entity_type === entityType).fence_token, input.fenceToken);
+
+    const duplicate = manifestBucket(null, [sameToken, { ...sameToken }]);
+    await assert.rejects(precommitLegacyImportVisibilityFence(input,
+      createLegacyImportEventEffects(duplicate.bucket).fenceHost), /public_visibility_fence_token_mismatch/);
+    assert.equal(duplicate.attempts.length, 0, "ambiguous ownership never writes");
+  }
+});
+
+test("MIG-0645 U02aq import fence precommit: missing bucket and lost confirmation fail closed", async () => {
+  const input = { entityType: "video", entityId: "video-id", fenceToken: "import-token" };
+  await assert.rejects(precommitLegacyImportVisibilityFence(input,
+    createLegacyImportEventEffects(undefined).fenceHost), /public_visibility_manifest_bucket_missing/);
+  let writes = 0;
+  let reads = 0;
+  const manifest = emptyPublicVisibilityBlockedEntitiesManifest(1);
+  const host = { manifest: {
+    read: async () => {
+      reads++;
+      return { manifest, etag: reads === 1 ? null : "other-etag" };
+    },
+    write: async (_candidate, options) => {
+      writes++;
+      assert.equal(options.ifMatchEtag, null);
+      assert.equal(typeof options.mutateOnConflict, "function");
+      // The R2 PUT returned, but the confirmation read no longer owns a block.
+    },
+  } };
+  await assert.rejects(precommitLegacyImportVisibilityFence(input, host), /public_visibility_fence_token_mismatch/);
+  assert.equal(writes, 1);
+  assert.equal(reads, 2);
 });
 
 test("MIG-0645 U02ag event cache host: four snapshot and eight export keys, best effort", async () => {
