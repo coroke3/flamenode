@@ -153,13 +153,13 @@ export async function legacyImportD1ApplyStep(
 
   // One bounded D1 read: at most two receipts, or the reserved principal only
   // when no receipt exists. This combines both CURRENT reads into one query.
-  const rows = await input.db.all(sql\`
+  const rows = await input.db.all(sql`
     WITH marker_rows AS (
       SELECT after_json AS payload
         FROM audit_logs
-       WHERE table_name = \$\{STEP_AUDIT_TABLE}
-         AND target_id = \$\{identity.targetId}
-         AND context = \$\{STEP_AUDIT_CONTEXT}
+       WHERE table_name = ${STEP_AUDIT_TABLE}
+         AND target_id = ${identity.targetId}
+         AND context = ${STEP_AUDIT_CONTEXT}
        LIMIT 2
     ),
     principal_rows AS (
@@ -181,14 +181,14 @@ export async function legacyImportD1ApplyStep(
         'last_guild_check', last_guild_check
       ) AS payload
         FROM "user"
-       WHERE id = \$\{SYSTEM_USER_ID}
+       WHERE id = ${SYSTEM_USER_ID}
          AND NOT EXISTS (SELECT 1 FROM marker_rows)
        LIMIT 1
     )
     SELECT 'marker' AS kind, payload FROM marker_rows
     UNION ALL
     SELECT 'principal' AS kind, payload FROM principal_rows
-  \`) as unknown as ReadRow[];
+  `) as unknown as ReadRow[];
 
   const markerRows = rows.filter((row) => row.kind === "marker");
   const principalRows = rows.filter((row) => row.kind === "principal");
@@ -254,19 +254,19 @@ export async function legacyImportD1ApplyStep(
     strict: true,
   };
   const mutation = createPrincipal
-    ? input.db.run(sql\`
+    ? input.db.run(sql`
         INSERT INTO "user" (
           id, name, role, can_create_events, is_notification_enabled,
           is_tos_accepted, is_banned, created_at
         ) VALUES (
-          \$\{SYSTEM_USER_ID}, 'Legacy import system', 'user', 0, 0, 0, 0,
-          \$\{Math.floor(Date.now() / 1000)}
+          ${SYSTEM_USER_ID}, 'Legacy import system', 'user', 0, 0, 0, 0,
+          ${Math.floor(Date.now() / 1000)}
         )
-      \`)
-    : input.db.run(sql\`
+      `)
+    : input.db.run(sql`
         SELECT CASE WHEN 1 THEN 1
         ELSE json_extract('legacy_import_step_marker', '$') END
-      \`);
+      `);
   const audits = createPrincipal
     ? [
         {
@@ -287,18 +287,18 @@ export async function legacyImportD1ApplyStep(
 
   await mutateWithAudit(input.db, {
     preMutationAssertions: [
-      input.db.run(sql\`
+      input.db.run(sql`
         SELECT CASE
           WHEN NOT EXISTS (
             SELECT 1 FROM audit_logs
-             WHERE table_name = \$\{STEP_AUDIT_TABLE}
-               AND target_id = \$\{identity.targetId}
-               AND context = \$\{STEP_AUDIT_CONTEXT}
+             WHERE table_name = ${STEP_AUDIT_TABLE}
+               AND target_id = ${identity.targetId}
+               AND context = ${STEP_AUDIT_CONTEXT}
           )
           THEN 1
           ELSE json_extract('not-valid-json', '$')
         END
-      \`),
+      `),
     ],
     mutationStatements: [mutation],
     expectedMutationChanges: createPrincipal ? [1] : [null],
