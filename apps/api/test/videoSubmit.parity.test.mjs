@@ -1312,6 +1312,135 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+
+  test("U03a SA-088: part projection and event config freshness are asserted in the same batch", async () => {
+    const {
+      readSlotSubmissionReceipt,
+      readSlotSubmissionVideoEventReceipt,
+      buildSlotSubmissionPartAndEventAssertions,
+    } = await import("@flamenode/server-core/video/requiredVideoFields");
+    const { mutateWithAudit } = await import("@flamenode/server-core/audit/mutate");
+    const { sql } = await import("drizzle-orm");
+    const cases = [
+      { name: "unchanged bounded receipt", accept: true },
+      {
+        name: "prefix start time changes",
+        mutate: (sqlite) => sqlite.prepare("UPDATE slots SET start_time=1200 WHERE id='part_before'").run(),
+      },
+      {
+        name: "prefix sort order changes",
+        mutate: (sqlite) => sqlite.prepare("UPDATE slots SET sort_order=9 WHERE id='part_before'").run(),
+      },
+      {
+        name: "new numeric prefix row",
+        mutate: (_sqlite, addSlot) => addSlot("part_added", 2000, 2),
+      },
+      {
+        name: "prefix row removed",
+        mutate: (sqlite) => sqlite.prepare("DELETE FROM slots WHERE id='part_before'").run(),
+      },
+      {
+        name: "later timed row change does not alter bounded prefix",
+        accept: true,
+        mutate: (sqlite) => sqlite.prepare("UPDATE slots SET start_time=6000 WHERE id='part_future'").run(),
+      },
+      {
+        name: "untimed fallback rechecks the full event row set",
+        fallback: true,
+        mutate: (_sqlite, addSlot) => addSlot("part_added", 2000, 2),
+      },
+      {
+        name: "event parts policy changes",
+        mutate: (sqlite) => sqlite.prepare("UPDATE events SET parts_json=? WHERE id='ev_open'").run('["Changed"]'),
+      },
+      {
+        name: "event part gap changes",
+        mutate: (sqlite) => sqlite.prepare("UPDATE events SET slot_part_gap_minutes=30 WHERE id='ev_open'").run(),
+      },
+      {
+        name: "event required fields change",
+        mutate: (sqlite) => sqlite.prepare("UPDATE events SET required_video_fields_json=? WHERE id='ev_open'").run('["videos.title"]'),
+      },
+      {
+        name: "event notification title changes",
+        mutate: (sqlite) => sqlite.prepare("UPDATE events SET title='Changed' WHERE id='ev_open'").run(),
+      },
+      {
+        name: "event deletion invalidates the receipt",
+        mutate: (sqlite) => sqlite.prepare("DELETE FROM events WHERE id='ev_open'").run(),
+      },
+    ];
+    for (const scenario of cases) {
+      const w = seedWorld();
+      try {
+        w.sqlite.prepare(
+          "UPDATE events SET parts_json=?, slot_part_gap_minutes=?, required_video_fields_json=? WHERE id=?",
+        ).run('["First","Second"]', 15, "[]", "ev_open");
+        insert(w.sqlite, "videos", {
+          id: "v_freshness", creator_x_user_id: "x_owner", submitted_by_user_id: "u_owner",
+          creator_display_name: "Owner", title: "Before", visibility_status: "pending",
+          created_at: 100, updated_at: 100,
+        });
+        const addSlot = (id, start_time, sort_order) => insert(w.sqlite, "slots", {
+          id, event_id: "ev_open", reservation_group_id: null, reserved_by_user_id: "u_owner",
+          x_user_id: "x_owner", reserved_x_id_snapshot: "x_owner", display_name: "Owner",
+          slot_label: "slot", start_time, sort_order, status: "reserved", video_id: null,
+          updated_at: 100, version: 1,
+        });
+        addSlot("part_before", 1000, 0);
+        addSlot("part_middle", 1500, 1);
+        addSlot("part_anchor", scenario.fallback ? null : 3500, 1);
+        addSlot("part_future", 5000, 0);
+
+        const db = drizzle(w.d1);
+        const receipt = await readSlotSubmissionReceipt(db, "part_anchor");
+        assert.ok(receipt, scenario.name);
+        assert.equal(receipt.partResolution.kind, scenario.fallback ? "fallback" : "bounded", scenario.name);
+        const videoEventReceipt = await readSlotSubmissionVideoEventReceipt(db, receipt.anchor, null);
+        assert.equal(videoEventReceipt.event?.id, "ev_open", scenario.name);
+        assert.equal(w.d1.stats.reads, 2, scenario.name);
+        const assertions = buildSlotSubmissionPartAndEventAssertions(receipt, videoEventReceipt);
+        assert.equal(assertions.length, 2, scenario.name);
+
+        if (scenario.mutate) scenario.mutate(w.sqlite, addSlot);
+        const before = snapshotDb(w.sqlite);
+        const video = { ...w.sqlite.prepare("SELECT * FROM videos WHERE id='v_freshness'").get() };
+        const write = () => mutateWithAudit(db, {
+          preMutationAssertions: assertions.map((condition) => db.run(condition)),
+          mutationStatements: [db.run(sql`UPDATE videos SET title='After' WHERE id='v_freshness'`)],
+          expectedMutationChanges: [1],
+          audits: [{
+            table_name: "videos", target_id: "v_freshness", operation: "UPDATE",
+            before: video, after: { ...video, title: "After" }, actor_user_id: "u_owner",
+            context: "video-save:submit-slot", retention_class: "normal", strict: true,
+          }],
+          callerQueryCount: 2,
+        });
+        if (scenario.accept) {
+          const ids = await write();
+          assert.equal(ids.length, 1, scenario.name);
+          assert.equal(
+            w.sqlite.prepare("SELECT title FROM videos WHERE id='v_freshness'").get().title,
+            "After",
+            scenario.name,
+          );
+          assert.equal(
+            w.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE target_id='v_freshness' AND table_name='videos'").get().n,
+            1,
+            scenario.name,
+          );
+        } else {
+          await assert.rejects(write, /malformed JSON/i, scenario.name);
+          assert.deepEqual(snapshotDb(w.sqlite), before, scenario.name);
+        }
+        assert.equal(w.d1.stats.batches, 1, scenario.name);
+        assert.ok(w.d1.stats.maxBinds <= 100, scenario.name);
+      } finally {
+        w.sqlite.close();
+      }
+    }
+  });
+
   test("U03a SA-088: incomplete or ambiguous receipt cannot build batch assertions", async () => {
     const { readSlotSubmissionReceipt, buildSlotSubmissionReceiptAssertions } = await import("@flamenode/server-core/video/requiredVideoFields");
     const w = seedWorld();
