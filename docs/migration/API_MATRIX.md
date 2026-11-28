@@ -649,6 +649,9 @@ Differential parity: `apps/api/test/adminEventGroups.current.parity.test.mjs` (T
 
 ## MIG-0639 per-method LOCAL CPU (Linux, 2026-11-01)
 
+2026-11-28 harness-integrity update (PR #456 source/test `2e72e446a3872775023947f4fabdb022321f0b3d`): CDP profiler command responses now require successful result envelopes, and V8 CPUProfile samples/node references/deltas are structurally validated before busy time or resolution is recorded. Empty profiles are invalid evidence; a valid idle-only profile remains zero. This is a measurement-integrity correction only, **not a new CPU measurement or S2/S3/S4 verdict**. Exact-head repository tests and CI are pending.
+
+
 **LOCAL MEASUREMENT - NOT A PRODUCTION VALUE.** Source: `docs/migration/cloudflare/API_CPU_BENCHMARK.md` section 10. Host: Linux linux/x64 (4 vCPU Intel Xeon 2.10 GHz, kernel 6.18.44-fc-v185), Node v22.23.4, Wrangler 4.118.0, workerd local, V8 profiler (100 us), D1/R2 replayed from node:sqlite (`--d1 replay`), 50 samples per kind, 10 warm-up discarded. BASELINE (no-op route) warm max in the same run: **11.14 ms**. The Work Order STOP rule (BASELINE >= 4 ms) makes every S2/S3 verdict 判定不能; the numbers below are evidence, not budget verdicts. Machine ranks and per-kind p50/p95/p99 are in section 10. Fixture depth: shared minimal fixture, deep inputs only where section 10 lists them.
 
 | ID | method path | class | LOCAL max, warm (normal/limit/invalid) ms | LOCAL max, cold ms | warm p50 (limit) ms | D1 stmts | verdict |
