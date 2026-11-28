@@ -27,7 +27,7 @@ const csv = (preset = "public_staff") => ({
   }],
 });
 
-function setup({ user = ADMIN, fault, failQueue = false, failRouteDb = false, routeDbError } = {}) {
+function setup({ user = ADMIN, fault, failQueue = false, failRouteDb = false, routeDbError, beforeTransferBatch } = {}) {
   const { db, sqlite, stats } = createAdminD1();
   seedBase(sqlite);
   seedEvent(sqlite);
@@ -48,7 +48,7 @@ function setup({ user = ADMIN, fault, failQueue = false, failRouteDb = false, ro
   const before = () => ["event_staff", "x_users", "audit_logs", "static_rebuild_queue"].map(count);
   const initial = before();
   const receipt = {
-    readFaults: 0, queueFaults: 0, routeFaults: 0,
+    readFaults: 0, queueFaults: 0, routeFaults: 0, transferInterleavings: 0,
     committedAtQueueFailure: null, committedAtRouteFailure: null,
   };
   const originalPrepare = db.prepare;
@@ -76,6 +76,13 @@ function setup({ user = ADMIN, fault, failQueue = false, failRouteDb = false, ro
   };
   const originalBatch = db.batch;
   db.batch = async (statements) => {
+    // Simulate a competing committed write after transfer reads but before
+    // the original atomic mutation/audit batch. Never intercept reads or queue.
+    if (beforeTransferBatch && receipt.transferInterleavings === 0 &&
+        statements.some((s) => /UPDATE\s+event_staff\s+SET\s+permission_preset\s*=\s*CASE/i.test(s._sql ?? ""))) {
+      receipt.transferInterleavings++;
+      beforeTransferBatch(sqlite);
+    }
     if (failQueue && statements.some((s) => /INSERT INTO static_rebuild_queue\s*\(/i.test(s._sql ?? ""))) {
       receipt.queueFaults++;
       receipt.committedAtQueueFailure = before();
@@ -370,6 +377,58 @@ test("SEC-800: CSV owner conflicts return local row-specific messages, not provi
     assert.deepEqual(faulty.before(), faulty.initial);
   } finally {
     faulty.sqlite.close();
+  }
+});
+
+test("SEC-800: owner transfer rejects stale CAS and revoked eligibility without partial audit or projection", async () => {
+  // Different-timestamp CAS and live eligibility are existing core guarantees.
+  // Same-second snapshot conflicts (#933) are deliberately a separate core fix.
+  const scenarios = [
+    ["target version", "UPDATE event_staff SET display_name='Concurrent target', updated_at=2 WHERE id='s-target'"],
+    ["source version", "UPDATE event_staff SET display_name='Concurrent source', updated_at=2 WHERE id='s-owner'"],
+    ["target approval", "UPDATE x_users SET approval_status='pending' WHERE id='target_x'"],
+    ["target owner link", "DELETE FROM x_user_account_links WHERE x_user_id='target_x' AND link_role='owner'"],
+    ["target deleted", "DELETE FROM event_staff WHERE id='s-target'"],
+  ];
+  const snapshot = (sqlite) => [
+    ...["event_staff", "x_users", "audit_logs", "static_rebuild_queue"]
+      .map((table) => sqlite.prepare('SELECT * FROM "' + table + '" ORDER BY id').all()),
+    sqlite.prepare("SELECT * FROM x_user_account_links ORDER BY auth_user_id, x_user_id, link_role").all(),
+  ];
+  for (const [label, competingSql] of scenarios) {
+    let competingState;
+    const s = setup({ beforeTransferBatch: (sqlite) => {
+      sqlite.exec(competingSql);
+      competingState = snapshot(sqlite);
+    } });
+    try {
+      s.sqlite.exec(`
+        INSERT INTO x_users (id, x_name, approval_status) VALUES ('target_x', 'Target', 'approved');
+        INSERT INTO x_user_account_links (auth_user_id, x_user_id, link_role) VALUES ('admin-1', 'target_x', 'owner');
+        INSERT INTO event_staff (id, event_id, x_user_id, display_name, permission_preset, is_public, created_at, updated_at)
+          VALUES ('s-target', 'ev-1', 'target_x', 'Target', 'reviewer', 0, 1, 1);
+      `);
+      const beforeCompeting = snapshot(s.sqlite);
+      await withThrowingDiagnostics(async ({ errors, warnings }) => {
+        const result = await s.send("POST", "/owner-transfer", transfer);
+        assert.equal(result.status, 503, label + ": " + await result.clone().text());
+        assert.equal(result.headers.get("cache-control"), "private, no-store", label);
+        assert.deepEqual(await result.json(), { ok: false, message: GENERIC }, label);
+        assert.deepEqual(errors, [["[MIG-0654] owner transfer unavailable"]], label);
+        assert.equal(warnings(), 0, label);
+      });
+      assert.equal(s.receipt.transferInterleavings, 1, label);
+      assert.equal(s.receipt.readFaults, 0, label);
+      assert.equal(s.stats.batches, 1, label + ": actual mutation batch attempted");
+      assert.ok(competingState, label + ": competing write reached");
+      assert.notDeepEqual(competingState, beforeCompeting, label + ": competing write changed state");
+      assert.deepEqual(snapshot(s.sqlite), competingState, label + ": rollback preserves only competing write");
+      assert.equal(s.count("audit_logs"), 0, label);
+      assert.equal(s.count("static_rebuild_queue"), 0, label);
+      assert.equal(s.sqlite.prepare("SELECT permission_preset FROM event_staff WHERE id='s-owner'").get().permission_preset, "owner", label);
+    } finally {
+      s.sqlite.close();
+    }
   }
 });
 
