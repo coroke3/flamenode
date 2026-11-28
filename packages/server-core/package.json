@@ -114,7 +114,8 @@
     "./video/requiredVideoFields": "./src/video/requiredVideoFields.ts",
     "./video/freeVideoRebuildTargets": "./src/video/freeVideoRebuildTargets.ts",
     "./video/freeVideoRow": "./src/video/freeVideoRow.ts",
-    "./video/freeVideoInsertPlan": "./src/video/freeVideoInsertPlan.ts"
+    "./video/freeVideoInsertPlan": "./src/video/freeVideoInsertPlan.ts",
+    "./video/slotGrouping": "./src/video/slotGrouping.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

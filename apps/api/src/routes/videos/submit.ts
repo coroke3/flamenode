@@ -57,6 +57,7 @@ import {
   type SlotSubmissionReceiptRow,
 } from "@flamenode/server-core/video/requiredVideoFields";
 import { buildFreeVideoSubmissionWithRebuildPlan } from "@flamenode/server-core/video/unslottedEventPlans";
+import { areSlotsInSamePart, sortSlotsChronologically } from "@flamenode/server-core/video/slotGrouping";
 import {
   checkYoutubeVideoDuplicate,
   isYoutubeIdUniqueConstraintError,
@@ -197,74 +198,10 @@ export function validateSlotSubmissionAnchor(
   return { ok: true, activeXId: actor.activeXId };
 }
 
-const SLOT_SUBMISSION_JST_OFFSET_SEC = 9 * 60 * 60;
-
-function slotSubmissionJstDayBucket(unixSec: number | null): number | null {
-  return unixSec == null || !Number.isFinite(unixSec)
-    ? null
-    : Math.floor((unixSec + SLOT_SUBMISSION_JST_OFFSET_SEC) / (24 * 60 * 60));
-}
-
-function normalizeSlotSubmissionGapSec(gapSec: number): number {
-  return Number.isFinite(gapSec) && gapSec >= 0 ? gapSec : 15 * 60;
-}
-
-// Treat malformed provider timestamps as untimed without mutating source rows.
-function finiteSlotSubmissionStartTime(value: number | null | undefined): number | null {
-  return value != null && Number.isFinite(value) ? value : null;
-}
-
-function sortSlotSubmissionRows<
-  T extends {
-    id?: string | null;
-    start_time: number | null;
-    sort_order?: number | null;
-  },
->(rows: T[]): T[] {
-  return [...rows].sort((a, b) => {
-    // Malformed timestamps must not bypass the order/id tie-breaker via NaN.
-    const aStart = finiteSlotSubmissionStartTime(a.start_time);
-    const bStart = finiteSlotSubmissionStartTime(b.start_time);
-    const aTimed = aStart !== null;
-    const bTimed = bStart !== null;
-    if (aTimed !== bTimed) return aTimed ? -1 : 1;
-    const startDiff = (aStart ?? 0) - (bStart ?? 0);
-    if (startDiff !== 0) return startDiff;
-    const aOrder = a.sort_order != null && Number.isSafeInteger(a.sort_order)
-      ? a.sort_order
-      : 0;
-    const bOrder = b.sort_order != null && Number.isSafeInteger(b.sort_order)
-      ? b.sort_order
-      : 0;
-    const orderDiff = aOrder - bOrder;
-    return orderDiff || (a.id ?? "").localeCompare(b.id ?? "");
-  });
-}
-
-function areSubmissionSlotsInSamePart<
-  T extends { start_time: number | null; sort_order?: number | null },
->(prev: T, next: T, gapSec = 15 * 60): boolean {
-  if (prev.start_time != null && next.start_time != null) {
-    if (next.start_time < prev.start_time) return false;
-    if (slotSubmissionJstDayBucket(prev.start_time) !== slotSubmissionJstDayBucket(next.start_time)) return false;
-    return next.start_time - prev.start_time <= normalizeSlotSubmissionGapSec(gapSec);
-  }
-  if (prev.start_time == null && next.start_time == null) {
-    return (
-      prev.sort_order != null &&
-      next.sort_order != null &&
-      Number.isSafeInteger(prev.sort_order) &&
-      Number.isSafeInteger(next.sort_order) &&
-      next.sort_order === prev.sort_order + 1
-    );
-  }
-  return false;
-}
-
 /** SA-088 late group preflight: call only AFTER anchor authorization,
  * form, duplicate/member/event/stage/general-answer/required-field validation.
- * CURRENT comparator is kept verbatim (local names only) pending coordinated
- * extraction of the shared slot UI helper; no import across the Next boundary.
+ * Uses the server-core CURRENT-compatible comparator, parity-tested against the
+ * existing slot UI helper; no import across the Next boundary.
  * Never apply a new deadline or configured max-slots policy to this step.
  */
 export function validateSlotSubmissionGroup(
@@ -281,7 +218,7 @@ export function validateSlotSubmissionGroup(
     if (receipt.group.kind === "overflow") {
       return { ok: false, message: "連続枠の件数が上限を超えています。" };
     }
-    const groupRows = sortSlotSubmissionRows(receipt.group.rows);
+    const groupRows = sortSlotsChronologically(receipt.group.rows);
     if (groupRows.length > MAX_SLOTS_PER_VIDEO) {
       return { ok: false, message: "連続枠の件数が上限を超えています。" };
     }
@@ -348,10 +285,10 @@ export function validateSlotSubmissionGroup(
     return { ok: false, message: "予約中の枠だけ作品を提出できます。" };
   }
   const slotGapSec = (eventConfig.slot_part_gap_minutes ?? 15) * 60;
-  const orderedSubmittedSlots = sortSlotSubmissionRows(submittedSlots);
+  const orderedSubmittedSlots = sortSlotsChronologically(submittedSlots);
   for (let index = 1; index < orderedSubmittedSlots.length; index += 1) {
     if (
-      !areSubmissionSlotsInSamePart(
+      !areSlotsInSamePart(
         orderedSubmittedSlots[index - 1],
         orderedSubmittedSlots[index],
         slotGapSec,
